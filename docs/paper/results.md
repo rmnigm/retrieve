@@ -41,6 +41,9 @@ not part of the study.
   ([hub-index](../artifacts/hub-index.md)). When the rerun's parquet is
   passed as an extra argument, its `official-fork` records replace the
   bridge, and the same tables fill with measured numbers.
+- **The story page:** a short, chart-led reading of these tables
+  (https://claude.ai/artifact/WMfvv46CKNGKcWaoidNXCg, private), built by
+  `page/pagedata.py` and `page/assemble.py` next to the script.
 
 All latencies are per batch, CUDA-graph mode, median. "Recall" is recall@k
 against the exact filtered top-k.

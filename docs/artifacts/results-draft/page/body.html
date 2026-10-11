@@ -1,0 +1,57 @@
+<div class="wrap">
+<header style="display:flex;flex-direction:column;gap:14px">
+  <span class="eyebrow">Reproducibility paper · results draft · 11 Oct 2026</span>
+  <h1>SilverTorch is faster than LiNR until you ask for the recall LiNR gives for free</h1>
+  <p class="lede">Two families of filtered GPU retrieval on one A100: <span class="key"><i class="sw" style="background:var(--st)"></i>SilverTorch</span> (Meta's official code, adapted by us) probes a few clusters of an int8 index; <span class="key"><i class="sw" style="background:var(--linr)"></i>LiNR</span> (V1 mask-then-score, V2 gather-then-score, our implementation from the paper) scans every item exactly. This page walks through where each one wins and why.</p>
+  <div class="banner"><span>⚠</span><span><b>Provisional, not citable.</b> SilverTorch latencies are bridged from the adapted code's gate grid (its time ÷ our Triton SilverTorch's, applied to the campaign's Triton time) until the full rerun lands. LiNR numbers wait on the final-pass gate. LAION 1–30 M has no adapted-SilverTorch numbers yet.</span></div>
+</header>
+
+<section>
+  <span class="eyebrow">1 · The production setting</span>
+  <h2>At 24 probes, SilverTorch is 1.5–49× faster, but it returns a different answer</h2>
+  <div class="chart"><svg id="c-prod" viewBox="0 0 700 330" role="img" aria-label="Speed-up of SilverTorch over the best LiNR variant at 24 probes, and SilverTorch recall, per real filter"></svg></div>
+  <p class="note"><b>How to read it:</b> each row is a real filter. Left: how many times faster SilverTorch is than the best exact LiNR variant, at one query (hollow) and at a batch of 16 (filled). Right: the share of the true top-100 SilverTorch finds. The speed-up grows with N and batch size; the recall falls with N and with how selective the filter is. On PubMed's five-clause filter it is 49× faster and finds 39 % of the right items.</p>
+</section>
+
+<section>
+  <span class="eyebrow">2 · The price of recall</span>
+  <h2>More probes buy recall, and at a batch of 16 they eat most of the lead</h2>
+  <div class="controls" id="ctl-curve"></div>
+  <div class="chart"><div class="legend" id="lg-curve"></div><svg id="c-curve" viewBox="0 0 700 360" role="img" aria-label="Latency against filter pass rate for LiNR V1, V2 and SilverTorch at three probe counts"></svg></div>
+  <p class="note"><b>How to read it:</b> synthetic filters with a controlled pass rate. Darker blue means more probes and higher recall (range at the line's end). LiNR's lines barely move with pass rate except V2 at high pass rates. At bs 16 on arXiv-synth, SilverTorch's 0.95-recall setting (512 probes) keeps only a 7 % lead over LiNR V1 when every item passes. At pass rate 0.001 no gated probe count reaches 0.95 at all.</p>
+</section>
+
+<section>
+  <span class="eyebrow">3 · Matched recall</span>
+  <h2>At equal recall, SilverTorch wins most filters up to 3 M items, and LiNR wins wherever SilverTorch cannot get there</h2>
+  <div class="controls" id="ctl-map"></div>
+  <div class="chart"><table class="map" id="c-map"></table></div>
+  <p class="note"><b>How to read it:</b> each cell is the faster family at the chosen recall target. A number is SilverTorch's time as a fraction of LiNR's (0.30 = 3.3× faster). <span style="background:repeating-linear-gradient(135deg,var(--linr-soft) 0 5px,transparent 5px 8px);padding:0 4px">Hatched</span> cells are LiNR wins by default: SilverTorch never reached the target at the probe counts gated so far (up to a quarter of the clusters). Very selective filters, k 1000 and the 10 M sets fall there. More clusters and probes reach 0.95 on PubMed in our Triton records, so those cells are open, not settled.</p>
+</section>
+
+<section>
+  <span class="eyebrow">4 · Inside LiNR</span>
+  <h2>LiNR's V2 beats V1 only for one query at a time</h2>
+  <div class="chart"><div class="legend" id="lg-c1"></div><svg id="c-c1" viewBox="0 0 700 300" role="img" aria-label="LiNR V2 over V1 latency against pass rate at bs 1 and bs 16 for three index sizes"></svg></div>
+  <p class="note"><b>How to read it:</b> below the line V2 (gather the passing items, then score) is faster than V1 (score everything, mask). The paper's claim holds cleanly at bs 1: V2 wins below a pass rate of about 0.8–0.97, and by more as N grows (5× at 30 M). At bs 16 the crossover drops to about 0.02 and V2's edge is at most 13–25 %. Darker = larger index, all at d 256 except Goodreads.</p>
+</section>
+
+<section>
+  <span class="eyebrow">5 · Co-design</span>
+  <h2>Meta's "probe, then filter" pays off only at 10–30 M items</h2>
+  <div class="chart"><div class="legend" id="lg-c5"></div><svg id="c-c5" viewBox="0 0 700 280" role="img" aria-label="Full-index bloom filter time over probe-then-filter time against index size, Meta's code as published"></svg></div>
+  <p class="note"><b>How to read it:</b> above 1, filtering inside the probed clusters (the paper's co-design) beats building the filter over the whole index first. With Meta's code as published, the paper's 1.79–2.15× shows up at 30 M (and more at bs 64), but below 10 M the full-index path is faster. The adapted code is roughly neutral at bs 1 and gains 1.1–1.6× at bs 64 (median), so the claim is about scale, not about the kernel.</p>
+</section>
+
+<section>
+  <span class="eyebrow">6 · Claim check</span>
+  <h2>What each paper claimed, and what we measured</h2>
+  <div class="claims" id="claims"></div>
+</section>
+
+<footer class="foot">
+  <span>Source tables and the script that writes them: <code>docs/artifacts/results-draft/build_results.py</code> on branch <code>dev/results-draft</code>; outputs on the results Hub under <code>artifacts/results-draft/20261011</code>. Page text: <code>docs/paper/results.md</code>.</span>
+  <span>Inputs: the final-pass table (one library version, 4,016 records) and the adapted code's gate grid (1,536 cells, all returning Meta's exact ids and scores). Latencies are CUDA-graph medians per batch; recall is against the exact filtered top-k.</span>
+</footer>
+</div>
+<div id="tip" hidden></div>
