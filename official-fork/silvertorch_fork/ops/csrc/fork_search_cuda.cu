@@ -661,9 +661,9 @@ __global__ void epilogue_kernel(
 // bit for bit retrieve.indexing.quantize.quantize_int8 as eager torch computes it: abs max
 // clamped at fp32(1e-8); scale = abs_max * fp32(1 / 127) (torch divides by a CPU scalar as a
 // multiply by its fp32 reciprocal); code = rint(fp32(fp64(x) / fp64(abs_max)) * 127) clamped to
-// [-128, 127]. Block B: the probed clusters (ids, lengths, offsets) and the scorer's warp
-// rounding with its three cumsums (warp-rounded lengths per row, remainders and warp counts
-// over all B * P), as round_cluster_to_warp + cumsum would, scanned in int64.
+// [-128, 127]. Blocks [B, 2B): one row each, its probed clusters (ids, lengths, offsets) and the
+// scorer's warp rounding with its three cumsums (warp-rounded lengths per row, remainders and
+// warp counts over all B * P), as round_cluster_to_warp + cumsum would, scanned in int64.
 __global__ void __launch_bounds__(kPrepThreads) probe_prep_kernel(
     const float* __restrict__ query,
     int64_t rows,
@@ -713,17 +713,36 @@ __global__ void __launch_bounds__(kPrepThreads) probe_prep_kernel(
     return;
   }
 
-  if (threadIdx.x < 3) {
-    carry[threadIdx.x] = 0;
+  // Blocks [rows, 2 * rows): block rows + r scans row r. The row's prefix over rows < r (warp-
+  // rounded lengths are per row; remainders and warp counts run over all B * P) is summed from
+  // those rows' cluster lengths by this block itself, so the rows scan in parallel.
+  using Sum = cub::BlockReduce<int64_t, kPrepThreads>;
+  __shared__ typename Sum::TempStorage sum_tmp;
+  const int64_t r = blockIdx.x - rows;
+  int64_t before_rem = 0;
+  int64_t before_warps = 0;
+  for (int64_t i = threadIdx.x; i < r * n_probe; i += kPrepThreads) {
+    const int64_t len = cluster_sizes[probe_ids[i]];
+    before_rem += len % 32;
+    before_warps += len / 32;
+  }
+  before_rem = Sum(sum_tmp).Sum(before_rem);
+  __syncthreads();
+  before_warps = Sum(sum_tmp).Sum(before_warps);
+  if (threadIdx.x == 0) {
+    carry[0] = 0;
+    carry[1] = before_rem;
+    carry[2] = before_warps;
   }
   __syncthreads();
-  const int64_t total = rows * n_probe;
-  for (int64_t base = 0; base < total; base += kPrepThreads) {
-    const int64_t i = base + threadIdx.x;
+  const int64_t first = r * n_probe;
+  for (int64_t base = 0; base < n_probe; base += kPrepThreads) {
+    const int64_t j = base + threadIdx.x;
+    const int64_t i = first + j;
     int64_t rounded = 0;
     int64_t remainder = 0;
     int64_t warps = 0;
-    if (i < total) {
+    if (j < n_probe) {
       const int64_t c = probe_ids[i];
       const int64_t len = cluster_sizes[c];
       cluster_ids[i] = c;
@@ -743,8 +762,7 @@ __global__ void __launch_bounds__(kPrepThreads) probe_prep_kernel(
     Scan(tmp.scan[0]).InclusiveSum(rounded, s_rounded, t_rounded);
     Scan(tmp.scan[1]).InclusiveSum(remainder, s_remainder, t_remainder);
     Scan(tmp.scan[2]).InclusiveSum(warps, s_warps, t_warps);
-    if (i < total) {
-      // the warp-rounded lengths' cumsum over all B * P first; made per row below
+    if (j < n_probe) {
       warp_rounded_length_cumsum[i] = static_cast<int32_t>(carry[0] + s_rounded);
       remaining_length_cumsum[i] = static_cast<int32_t>(carry[1] + s_remainder);
       warp_size_cumsum[i] = static_cast<int32_t>(carry[2] + s_warps);
@@ -757,29 +775,9 @@ __global__ void __launch_bounds__(kPrepThreads) probe_prep_kernel(
     }
     __syncthreads();
   }
-  // Per row: subtract the global sum before the row's first cluster. Chunks run back to front,
-  // reads before writes, so every base an element reads is still the global value.
-  for (int64_t base = (total - 1) / kPrepThreads * kPrepThreads; base >= 0;
-       base -= kPrepThreads) {
-    const int64_t i = base + threadIdx.x;
-    int32_t value = 0;
-    if (i < total) {
-      const int64_t row_first = i / n_probe * n_probe;
-      value = warp_rounded_length_cumsum[i] -
-          (row_first == 0 ? 0 : warp_rounded_length_cumsum[row_first - 1]);
-    }
-    __syncthreads();
-    if (i < total) {
-      warp_rounded_length_cumsum[i] = value;
-    }
-    __syncthreads();
-  }
-  // the slots the scorer writes in each row: its full warps' docs, then its remainders
-  for (int64_t r = threadIdx.x; r < rows; r += kPrepThreads) {
-    const int64_t last = r * n_probe + n_probe - 1;
-    row_written[r] = n_probe == 0 ? 0
-                                  : warp_rounded_length_cumsum[last] + remaining_length_cumsum[last] -
-            (r == 0 ? 0 : remaining_length_cumsum[r * n_probe - 1]);
+  // the slots the scorer writes in the row: its full warps' docs, then its remainders
+  if (threadIdx.x == 0) {
+    row_written[r] = static_cast<int32_t>(carry[0] + (carry[1] - before_rem));
   }
 }
 
@@ -1230,29 +1228,31 @@ Prep probe_prep(
       at::empty({rows * n_probe}, i32),
       at::empty({rows * n_probe}, i32),
       at::empty({rows}, i32)};
-  probe_prep_kernel<<<
-      rows + 1,
-      kPrepThreads,
-      0,
-      at::cuda::getCurrentCUDAStream()>>>(
-      q.const_data_ptr<float>(),
-      rows,
-      q.size(1),
-      probes.const_data_ptr<int64_t>(),
-      n_probe,
-      cluster_offsets.contiguous().const_data_ptr<int64_t>(),
-      cluster_sizes.contiguous().const_data_ptr<int64_t>(),
-      p.codes.mutable_data_ptr<int8_t>(),
-      p.scales.mutable_data_ptr<float>(),
-      p.cluster_ids.mutable_data_ptr<int64_t>(),
-      p.cluster_length.mutable_data_ptr<int64_t>(),
-      p.selected_offsets.mutable_data_ptr<int64_t>(),
-      p.warp_size.mutable_data_ptr<int32_t>(),
-      p.warp_rounded_length_cumsum.mutable_data_ptr<int32_t>(),
-      p.remaining_length_cumsum.mutable_data_ptr<int32_t>(),
-      p.warp_size_cumsum.mutable_data_ptr<int32_t>(),
-      p.row_written.mutable_data_ptr<int32_t>());
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  if (rows > 0) {
+    probe_prep_kernel<<<
+        2 * rows,
+        kPrepThreads,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(
+        q.const_data_ptr<float>(),
+        rows,
+        q.size(1),
+        probes.const_data_ptr<int64_t>(),
+        n_probe,
+        cluster_offsets.contiguous().const_data_ptr<int64_t>(),
+        cluster_sizes.contiguous().const_data_ptr<int64_t>(),
+        p.codes.mutable_data_ptr<int8_t>(),
+        p.scales.mutable_data_ptr<float>(),
+        p.cluster_ids.mutable_data_ptr<int64_t>(),
+        p.cluster_length.mutable_data_ptr<int64_t>(),
+        p.selected_offsets.mutable_data_ptr<int64_t>(),
+        p.warp_size.mutable_data_ptr<int32_t>(),
+        p.warp_rounded_length_cumsum.mutable_data_ptr<int32_t>(),
+        p.remaining_length_cumsum.mutable_data_ptr<int32_t>(),
+        p.warp_size_cumsum.mutable_data_ptr<int32_t>(),
+        p.row_written.mutable_data_ptr<int32_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
   return p;
 }
 
