@@ -54,7 +54,7 @@ the user moving it onto the roadmap.
   index). Needs a fresh `bench report` head-to-head against the current
   kernels: the kernel-opt gate checked only the bloom kernel-only ratio,
   and the end-to-end comparison in
-  [validation](validation.md#official-against-our-triton-reimplementation-citable-contested)
+  [validation](validation.md#official-against-our-triton-reimplementation-citable-contested-not-in-the-study)
   reflects the code before TF-1 / TF-9.
 - **G-b: extended experiments**: a synthetic scale ladder to 240M and 1B
   items (L4, L5), co-design ablation depth, V3 bit width, an extended batch
