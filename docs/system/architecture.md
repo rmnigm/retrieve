@@ -1,7 +1,7 @@
 ---
 title: architecture
 created: 2026-09-26
-updated: 2026-09-29
+updated: 2026-10-11
 type: entity
 tags: [library]
 sources: [retrieve/src/retrieve/]
@@ -13,6 +13,17 @@ This is the high-level map of the `retrieve` package (on PyPI as
 `torchretrieve`): what each retrieval module does, how filters compose, and
 which kernels back which paths. For per-kernel detail (launch grids, tile
 shapes, autotune keys, numerics) see [kernels.md](kernels.md).
+
+**What ships** ([decisions](../decisions.md#goal-and-scheduling)): the
+release carries LiNR V1-V3 with their filters and kernels, and
+`SilverTorch` on Meta's official SilverTorch code, adapted
+(`backend="official-fork"`, the `official-fork/` workspace member, on
+`dev/meta-fork` until its review accepts; renamed to the default backend at
+roadmap RENAME). `backend="official"` (Meta's code as published) stays as
+the parity reference. `SilverTorch`'s `backend="triton"` and
+`backend="torch"` (our Triton reimplementation of Algorithm 1 and its eager
+reference) are in this tree today but not in the release; roadmap
+TRITON-ST-DELETE removes them. This page describes the tree as it is.
 
 ## Package layout
 
@@ -572,7 +583,7 @@ label stands for:
 
 | module | `"triton"` | `"torch"` | `"official"` |
 |---|---|---|---|
-| `SilverTorch` | fused Triton (`ops.triton.codesigned_probe_score*`) | eager torch (`ops.reference`) | Meta's `torch.ops.st.*` (eager-only) |
+| `SilverTorch` | fused Triton (`ops.triton.codesigned_probe_score*`); not in the release | eager torch (`ops.reference`); not in the release | Meta's `torch.ops.st.*` as published (eager-only), the parity reference |
 | `LiNRV2` / `LiNRV3` | the primitives' Triton ops below | eager (`ops.reference`) | raises `ValueError` |
 | `LiNRV1` | cuBLAS; one query on `gemv_scores` where `register_index` found it bit-exact ([kernels](kernels.md), `gemv_scores`); a filter cell adds the filter's own path | cuBLAS | raises `ValueError` |
 | `PrefilterKNN` | `fused_masked_knn_topk` | eager (`ops.reference`) | raises `ValueError` |

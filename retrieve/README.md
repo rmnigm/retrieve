@@ -50,8 +50,11 @@ For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` /
 | `retrieve.ops.triton` / `retrieve.ops.reference` / `retrieve.ops.official` | The kernels behind the modules, one namespace per backend, same op names and signatures. |
 
 Triton is the default backend; modules that have a pure-PyTorch path accept
-`backend="torch"` for `torch.compile` / Inductor users, and `SilverTorch` also
-accepts `backend="official"` (Meta's kernels, eager-only). The package is two
+`backend="torch"` for `torch.compile` / Inductor users. In the release,
+`SilverTorch` runs Meta's official SilverTorch code, adapted (improvements
+listed in its CHANGES file; the `official` extra); `backend="official"` is
+Meta's code as published (eager-only), kept as the reference. The Triton and
+torch SilverTorch backends in this source tree are not part of the release. The package is two
 public layers — `retrieve.modules` (re-exported at the top level) and
 `retrieve.ops` — plus `retrieve.indexing` (index-build math) and
 `retrieve.functional` (query-time glue).

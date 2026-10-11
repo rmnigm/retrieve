@@ -68,7 +68,7 @@ retrieve.ops.available_backends()       # ("triton", "torch") or ("triton", "tor
 
 | op | `triton` / `reference` | consumer |
 | --- | --- | --- |
-| `codesigned_probe_score`, `codesigned_probe_score_bloom`, `codesigned_probe_score_exact` | fused IVF probe + INT8 dot (+ bloom / exact predicate) + top-k | `SilverTorch` |
+| `codesigned_probe_score`, `codesigned_probe_score_bloom`, `codesigned_probe_score_exact` | fused IVF probe + INT8 dot (+ bloom / exact predicate) + top-k | `SilverTorch(backend="triton" / "torch")`; not in the release ([modules](modules.md#silvertorch)) |
 | `bloom_match`, `bloom_compact` | bloom subset test → `[B, N]` bool / compact candidates | `BloomFilter` |
 | `clause_mask`, `clause_compact` | exact clause predicate → `[B, N]` bool / compact candidates | `ExactAttributeFilter` |
 | `fused_masked_knn_topk` | gather + fp32-accumulated dot over candidate ids + top-k | `PrefilterKNN` |
