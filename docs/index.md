@@ -11,7 +11,9 @@ sources: [docs/]
 
 > Last updated: 2026-10-11 | Total pages: 17
 
-What is true now about the code and the project. Conventions, page
+What is true now about the code and the project. The study: Meta's
+official SilverTorch code, adapted, against LiNR V1-V3
+([decisions](decisions.md#goal-and-scheduling)). Conventions, page
 format and tags: [SCHEMA.md](SCHEMA.md). Structural changes:
 [log.md](log.md).
 
@@ -32,7 +34,8 @@ How the code works today. Code comments cite these pages by section.
 - [architecture](system/architecture.md): the `retrieve` package map,
   modules, filter composition, backend dispatch, module layout.
 - [kernels](system/kernels.md): every Triton kernel, the reference ops and
-  Meta's official ops: launch grids, tiles, autotune, numerics.
+  Meta's official ops: launch grids, tiles, autotune, numerics, and which
+  of them ship.
 - [filtering](system/filtering.md): what each paper specifies for filters,
   the mask and candidate-id paths, bloom hash keys.
 - [testing](system/testing.md): the library suite's layout, fixtures,
@@ -60,7 +63,7 @@ How the code works today. Code comments cite these pages by section.
 - [paper/](paper/): the reproducibility paper's sections
   ([deviations](paper/reproduction-deviations.md),
   [provenance](paper/provenance-and-disclosure.md),
-  [official vs reimplementation](paper/official-vs-reimplementation.md),
+  [Meta as published vs adapted](paper/meta-published-vs-adapted.md),
   [claims](paper/claims.md),
   [results draft](paper/results.md),
   [ECIR criteria](paper/ecir-criteria.md),

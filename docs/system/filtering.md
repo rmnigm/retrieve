@@ -1,7 +1,7 @@
 ---
 title: filtering
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-10-11
 type: concept
 tags: [filtering, library]
 sources: [retrieve/src/retrieve/modules/filters.py, retrieve/src/retrieve/indexing/bloom_hash.py, retrieve/src/retrieve/functional.py]
@@ -19,7 +19,11 @@ The standalone filters are [retrieve/src/retrieve/modules/filters.py](../../retr
 their kernels are `retrieve.ops.triton` (with pure-torch twins in `retrieve.ops.reference`),
 the hash math `retrieve.indexing.bloom_hash`, the composition helpers `retrieve.functional`.
 This brief covers **filtering only**; KNN scoring, quantization, and training
-are out of scope here.
+are out of scope here. SilverTorch ships on Meta's official code, adapted
+(its bloom is Meta's bundle bloom with a configured width and an exact
+recheck, its exact mode runs inside Meta's search op; [decisions](../decisions.md#goal-and-scheduling));
+the Triton SilverTorch filter paths below are in this tree but not in the
+release.
 
 ## What each paper specifies
 
@@ -60,7 +64,7 @@ boolean composition.
 | Bloom hash math | [indexing/bloom_hash.py](../../retrieve/src/retrieve/indexing/bloom_hash.py) | the single home of the signature builders: public `generate_seeds` / `build_signatures` (index-side, chunked) / `build_query_signatures` (query-side, loop-free); `bloom_subset_match` is in `functional.py`; consumed by `BloomFilter` **and** `SilverTorch`'s fused bloom mode (no private cross-module imports). Hash math is pinned — changing it invalidates every persisted `bloom_sigs` buffer |
 | LiNR clause Triton kernels | [ops/triton/clause_compact.py](../../retrieve/src/retrieve/ops/triton/clause_compact.py), [clause_mask.py](../../retrieve/src/retrieve/ops/triton/clause_mask.py) | fused eval + stream compaction (compact); fused eval emitting `[B, N]` bool (mask). No `[B, N, C, A_max]` intermediate either way |
 | Bloom Triton kernels | [ops/triton/bloom_match.py](../../retrieve/src/retrieve/ops/triton/bloom_match.py), [bloom_compact.py](../../retrieve/src/retrieve/ops/triton/bloom_compact.py) | `(qb & sigs) == qb` → `[B, N]` bool (match); fused subset-test + stream compaction (compact). Consumed by `BloomFilter.evaluate_mask` / `evaluate_indices` on CUDA |
-| Filter fused into SilverTorch score kernel | [ops/triton/codesigned_probe_score.py](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py), [codesigned_probe_score_exact.py](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py) | Selected by `SilverTorch.filter_mode`. `"bloom"` → conjunctive bloom subset test (single `QB`), part of co-designed Algorithm 1; `"exact"` → exact AND-of-OR over `[N, C, A_max]` narrow attrs (reverse clauses supported), same `common.clause_pass` inner loop as `clause_mask` but fused into the probe-and-score path. Both are **separate paths** from the standalone `BloomFilter` / `ExactAttributeFilter` — SilverTorch shares the predicate math and hash builders, not the module classes. On `backend="official"` the `"exact"` predicate is our `clause_mask` packed into the official scorer's bit mask and `"bloom"` is Meta's own bloom index (see [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend)). |
+| Filter fused into SilverTorch score kernel (Triton reimplementation; not in the release) | [ops/triton/codesigned_probe_score.py](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py), [codesigned_probe_score_exact.py](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py) | Selected by `SilverTorch.filter_mode`. `"bloom"` → conjunctive bloom subset test (single `QB`), part of co-designed Algorithm 1; `"exact"` → exact AND-of-OR over `[N, C, A_max]` narrow attrs (reverse clauses supported), same `common.clause_pass` inner loop as `clause_mask` but fused into the probe-and-score path. Both are **separate paths** from the standalone `BloomFilter` / `ExactAttributeFilter` — SilverTorch shares the predicate math and hash builders, not the module classes. On `backend="official"` the `"exact"` predicate is our `clause_mask` packed into the official scorer's bit mask and `"bloom"` is Meta's own bloom index (see [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend)). |
 | `combine_masks` / `combine_indices` | [functional.py](../../retrieve/src/retrieve/functional.py) | mask-AND composition; sparse cascade via `evaluate_subset` |
 | Official SilverTorch filters (`backend="official"`) | [ops/official/adapter.py](../../retrieve/src/retrieve/ops/official/adapter.py) | `filter_mode="bloom"` is **Meta's bloom index** (`bloom_index_build` over `(clause, value)` features, murmur3, bundles of 2048 docs, width from `OfficialConfig.b_multiplier`) queried through their expression DSL (`"0:v AND 1:w"`, `NOT`, `""` = all) — a different hash from ours, never bit-compared, matched by FPR / memory instead; `filter_mode="exact"` is our `clause_mask` packed into the official scorer's `filtering_bit_mask`. See [kernels.md](kernels.md#official--metas-torchopsst-kernels-as-the-reference-backend) |
 

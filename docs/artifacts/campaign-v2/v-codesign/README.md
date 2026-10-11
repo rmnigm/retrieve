@@ -23,7 +23,7 @@ of the same records ([hub-index](../../hub-index.md)). Not citable.
 - `full` is faster than `partial` in every cell: paired full / partial eager median 0.80-0.88
   (arXiv), 0.78-0.86 (goodreads), every seed below 0.93. Official cannot be captured, so there
   is no `graph` entry. This repeats the official-code finding that the partial-response path is
-  slower than Meta's own full-`N` search ([official vs reimplementation](../../../paper/official-vs-reimplementation.md)),
+  slower than Meta's own full-`N` search ([deviations OF-9](../../../paper/reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper)),
   now interleaved, and it runs against C5 as stated.
 - Recall is identical between the two paths at every point (oracle recall@100 arXiv 0.52-0.94,
   goodreads 0.82-0.98 over `n_probe` 8 → 128).

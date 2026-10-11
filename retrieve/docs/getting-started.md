@@ -25,7 +25,9 @@ toolchain, so there are no prebuilt CUDA wheels to match. You need:
 > ```
 
 Modules that ship a pure-PyTorch path accept `backend="torch"` and run without Triton (still on
-GPU). The default is `backend="triton"`.
+GPU). The default is `backend="triton"`. `SilverTorch` is the exception in the release: it runs
+Meta's official SilverTorch code, adapted (the `official` extra), and its Triton and torch
+backends in this source tree are not released ([modules](modules.md#silvertorch)).
 
 The package has two public layers and two helper namespaces:
 

@@ -1,7 +1,7 @@
 ---
 title: backlog
 created: 2026-10-07
-updated: 2026-10-08
+updated: 2026-10-11
 type: summary
 tags: [roadmap]
 sources: [docs/roadmap.md, docs/validation.md, evaluation/bench/, evaluation/training/]
@@ -45,17 +45,11 @@ the user moving it onto the roadmap.
 
 ## After the paper
 
-- **Fusing top-k into the probe scorer**: top-k is ~100 µs of ~250 µs
-  device time in both implementations
-  ([h2h](artifacts/kernel-opt/h2h.md), one run, not validated); beyond
-  both papers, so post-paper.
-- **TF-3 / TF-4 retune**: TF-3 (retune) and TF-4 (`evict_first`, 0-5 %),
-  second-order after TF-9 (probe layout) and TF-1 (transposed bloom
-  index). Needs a fresh `bench report` head-to-head against the current
-  kernels: the kernel-opt gate checked only the bloom kernel-only ratio,
-  and the end-to-end comparison in
-  [validation](validation.md#official-against-our-triton-reimplementation-citable-contested)
-  reflects the code before TF-1 / TF-9.
+- **Triton SilverTorch kernel work** (top-k fused into the probe scorer,
+  TF-3 / TF-4 retune, cross-query cluster sharing): cancelled. Our Triton
+  SilverTorch is out of the paper and the release
+  ([decisions](decisions.md#goal-and-scheduling)); kernel work on
+  SilverTorch goes into the adapted official code (roadmap META-FORK).
 - **G-b: extended experiments**: a synthetic scale ladder to 240M and 1B
   items (L4, L5), co-design ablation depth, V3 bit width, an extended batch
   grid (G10-G12, G15, G16).
@@ -66,10 +60,11 @@ the user moving it onto the roadmap.
   remain). The live upsert/delete API (`LiveIndexMixin` on
   `retrieve.modules`) is medium-large: a new subsystem across five module
   classes and both filters.
-- **TF-10: official capturability.** File the upstream issue: Meta's
-  scorer syncs because `fused_kmean_ann_cuda.cu` never passes the explicit
-  output size `faster_repeat_interleave` accepts. A patched build is
-  measured only if a reviewer asks, labelled "not the official release".
+- **Offer the adaptation's fixes upstream.** The changes that remove
+  defects of Meta's published code (host syncs, per-call plan decode,
+  capture, the unparsable tests, `-O0` host code) could go to
+  `meta-recsys/silvertorch` as pull requests after the paper; filing the
+  defects as issues is on the roadmap's "Needs the user".
 
 ## Sequential-encoder follow-ups
 
@@ -137,8 +132,8 @@ Not scheduled work; candidates for citations or a one-time check.
   recent GPU-IVF kNN kernels: check whether the probe kernel already does
   something equivalent.
 - A tunable-vectorization GPU bloom filter (arXiv 2512.15595) and a
-  cuckoo-filter alternative (arXiv 2603.15486): comparisons for the
-  transposed bloom-index kernel.
+  cuckoo-filter alternative (arXiv 2603.15486): comparisons for the bloom
+  index of the adapted SilverTorch code.
 - A bucket-based coalesced-access layout for filtered graph search
   (GRAB-ANNS, arXiv 2604.16402): an alternative to the compact CSR-like
   probe layout.
@@ -148,7 +143,7 @@ Not scheduled work; candidates for citations or a one-time check.
 - For the paper: Meta's public SilverTorch numbers
   (`github.com/meta-recsys/silvertorch`, an Engineering-at-Meta post) as
   target figures for
-  [official-vs-reimplementation](paper/official-vs-reimplementation.md);
+  [Meta as published vs adapted](paper/meta-published-vs-adapted.md);
   two ANN-benchmark trustworthiness critiques (arXiv 2507.00379, a
   YDB.tech write-up) for
   [provenance-and-disclosure](paper/provenance-and-disclosure.md). No

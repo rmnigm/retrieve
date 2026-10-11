@@ -49,10 +49,11 @@ Most modules accept `backend="triton"` (default) or `backend="torch"`. The Trito
 kernels; the torch path is pure PyTorch (still GPU) and is `torch.compile`-friendly. Results are
 equivalent. `PostfilterKNN` accepts the flag for API symmetry but always runs
 the same code (cuBLAS already covers its case). `SilverTorch` alone also accepts
-`backend="official"`: Meta's own `meta-recsys/silvertorch` kernels (`torch.ops.st.*`, the
+`backend="official"` (and, in the release, runs Meta's code adapted; see
+[SilverTorch](#silvertorch)): Meta's own `meta-recsys/silvertorch` kernels (`torch.ops.st.*`, the
 `official` extra — built from source, needs a CUDA toolkit matching your torch) for the scoring
-and bloom phases, with our k-means and quantization in front; it is the reference the Triton
-kernels are checked against, eager-only (`torch.compile` raises), and its bloom mode is Meta's
+and bloom phases, with our k-means and quantization in front; it is Meta's code as published,
+the reference the adapted code is checked against, eager-only (`torch.compile` raises), and its bloom mode is Meta's
 bloom index rather than ours (`m_bits` is optional; `official=OfficialConfig(...)` carries
 `b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path, the
 and the partial-vs-full bloom path; the expression parse runs in `prepare_queries`). Any other
@@ -141,6 +142,14 @@ inputs, fp32 accumulation). Ranking is what the layers promise; cast at the boun
   trade memory for recall — the one knob the OPORP family can't reach.
 
 ## SilverTorch
+
+> **SilverTorch in the release.** The released package runs `SilverTorch` on Meta's official
+> SilverTorch code, adapted by us (improvements listed in its CHANGES file: no host syncs,
+> CUDA-graph capture, `m_bits` honoured, an exact recheck of bloom survivors), installed with the
+> `official` extra. This source tree still carries our Triton implementation of SilverTorch
+> (`backend="triton"`, today's default) and its `backend="torch"` reference; neither is part of
+> the release, and both will be removed. `backend="official"` (Meta's code as published) stays as
+> the reference the adapted code is checked against.
 
 ```python
 SilverTorch(k, n_lists, n_probe, filter_mode="none", m_bits=None, k_hash=None,

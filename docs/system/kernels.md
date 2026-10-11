@@ -1,7 +1,7 @@
 ---
 title: kernels
 created: 2026-09-26
-updated: 2026-09-29
+updated: 2026-10-11
 type: concept
 tags: [kernels, library]
 sources: [retrieve/src/retrieve/ops/]
@@ -13,6 +13,17 @@ Every kernel of ours is Triton. The one non-Triton path,
 `SilverTorch(backend="official")`, is Meta's own extension behind an
 adapter ([its section](#official--metas-torchopsst-kernels-as-the-reference-backend)).
 There is no CUDA C++ or CuTe DSL backend ([Deleted backends](#deleted-backends)).
+
+**What ships** ([decisions](../decisions.md#goal-and-scheduling)): LiNR's
+and the filters' Triton kernels, and SilverTorch on Meta's official code,
+adapted (`backend="official-fork"`, the `official-fork/` workspace member,
+on `dev/meta-fork` until its review accepts; its section joins this page
+with that merge). The [SilverTorch kernels](#silvertorch-kernels) below
+(`codesigned_probe_score*`, `bloom_full_mask` and their reference twins)
+are our Triton reimplementation: in this tree, not in the paper or the
+release, deleted at roadmap TRITON-ST-DELETE. The
+[official](#official--metas-torchopsst-kernels-as-the-reference-backend)
+adapter stays: it runs Meta's code as published, the parity reference.
 
 The Triton kernels live flat in
 [`ops/triton/`](../../retrieve/src/retrieve/ops/triton/), one file per
@@ -1230,7 +1241,8 @@ product in fp32 on both paths. Eager, it is a no-op.
 
 ## SilverTorch kernels
 
-Two co-designed IVF probe + INT8 scoring kernels live in
+Not in the release (our Triton reimplementation; see the top of this
+page). Two co-designed IVF probe + INT8 scoring kernels live in
 [`ops/triton/`](../../retrieve/src/retrieve/ops/triton/),
 selected by `SilverTorch.filter_mode`: `codesigned_probe_score` for
 `filter_mode ∈ {"none", "bloom"}`, `codesigned_probe_score_exact` for
@@ -1815,7 +1827,7 @@ files at gcc `-O0` (OF-11). The same sources at `-O3` are bit-identical and
 
 **Measured.** The head-to-head against Triton (end to end, kernel-only,
 phase 2, parity, memory) is in
-[validation](../validation.md#official-against-our-triton-reimplementation-citable-contested),
+[validation](../validation.md#official-against-our-triton-reimplementation-citable-contested-not-in-the-study),
 with tables in [artifacts](../artifacts/official-silvertorch/b3/tables.md).
 Both scorers now read the same CSR. The b3 split (Meta's
 scorer 10.9–17.8× ours on goodreads) was our former padded probe layout,

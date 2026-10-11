@@ -17,30 +17,39 @@ queued in the [backlog](backlog.md). An agent starting a session reads
 step names. Who executes a step is
 [agent orchestration](contracts/agent-orchestration.md).
 
+**The study** ([decisions](decisions.md#goal-and-scheduling)): Meta's
+official SilverTorch code, adapted by us, against LiNR V1-V3. The queue
+below finishes the adapted SilverTorch backend, reruns every SilverTorch
+cell on it, removes our Triton SilverTorch reimplementation from the code,
+and writes the paper. LiNR's numbers come from the final pass
+(`campaign-final`, library `e16512f5`) and are not rerun.
+
 **Rules.** No dates: every step is done, in the order given, and nothing
 is optional. Do not start a step whose dependencies are open. When a step
 finishes, its gate's row in [validation](validation.md) and the affected
 `docs/system` page are updated, and the orchestrator **removes** the step
-from this page. Step names (D1, H2, ...) are stable identifiers used in
-records, commits and code comments; they are not renumbered.
+from this page. Step names (META-FORK, D1-G, ...) are stable identifiers
+used in records, commits and code comments; they are not renumbered.
 
 **Estimates** are A100-SXM4-80GB GPU-hours (the reference GPU for every
-citable number), from the per-cell wall times the record inventory measured
-([artifact](artifacts/campaign-v2/README.md#b-measured-wall-time-per-cell-old-grid-3-bs--3-k--2-modes)); a *stream* is
-a slice of a step that can run on its own GPU at the same time as the
-others (see [Multi-GPU execution](#multi-gpu-execution)).
+citable number); a *stream* is a slice of a step that can run on its own
+GPU at the same time as the others (see
+[Multi-GPU execution](#multi-gpu-execution)).
 
 ## Needs the user
 
 - **Contact the original authors** (re-plan decision 7): the LinkedIn LiNR
   team and Meta's SilverTorch team — filter-set details, the V1/V2 setup,
   the SilverTorch paper's FPR inconsistency (0.067 % vs 0.00173 %) — and
-  file the official-code defects (OF-3, OF-4, OF-6, OF-9, OF-10 in
+  file the published-code defects (OF-3, OF-4, OF-6, OF-9, OF-10 in
   [deviations](paper/reproduction-deviations.md)) upstream as issues. The
   ECIR call asks what contact happened; replies take weeks.
+- **The release decisions** in [release §5](paper/release-and-licenses.md#5-decisions-for-the-user)
+  (goodreads checkpoints, Re-LAION vectors, the PubMed slice, the public
+  May result repos, `eval-results` when public, GitHub during review).
 - **Citability of a narrowed run.** A run with a narrowed mode set is
-  recorded `status: partial` and reported NOT CITABLE. The user decides
-  once `bench report` runs on the campaign's output (D1-G).
+  recorded `status: partial` and reported NOT CITABLE; the user decides
+  whether a deliberate, recorded narrowing reads differently.
 - **A4**: merging `staging` into `main` is on hold until the user decides.
 - **HF: squash `pinkmeme/eval-goodreads-work-id`** to reclaim 2.3 GB
   (`HfApi().super_squash_history(repo_id=..., repo_type="dataset")`).
@@ -62,6 +71,9 @@ GPU work runs on RunPod pods launched with
    environment gets its own venv (`UV_PROJECT_ENVIRONMENT=/venvs/<name> uv
    sync --all-packages --all-groups --extra official`): a worker that
    re-syncs the shared venv to its worktree breaks every running job.
+   Meta's code as published runs from an `-O3` build
+   (`scripts/build_official_o3.sh`; `env.official_build` records the loaded
+   extension).
 2. Data under `/data` (`RETRIEVE_DATA_ROOT`), with `evaluation/data ->
    /data` (a gitignored symlink) in every checkout and worktree. `eval-data
    fetch` only what the step reads: `arxiv-papers` (the license-fixed
@@ -69,15 +81,14 @@ GPU work runs on RunPod pods launched with
    `query_attrs_narrow` min = 0), `goodreads-work-id` with its checkpoints
    ([checkpoints](system/checkpoints.md#what-the-harness-reads)). PubMed is not on the Hub: rebuild the 10 M slice with
    `eval-data pubmed` ([datasets](system/datasets.md#pubmed); ~1 h
-   download-bound `convert`, 17 GB). YFCC-10M is public: `eval-data yfcc
+   download-bound `convert`, 17 GB), or copy it pod to pod. YFCC-10M is public: `eval-data yfcc
    all` ([datasets](system/datasets.md#yfcc10m), ~12.5 GB with the raw).
-   The synth attrs are built on the pod (*eval-data synth-filter*, CPU,
-   deterministic from its seed).
-3. Results: the remaining runs do not need the old records locally (the
-   narrow scoping below never resumes against them), but the final uploads
-   and the report do: `bench fetch --path-in-repo d1/<subtree> --results
-   <dir>` per [hub-index](artifacts/hub-index.md) row, merged into
-   `evaluation/results/<suite>/`.
+   LAION 30 M is not on the Hub either (pod-to-pod copies). The synth attrs
+   are built on the pod (*eval-data synth-filter*, CPU, deterministic from
+   its seed).
+3. Results: the final aggregation needs the final pass's records:
+   `bench fetch --path-in-repo campaign-final/<subtree> --results <dir>` per
+   [hub-index](artifacts/hub-index.md) row.
 4. Every GPU job: its own `TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/<job>`
    (`bench run` keys a default by `code_version` when none is given,
    [evaluation](system/evaluation.md#inductor-cache)), `HF_HOME=/scratch/hf`.
@@ -99,323 +110,226 @@ Pin each job's CPU threads to its GPU's NUMA-local cores (`taskset -c`,
 the affinity column of `nvidia-smi topo -m`): batch-1 latency is
 launch-bound, so a neighbour's host load moves it. Record in the step's
 validation row that neighbour GPUs were busy. Split streams by `--algo`,
-then by `--filter-kind` / `--sweep` / `--seed`; keep `silvertorch`'s
-`triton` and `official` backends in **one** stream, in that order: they
-share a `_parity/<dataset, dim, algo>` spill and the second backend's
+then by `--filter-kind` / `--sweep` / `--seed`; keep the `silvertorch`
+backends of one cell in **one** stream, in the suite's order: they share
+a `_parity/<dataset, dim, algo>` spill and the second backend's
 `jaccard_vs_first` compares against the first's. `bench campaign` has no
-`--algo`, so a split stream is a `bench run`. M1 decides whether
-multi-GPU numbers are comparable at all.
+`--algo`, so a split stream is a `bench run`. M1's result (one timed job
+per GPU of a two-GPU pod) is in
+[validation](validation.md#campaign-v2-phase-v-not-yet-validated).
 
-### Campaign code_version and reruns
-
-**Exploration first, one clean pass last** (user, 2026-10-09,
-[decisions](decisions.md#campaign-v2-user-2026-10-08)). While the library
-is still improving, legs run at the current tag (the `default` of
-[campaign.yaml](../evaluation/campaign.yaml), Hub `<tag>/<dataset>-<suite>`;
-its `log` lists every tag, its library code_version and what it changed;
-now `campaign-v2.12`, library `e16512f5`, the final pass's frozen library) to see how everything behaves and to make the charts. A new tag does not stop or
-invalidate anything: every record keeps its code_version, and a change adds
-rows to the **redo ledger** below only for the cells it actually changes.
-The final repro pass (F-REPRO) reruns the ledger, or the whole grid at the
-final tag, and D1-G gates it. After each leg: `bench upload --verify`, a
-[hub-index](artifacts/hub-index.md) row, the validation row, a look at the
-exhibit it feeds.
-
-**Library under a running leg.** The shared venv `/venvs/retrieve` is an
-editable install: every `bench` child imports `retrieve` from
-`/workspace/retrieve`. Since H-PROVENANCE, `code_version` is the imported
-package's tree, read per child, so a record is stamped with the code that
-ran. A leg launched with an older harness still reads the launching
-checkout: for those, `/workspace/retrieve`'s library stays fixed until the
-leg ends. A new tag still moves a pod's checkout only between legs, so one
-leg runs one library.
-
-**Redo ledger** (cells whose code or parameters changed after they ran):
-
-| records | changed by | redo |
-|---|---|---|
-| V2 + V3 Triton perf at `408b1188` (V-PILOT goodreads-synth, V-GR-FILTER) | V2-FIX-A (bit-exact; faster) | perf at the final tag, quality reused |
-| SilverTorch eager perf at `408b1188` (H2H-FINAL, V-CODESIGN, D3 timed: all rerun at v2.1) | quantize fix (+≈30 µs eager, graph unchanged) | eager perf |
-| goodreads SilverTorch `filter` + `synth` at `n_lists` 1024 | IVF-TUNE (goodreads 4096 / n95 64) | whole SilverTorch arms |
-| arXiv `72e5a90` reuse entries, V2 / V3 perf half | V2-FIX-A | perf |
-| PubMed SilverTorch Triton perf (D3 PubMed timed at v2.1; V-PUBMED's Triton arms) | ST-DLOOP (scores bit-exact) | Triton perf |
-| SilverTorch Triton bloom perf at d128 / d192 with p < 1/256 (synth low-p bloom) | ST-SKIP128 | Triton bloom perf |
-| V2 Triton perf at `D_PAD` ≥ 1024 run at v2.1 (V-PUBMED; d128 / d192 legs gain or are neutral) | V2-HIGHP | V2 perf |
-| every SilverTorch Triton perf record before v2.3 (all widths; ≈ −3 µs at k 100 × n_probe 24, more at k 1000) | ST-IDS | Triton perf |
-| V1 Triton perf before v2.3 | V1-FUSE | V1 perf |
-| every official perf record before v2.6 (C5 codesign official, T3 h2h, D3 / bloomwidth official) | OFFICIAL-REWORK (our adapter's per-forward host work left the timed call) | official perf |
-| every bloom-filter perf record before v2.6, every backend (SilverTorch, LiNR V1-V3, postfilter, router) | OFFICIAL-REWORK M1: the query-side filter encoding left the timed forward (now `query_prep_ms`) | bloom perf (forward) |
-| synth clause perf (V1, V2, SilverTorch exact) on the 10-clause synth tables before v2.7 | CLAUSE-SKIP (inactive clauses were loaded) | clause perf |
-| SilverTorch Triton bloom perf before v2.5 (all widths; 0 to −10 %) | ST-LANE (bit-exact; none / exact SASS unchanged) | Triton bloom perf |
-| V2 Triton perf at `D_PAD` ≤ 256 before v2.5 (incl. C1's crossover; 0.22-0.97 of v2.4) | V2-FILL (bit-exact) | V2 perf |
-| SilverTorch Triton perf before v2.10 where `B · n_probe` ≥ 512 (every width) or on sparse batches at `D_PAD` ≤ 256 (eager mostly; 0.74-1.00 of v2.9) | ST-WIDE-2 (bit-exact; fused probe prep, sparse two-pass) | Triton perf |
-| SilverTorch Triton perf before v2.11 where the padded score buffer reaches 2^23 slots (≥ 8 blocks per top-k slot; 30 M d256 n_probe 128 bs 16 / 64: 0.76-0.84 of v2.10) | ST-TOPK (bit-exact; two-level top-k, host only) | Triton perf |
-| V1 Triton perf before v2.12 (every cell; 30 M: bs 1 0.93-0.95, bs 16 0.59-0.63, bs 64 0.45-0.47 of v2.11) and SilverTorch Triton perf where `two_level_topk` engages (ops unchanged; 30 M 0.999-1.003) | V1-BS1 + V1-TOPK (bit-exact; B = 1 GEMV, batched-row masks, shared two-level top-k) | V1 perf, Triton perf |
-| graph-mode ids of SilverTorch records at `408b1188` | quantize fix | ids (D1-G's id gate) |
+**Timings compare only within one box**
+([decisions](decisions.md#harness)): every ratio is read inside one leg on
+one pod.
 
 ### Stop rules
 
-- **Pilot gate** (passed 2026-10-08 on goodreads-synth, [validation](validation.md)):
-  proceed to the arXiv and YFCC synth legs only if achieved pass rates are
-  within 1 % relative of target where N·p ≥ 10⁴ (below that the binomial
-  spread exceeds 1 %; goodreads p 0.001 is −1.01 % at N·p 797), V1's
-  `recall_oracle` is ≥ 0.99 at every p, and the curves are monotone where
-  they must be (V1 latency roughly flat in p, postfilter recall falling
-  with p). Otherwise stop and report.
 - **Noise gate.** Every timed comparison in an exhibit has a 95 % CI on its
   ratio that excludes 1.0, or it is reported as "no difference". No more
   than 5 repeats to force significance.
-- **Densify only on demand**: a parameter point is added only where an
-  exhibit's curve has a kink or crossover between two measured points and
-  the claim depends on where it is.
 - **Budget gate.** If a step's GPU-h exceed 1.25× its estimate, report it
   and update the remaining estimates from the measured rate; the queue
   continues (user, 2026-10-08: the full grid runs).
-- **Surprise gate.** A result that contradicts an earlier one (e.g. Triton
-  slower than official end to end on the frozen code) stops the queue:
-  rerun that one cell interleaved and report before anything else runs.
+- **Surprise gate.** A result that contradicts an earlier one (e.g. the
+  adapted backend slower than Meta's published code on a cell its gate
+  passed) stops the queue: rerun that one cell interleaved and report
+  before anything else runs.
 
-## Phase P: CPU work before the campaign
+## The queue
 
-The claims and the claim-to-evidence matrix are [claims](paper/claims.md);
-the record inventory is [artifacts/campaign-v2](artifacts/campaign-v2/README.md).
+### 1. META-FORK: finish, review, ACCEPT, tag
 
-## Phase V: the campaign (pods the user creates)
+Meta's official SilverTorch code, adapted (`official-fork/`,
+`backend="official-fork"`, branch `dev/meta-fork`): the chain fork-coder →
+GPU gate runner → fork-review, one agent at a time (chain notes under
+`.chains/meta-fork/`). What the adaptation changes and its parity gate:
+[Meta as published vs adapted](paper/meta-published-vs-adapted.md).
 
-GPU 0 takes all timed work from one sequential driver, cores pinned
-NUMA-local; GPU 1 takes quality-only work (`--skip-perf`: oracle builds via
-*bench oracle*, bloomwidth quality, the PubMed embedding check, the `n95`
-probe). Timed work moves to a second GPU only if M1 passes. Exhibits:
-T1 claims, T2 real-filter headline, T3 official vs Triton, F1 latency vs
-pass rate, F2 recall vs pass rate, F3 Pareto, F4a bloom FPR/memory, F4b
-co-design.
+- [ ] **K fixes on the four loss clusters** (fork-coder): the cells where
+  the adapted code is still slower than our Triton SilverTorch at
+  campaign-v2.12, each with its measured cause in the GPU runner's status
+  note: (1) wide unfiltered scans at d ≥ 192 (Meta's scorer; PubMed d768,
+  arXiv d256, YFCC d192 at wide probes); (2) the bloom **full** path on
+  multi-clause filters (Meta's full-N bloom search); (3) the partial bloom
+  path at bs 1 under CUDA graph (the payload kernels); (4) the exact filter
+  at wide probes, bs 1 (C9's per-doc check). Each fix bit-exact, its row in
+  CHANGES, a cell that still loses listed with cause, never hidden.
+- [ ] **Re-gate** (GPU runner): the four clusters at ≤ 10 M on pod b, the
+  rest of the grid only where X-relevant code changed; gate R (C12 / C13:
+  recall against the exact oracle, false positives, index bytes at D3's
+  widths on goodreads / arXiv / PubMed); the 30 M cells (LAION d256, pod d,
+  running at head 82fafb6), at the final head.
+- [ ] **fork-review**: the branch against the plan's definition of done
+  (X bit-exact, R, zero host syncs, capture, the compile gate, one clean
+  API, licence and headers, docs). Fixes go back to fork-coder, then
+  review again. **ACCEPT** ends the chain.
+- [ ] **Then** (controller): tag `campaign-fork`; merge `dev/meta-fork`
+  into `staging` (the `official-fork/` member, its validation section,
+  `kernels.md`'s adapted-backend section).
 
-- [ ] **M1: multi-GPU interference control**, before any timed step on a
-  multi-GPU pod: one arxiv `filter` cell at bs 1 and 16
-  (`silvertorch`/triton, `linr_v2`) alone, then with every other GPU
-  loaded, interleaved, cores pinned. *Gate*: loaded medians within each
-  arm's own repeat noise; otherwise timed steps run one GPU at a time.
-  **0.5 GPU-h** on a ≥ 2-GPU pod.
-- [ ] **EXHIBITS: the exhibits and the checks, after every leg** (user,
-  2026-10-09: use the GPUs to catch bugs, compare, reproduce the main takes).
-  CPU: `bench fetch` every `campaign-v2/` and `campaign-v2.1/` leg, `bench
-  report` (latest record per key; mixed code_versions labelled), and build
-  T1 (claims table, verdict per C1-C7), T2, T3, F1, F2 (with the real-data
-  per-query selectivity overlay from the dumps), F3, F4a, F4b; plus the D1-G
-  checks on what exists (eager-vs-graph `ids_sha256`, bs 16 < 16 × bs 1,
-  recall sanity vs exact arms). Each run: an artifact page for the user and
-  a note naming new bugs, surprises and claim status.
-- [ ] **V-AX-CORR: the cluster-correlated synth variant** (re-plan P1; its
-  trigger, the IVF recall collapse at low pass rate, shows on YFCC and
-  PubMed). Builder: `eval-data synth-filter --correlated` (coarse k-means
-  with round(1/p) centroids; item attribute = its cluster, a query's clause =
-  its nearest centroid), `arxiv-corr-synth.yaml`, CPU test (pass rate, query
-  side); then arXiv at p {0.01, 0.03, 0.1}, every synth arm. IVF's best case
-  next to the uniform worst case (F2). **≈ 3 GPU-h.**
-- [ ] **H-SCOPE follow-ups**: `kernel_scopes` is merged (harness, CPU
-  test over every real kernel name). Left: the report's T3 scorer column
-  reads `kernel_scopes`, and one GPU test on a real call (~2 min).
-- [ ] **C5-OURS cells: co-design vs full mask inside our Triton backend**
-  (idea #3; the `bloom_path=full` option is in `campaign-v2.5`). Run the
-  `codesign` triton cells interleaved partial / full on goodreads + arXiv,
-  plus one PubMed 10 M point (C5 is claimed at 20 M; the full mask's
-  scratch grows with N). Separates the co-design idea from Meta's host-side
-  partial path (V-PROF3). At `campaign-v2.5` or later, Hub
-  `<tag>/<dataset>-codesign-ours`. **≈ 1-2 GPU-h.**
-- [ ] **EXHIBITS ideas #1, #2, #6** (CPU): a per-query
-  pass-rate router (IVF / V2 / V1) as a counterfactual from the sidecars;
-  filter-cluster alignment (GLS) to explain F2's real-vs-synth gap, with
-  V-AX-CORR; Big-ANN-style QPS at recall 0.95 per selectivity band, and a
-  reproduction defect ledger.
-- [ ] **SYNTH-TRIM: a smaller synth grid, dense in the middle** (user,
-  2026-10-10: the lowest rates add little, 0.1 / 0.2 / 0.5 matter more).
-  arxiv-synth rates {0.001, 0.01, 0.05, 0.1, 0.2, 0.5, 1.0}, yfcc10m-synth
-  {0.01, 0.1, 0.2, 0.5, 1.0}; seed 0 only, seeds 0-2 at p 0.01 and 0.2
-  (the variance check); SilverTorch clause `n_probe` {24, 64, 256, 1024}
-  (YFCC {24, 256, 1024}). New attrs (`eval-data synth-filter --rates`),
-  configs, `suites.yaml`, the YFCC chunk list regenerated; cell counts and
-  GPU-h re-projected before V-AX-SYNTH starts. goodreads-synth gains 0.05 /
-  0.2 / 0.5 at seed 0 (≈ 1-2 GPU-h) so the panels share the middle points.
-  Before V-AX-SYNTH.
-- [ ] **V-AX-SYNTH: arXiv synth** on SYNTH-TRIM's grid (the correlated
-  variant is V-AX-CORR). F1/F2 3M panel. **≈ 15-45 GPU-h**
-  (the pilot measured 8.7 GPU-h at 0.8 M; re-projected ≈ 24-30 GPU-h, the
-  torch arms run ≈ 385 s a cell at 3 M), GPU 0. Its timed cells run at
-  `campaign-v2.1`, at IVF-TUNE's arXiv `n_lists`.
-- [ ] **V-GR-DEEP: goodreads `deep`**, trimmed (`n_lists` {1024, 4096},
-  `n_probe` {8, 16, 32, 64, 128}, V3 pool fractions); replaces D1-C.
-  F3; goodreads' `n95`, then the goodreads `filter` n95 cells and the
-  189 new goodreads-synth cells of the SilverTorch n_probe sweep (in
-  suites.yaml; resume adds only the new cells; driver
-  [v-gr-deep](artifacts/campaign-v2/v-gr-deep/driver.sh)). **≈ 6 GPU-h**,
-  GPU 0/1.
-- [ ] **V-YFCC: YFCC synth (SYNTH-TRIM's 5 points) and a small `deep`** (`n_lists`
-  {4096, 16384}). F1/F2 10M panel; YFCC's `n95`. Runs alongside
-  V-AX-SYNTH on another GPU (three pods, no fourth: user, 2026-10-08); a
-  collapse found on arXiv adds YFCC points afterwards. **≈ 31-54 GPU-h**
-  (EXHIBITS run 1; V3 at 10 M is most of the range: one timed V3 cell first).
-  `synth` splits in arm-group chunks (`bench run --algo`, one interleave
-  unit never split) across free GPUs.
-- [ ] **V-SEEDS: arXiv and YFCC `filter`, the cells the manifest does not
-  reuse.** Deferred to F-REPRO (user, 2026-10-10: the exploration needs
-  numbers that decide the claims, not final ones; seed variance is a
-  final-pass question). The arXiv half runs only if no claim-deciding
-  work is queued. arXiv: 117 cells (V1-V3 `c3_nversions` seeds 0-2; SilverTorch
-  triton; official bloom; `postfilter` α {1, 8}; SilverTorch torch, plain
-  and compiled, for C3); V1-V3 on `c0_maincat` / `all4` are reused
-  through the manifest (36 cells, [campaign.yaml](../evaluation/campaign.yaml)).
-  YFCC: all 18 cells, seed 0 included (a manifest entry cannot name a
-  seed). Plus the `n95` column on the kept sweeps. T2 with CIs. Needs
-  V-AX-SYNTH and V-YFCC. **≈ 8-12 GPU-h**, GPU 0.
-- [ ] **V-PUBMED: PubMed `filter` under the new grid** (replaces D1-E):
-  the embedding identity check on GPU 1 first (`eval-data pubmed
-  encode_queries`, `bench check`, one V1 cell equal to `d1/pubmed`'s
-  quality, or stop), the `n95` probe suite (quality-only), then the 3
-  kept sweeps, 3 seeds, every arm, now at `campaign-v2.1` and IVF-TUNE's values
-  (its SilverTorch Triton perf goes on the redo ledger for ST-DLOOP). T2's 768-d row.
-  **≈ 14 GPU-h**, GPU 0.
-- [ ] **V-LAION30: a 30 M scale point at d256, `filter` only** (data staged
-  through the generic ingest, `bench check` ok; the grid remains) (user,
-  2026-10-10; [decisions](decisions.md#datasets)).
-  Re-LAION-2B-en-research-safe (gated, auto-approved; captions + url /
-  size / similarity / punsafe / pwatermark, no embeddings): the first two
-  parquet parts (32.8 M rows), 30 M items + held-out caption queries;
-  captions encoded by us with nomic-embed-text-v1.5 at its Matryoshka
-  d256 (≈ 1.5 GPU-h). Filters from the metadata as tags: url domain
-  ("search within a site"), size, similarity and punsafe / pwatermark
-  buckets; a query's clause from its own tags. A new `eval-data` command
-  + `laion30m.yaml` + CPU tests + `bench check`; then a reduced `filter`
-  grid (SilverTorch triton, V1, V2, bs 1 / 16, 3 sweeps, seed 0) at the
-  current tag, IVF sized for 30 M under the 25 % cap. Memory: 31 GB fp32
-  items + 7.7 GB int8 codes (the item-chunked oracle holds no copy).
-  **≈ 10-15 GPU-h** (estimate, scaled from
-  PubMed's 10 M cells).
-- [ ] **OFFICIAL-O3: Meta's extension built with `-O3`** (OF-11: Meta's setup passes no
-  `-O`, host code at gcc `-O0`; `-O3` is 0.77-0.98 of the shipped time, outputs
-  bit-identical). New official legs build their own venv with
-  `scripts/build_official_o3.sh`; `env.official_build` records the loaded
-  extension's sha256 and flags. Remaining: rebuild the shared venvs between legs.
-- [ ] **C5-OURS-30M + C1 re-time at v2.7**: codesign-laion30m's triton half
-  (our partial vs full at 30 M, beside Meta's, on one box; per-sweep processes
-  until H-ARMFREE lands) and arxiv-synth's V1 / V2 cells re-timed (C1's 3 M
-  crossover without the clause-width cost).
-- [ ] **REL-LIC: license audit and the public-release plan** (user,
-  2026-10-10, ECIR Availability): per dataset (goodreads, arXiv, PubMed /
-  MedCPT, YFCC-10M, Re-LAION, the synth attrs) whether the derived data may
-  be redistributed or only its build recipe; which Hub repos go public at
-  submission (results, datasets, checkpoints) and what each must not hold;
-  a page under `docs/paper/`. Making anything public stays the user's
-  call. CPU.
-- [ ] **F-CRIT: the ECIR criteria checklist** (user, 2026-10-10): each
-  question of the replicability-track criteria (reliability, impact,
-  novelty, availability) mapped to the paper section, table or artifact
-  that answers it, with gaps named; a new page ecir-criteria.md under docs/paper. F5
-  writes against it.
-- [ ] **META-FORK: a fork of Meta's SilverTorch with its bottlenecks
-  removed** (user, 2026-10-10;
-  [decisions](decisions.md#goal-and-scheduling)), the paper's improved
-  SilverTorch baseline. One GPU worker, st-dloop.
-  - **The final pass continues** at campaign-v2.12 / campaign-final: it
-    measures Meta's code as shipped (+ -O3), the fork's baseline, and
-    Triton for the record.
-  - **GPU:** design, code and CPU tests first; it takes pod b's GPU when
-    pod b's last final leg ends, then pod b stays up for it while the other
-    pods stop as they finish. No GPU use before that (pod b is timing).
-  - **Scope:** remove the measured bottlenecks
-    ([deviations](paper/reproduction-deviations.md),
-    [official vs ours](paper/official-vs-reimplementation.md)): host syncs
-    and launches per call, the per-call plan decode, eager-only ops (make
-    it CUDA-graph capturable), the per-2048-doc bloom false positives
-    (OF-1 / OF-12), `m_bits` not followed (OF-10). *Gate*: bit-exact
-    (`torch.equal`) against Meta's int32 path wherever the change is not a
-    bloom change; bloom changes report recall against the exact oracle
-    instead; the official parity gate reruns on the fork.
-  - **Where:** a new uv workspace member `official-fork/`, keeping Meta's
-    code and licence apart from ours (Meta's LICENSE and headers kept, our
-    changes listed in a CHANGES file), exposed in the library as
-    `backend="official-fork"` through the existing official adapter path.
-  - **Measurements:** 10 M (PubMed d768, YFCC d192) and 30 M (LAION d256):
-    fork vs Meta -O3 vs our Triton at the v2.12 records, C5 / C7 cells
-    first.
-  - **Cost:** one GPU only; checkpoints pushed often; persistence as
-    before.
-- [ ] **AFTER-QUEUE: more experiments and kernel work, ranked by paper value**
-  (user, 2026-10-11: once the planned work is done, more experiments, deeper
-  sweeps and Triton kernel performance work, staying close to what the
-  reproducibility paper needs). In order:
-  1. **Close the provisional cells**: every T1 / figure number still marked
-     pre-ST-WIDE or pre-CLAUSE-SKIP re-timed at the newest tag.
-  2. **Sharpen the figures the paper leads with**: F1 / F2 at 10 M and 30 M
-     with the low and middle pass rates (0.001, 0.003, 0.03, 0.05) on uniform
-     synth; the probe curve at 30 M (n_probe 64 / 256); seeds 0-2 on the cells
-     a T2 confidence interval rests on.
-  3. **Stopped (user, 2026-10-10, META-FORK; ST-XQ cancelled).** Triton
-     kernel work where ours trails Meta's or the compiler:
-     cross-query cluster sharing in the probe scorer (30 M d256, n_probe 128,
-     bs 64, with ST-TOPK: ours / Meta -O3 0.907 / 1.068 at int32 and
-     1.064 / 1.256 against Meta's default fp16, c0_domain / tags4, Hub
-     `artifacts/st-topk-30m`; the remaining gap is our scorer, 2.2 vs 0.3 ms
-     at v2.10, `campaign-v2.10/laion30m-c7-scorepath`). Each bit-exact plus the
-     keep rule, then a tag. Post-final work: the library is frozen at
-     campaign-v2.12, so none of it enters the final pass.
-- [ ] **F-REPRO: the final pass.** When the library stops changing: tag the
-  final version, rerun the redo ledger (or the whole grid if the ledger is
-  most of it) at that tag into `campaign-final/`, write *campaign.yaml* for
-  one code_version. Then D1-G.
-- [ ] **D1-G: gate reruns and the report.** Needs F-REPRO.
-  Eager-vs-graph id identity from the stored hashes, a byte-identical
-  quality subset per leg (`--force` into a scratch tree),
-  `median_ms(bs=16) < 16 × median_ms(bs=1)`, then `bench report
-  --manifest` over everything. **≈ 4 GPU-h**, both GPUs.
+*Gate*: fork-review's ACCEPT note, every gate row green in validation's
+META-FORK section. *GPU*: pod b (≤ 10 M), pod d (30 M); one job per GPU.
 
-## Phase F: the paper
+### 2. FORK-RERUN: every SilverTorch cell on the adapted backend
 
-- [ ] **F2: the official-vs-reimplementation section** rewritten from
-  H2H-final's numbers, with CIs and paired tests
-  ([paper](paper/official-vs-reimplementation.md)). Needs H-PROFILE and
-  D1-G.
+Needs 1, and runs after the paper's abstract (paper-draft; it needs claim
+verdicts, not numbers). Rerun every SilverTorch cell of the final grid with
+`backend="official-fork"` at the `campaign-fork` tag, in place of our
+Triton SilverTorch: `filter`, `deep`, `synth`, `codesign`, `h2h`,
+tune-timed, `laion30m`, the N-sweep, `seeds-c7`, the C6 ceiling checks;
+`bloomwidth` for C4. Meta's code as published (`official`, `-O3`) runs
+beside it only in the cells that feed T3 and the parity spill (`h2h`,
+`codesign`). LiNR cells are not rerun, except as the interleaved partner
+of item 5. The study's cells run the int32 score path with the exact recheck of
+bloom survivors on (C13); fp16 only as a reported variant where cheap
+([decisions](decisions.md#goal-and-scheduling)).
+Recall targets reported: 0.90 and 0.95, 0.99 a stretch (user,
+2026-10-11).
+
+The grid extension the user approved (2026-10-11; plan
+`.chains/results-draft/2026-10-11-163000000-grid-plan.md`) folds in here:
+it changes which cells run, not the number of legs. Why: at one tuned
+point SilverTorch's recall swings across filters and k, and the 10 M rows
+stop short of 0.95 (results draft, provisional).
+
+1. **Per-filter probe curves**: every filter sweep (real and synth),
+   `n_probe` doubling from 8 to the cap `n_lists` / 4, k 100 and 1000,
+   bs 1 / 16, in place of the fixed probe sets; the tuned point is
+   reported with the recall each filter gets
+   ([decisions](decisions.md#campaign-v2-user-2026-10-08), operating point).
+2. **Enough clusters at 10-30 M** (user, 2026-10-11): PubMed, YFCC and
+   LAION 10 M and LAION 30 M at `n_lists` {4096, 16384, 65536}, `n_probe`
+   doubling to the cap `n_lists` / 4, with the k 1000 check per `n_lists`
+   (whether the adapted top-k lifts the `n_probe` ≤ 1024 limit at k 1000
+   that forced 4096 lists; where it does not, k 1000 stays at the largest
+   `n_lists` that runs and the paper says so). The tuned point per size is
+   picked from this sweep.
+3. **The adapted code on the LAION N-sweep** (laion1m / 3m / 10m / 30m,
+   d256; real `c0_domain`, `tags4` and the synth rates) with one `n_lists`
+   rule across N (≈ 4√N to a power of two) and item 1's curves: the
+   paper's N axis.
+4. **Time the released configuration**: the shipped bloom default
+   (configured width C12 + exact recheck C13, decided) is what the paper's
+   SilverTorch bloom numbers use; Meta's semantics stay only in the "as
+   published vs adapted" table.
+5. **Interleaved SilverTorch vs LiNR**: SilverTorch and LiNR (V1, V2, the
+   best per cell) interleaved in one process per cell group (ABAB rounds,
+   as `seeds-c1`), so every SilverTorch / LiNR ratio has a paired CI.
+
+- Size it first from the final pass's per-cell wall times (the method of
+  [F-REPRO sizing](artifacts/f-repro/README.md)), then a recipe of legs per
+  GPU like [campaign-final](artifacts/campaign-final/README.md).
+- After each leg: `bench upload --verify`, a [hub-index](artifacts/hub-index.md)
+  row, the validation row; then rebuild the results draft
+  (its `build_results.py` under the results-draft artifacts, on
+  `dev/results-draft`).
+
+*Gate*: every planned cell `ok`; eager-vs-graph ids equal on every
+adapted cell; the int32 cells' scores `torch.equal` to the published code
+where both ran. *Estimate*: not sized yet.
+
+### 2b. GRID-EXT: small legs after the rerun
+
+Needs 2. Items 6-10 of the grid plan, each a small separate leg, both
+families (adapted SilverTorch, LiNR on Triton):
+
+6. **bs 64** (and 256 where LiNR fits at 10 M) on the real filters and the
+   LAION sweep.
+7. **LiNR V3 as a curve**: candidate pool 0.5 / 1 / 2 / 5 / 10 / 20 % on the
+   real filters and the LAION sweep, at the default bits per d: the
+   approximate-vs-approximate comparison at matched recall.
+8. **Correlated filters**: `arxiv-corr-synth` gains LiNR V1 / V2 and the
+   adapted SilverTorch.
+9. **d apart from the dataset**: one dataset at several widths (proposed
+   arXiv d 128 / 256 / 768, same N and filters); the adapted code's known
+   loss regime is wide scans at d ≥ 192.
+10. **The papers' own k**: k 2048 on a subset (LiNR reports recall@2000;
+    SilverTorch top-k 1024-4096).
+
+*Gate*: every planned cell `ok`, Hub rows, validation rows. *Estimate*:
+sized with FORK-RERUN's grid.
+
+### 3. RENAME: the adapted backend becomes SilverTorch's default
+
+Needs 2. `backend="official-fork"` becomes the default `SilverTorch`
+backend under a name decided in this step; the package, distribution and
+op-namespace names (`silvertorch_fork`, `silvertorch-fork`, `stfork`)
+likewise. Records keep the names they were written with; the report maps
+them. Every copy of the old names in `AGENTS.md`, `README.md`, `docs/`
+and `retrieve/docs/` follows (rule 4).
+
+*Gate*: library and harness suites green, Meta's suite on the renamed
+package, the compile gate, outputs `torch.equal` before / after on the
+gate grid's int32 cells (a rename changes no behaviour).
+
+### 4. TRITON-ST-DELETE: delete the Triton SilverTorch reimplementation
+
+Needs 3 (rule 5: the adapted backend is accepted and its rerun is done).
+Tag `triton-silvertorch-final` on `staging` first, then delete
+`SilverTorch`'s `backend="triton"` and `backend="torch"` paths: the
+`codesigned_probe_score*` and `bloom_full_mask` kernels and their
+`ops/reference` twins, SilverTorch-only host helpers, their parity /
+correctness / compile tests (the official parity tests re-pointed at
+adapted vs published), the harness arms and suite entries, the
+`tune-kernels` entries, and their docs (`kernels.md`'s SilverTorch kernels
+section, `architecture.md`, `filtering.md`, `testing.md`, `evaluation.md`,
+`retrieve/docs/`). What SilverTorch's other backends share stays: phase 1
+(`KMeans`, `quantize_int8*`, `csr_layout`, probe selection), the clause
+kernels, the bloom hash (LiNR's `BloomFilter`), `two_level_topk` (LiNR V1).
+LiNR's kernels stay.
+
+*Gate*: library and harness suites green, `interfaces.DISPATCH` without
+the deleted backends, `ruff`, links 0.
+
+### 5. FINAL-AGG: one parquet, D1-G, T1
+
+Needs 4 and 2b. One `results.parquet`: the adapted SilverTorch cells
+(FORK-RERUN, GRID-EXT), the new LiNR cells of GRID-EXT and item 5, and LiNR's (`campaign-final`), plus the published-code cells T3 needs; the
+manifest names, per (dataset, suite, algo, backend), the accepted subtree.
+D1-G's checks over it (eager-vs-graph ids, a byte-identical quality subset
+per leg, batch scaling, `bench report --manifest`), T1 with C1-C7 as
+re-stated in [claims](paper/claims.md), T3 as Meta as published vs adapted
+(its scorer column from `kernel_scopes`: H-SCOPE's one GPU test on a real
+call is left). **≈ 4 GPU-h** for D1-G's reruns, both GPUs.
+
+*Gate*: D1-G's four checks (the batching check as the user declared it
+for the final pass: green with its 25 listed, explained failures), 0
+manifest gaps.
+
+### 6. The paper
+
+Needs 5.
+
+- [ ] **F2: the "Meta as published vs adapted" section** from T3 and the
+  META-FORK gates, with CIs and paired tests
+  ([paper](paper/meta-published-vs-adapted.md)).
 - [ ] **F4: package the artifacts**: the results public, the PubMed slice
-  or its build recipe with checksums, a tagged `torchretrieve` release, a
-  Zenodo DOI including the pinned official sdist, a one-command
-  reproduction, an anonymised mirror (anonymous.4open.science) for the
-  double-blind review. Needs D1-G and the user's accounts.
+  or its build recipe with checksums, a tagged `torchretrieve` release
+  (LiNR plus the adapted SilverTorch; the adapted code keeps Meta's
+  Apache-2.0 licence and headers), a Zenodo DOI including the adapted
+  source and Meta's pinned sdist, a one-command reproduction, an
+  anonymised mirror (anonymous.4open.science) for the double-blind review.
+  Needs the user's accounts and the release decisions.
 - [ ] **F5: write the paper** (ECIR 2027 reproducibility format, 12 pages
   LNCS): every table from `bench report`, the `docs/paper/` drafts
-  rewritten against claims C1-C7 (they still cite retired plan labels).
-  Needs everything above.
+  rewritten against C1-C7 as re-stated, against the
+  [ECIR criteria](paper/ecir-criteria.md).
 
-## Estimates
+### 7. AFTER-QUEUE: sharpen the figures the paper leads with
 
-| step | A100 GPU-h | GPU | basis |
-|---|---|---|---|
-| M1 | 0.5 | both | |
-| EXHIBITS | 0 | CPU | after every leg |
-| V-AX-CORR | ≈ 3 | 0 | 3 points, arXiv |
-| V-V3BITS | ≈ 1-2 | 0 | goodreads |
-| D3 bloomwidth | ≈ 3-5 | 1 (+0) | quality-only cells |
-| V-AX-SYNTH | ≈ 15-45 | 0 | Triton ~2,000 s per pass point; V1/V2 torch at 3 points ×3 seeds is most of it |
-| V-GR-DEEP | ≈ 3-6 | 0/1 | ~210 cells at ~50 s (`d1/arxiv-deep`: 873 cells in 36 h at 3 M) |
-| V-YFCC | ≈ 31-54 | 0/1 | V1 / V2 / V3 cells 0.3-1.2 h each at the v2 grid; V2/V3 cost vs p at 10 M unmeasured |
-| V-SEEDS | ≈ 8-12 | 0 | YFCC seeds 1-2: V2 and V3 ~1.1 h a cell |
-| V-PUBMED | ≈ 20-25 | 0 (+1 for the checks) | V1 ~650 s, V2 ~1,300 s, SilverTorch-Triton ~700 s a cell; 3 sweeps × 3 seeds |
-| V-LAION30 | ≈ 10-15 (+1.5 encode) | 0/1 | scaled from PubMed 10 M; 30 M d256 |
-| D1-G | ≈ 4 | both | |
-
-Total ≈ 130-250 GPU-h, against the re-plan's 70-90: the 10 M exact arms
-and the torch arms were underestimated there (see "Needs the user"). The
-SilverTorch/Triton perf-only rerun the re-plan held in reserve costs
-0 GPU-h: the CSR probe layout and transposed bloom predate `72e5a90`, and
-the one later library change (per-width probe tiles) moves tiles only at
-`D_PAD > 256` ([validation](validation.md#library-gates), *Probe-scorer
-tile per width*).
+Beside 6, GPU only for cells a figure needs (user, 2026-10-11: once the
+planned work is done, more experiments and deeper sweeps, close to what
+the paper needs): F1 / F2 at 10 M and 30 M with the low and middle pass
+rates (0.001, 0.003, 0.03, 0.05) on uniform synth, the probe curve at 30 M
+(n_probe 64 / 256), seeds 0-2 on the cells a T2 confidence interval rests
+on. SilverTorch on the adapted backend, LiNR on Triton; no Triton
+SilverTorch work.
 
 ## Dependencies
 
 ```
-tag campaign-v2 ───────────────────────┬─> V-PILOT ─┬─> V-AX-SYNTH, V-YFCC ─> V-SEEDS ─┐
-                                       │            └─> V-GR-DEEP ─────────────────────────┤
-                                       ├─> V-CODESIGN, D3 ─────────────────────┤
-                                       └─> V-PUBMED ───────────────────────────────────────┴─> D1-G ─> F2, F4, F5
-M1: before any timed step on a multi-GPU pod
-tag campaign-v2.1 and IVF-TUNE (both done): before every timed V-AX-SYNTH, V-YFCC, V-PUBMED, V-SEEDS cell
+paper abstract (paper-draft) ─┐
+1 META-FORK ─> tag campaign-fork, merge ─┴─> 2 FORK-RERUN ─┬─> 3 RENAME ─> 4 TRITON-ST-DELETE ─┬─> 5 FINAL-AGG ─> 6 F2, F4, F5
+                                                           └─> 2b GRID-EXT ────────────────────┘                └─> 7 AFTER-QUEUE (beside 6)
+Needs the user: release decisions before F4
 ```

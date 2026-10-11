@@ -17,6 +17,11 @@
 > from the C4 numbers** ([H WP-4's amendment block](../validation.md#harness-gates)).
 > §6 lists what is not yet validated and the roadmap step each item waits on
 > (CLAUDE.md rule 2).
+>
+> **The study** ([decisions](../decisions.md#goal-and-scheduling)): Meta's
+> official SilverTorch code, adapted by us, against LiNR V1–V3. Our Triton
+> SilverTorch reimplementation is out of the paper; where this page reports
+> a check that involved it (§5), the check is history.
 
 ## 1. Hardware
 
@@ -47,7 +52,8 @@ datasets.
 | Triton | **3.6.0** |
 | CUDA toolkit on the box | **12.4 only** — `nvcc 12.4` at `/usr/local/cuda`. There is no 12.8 toolkit here; earlier notes claiming a 12.8 build are stale and were corrected on 2026-09-15 |
 | toolkit / wheel mismatch | building a C++/CUDA extension with nvcc 12.4 against the cu128 wheel is a **minor** version mismatch: torch warns (`cpp_extension.py: minor version mismatch`) and builds. It raises only on a *major* mismatch, and every CUDA test the upstream package ships passes on the resulting extension |
-| Meta's SilverTorch | `silvertorch` **1.0.0** at commit **`21aa35e28b6dd9a91e9ee35efb0857715e86bda7`** (`meta-recsys/silvertorch`, Apache-2.0), installed through the repo's `official` extra. Build: **2 m 17 s**, `ninja`, 10 translation units, `TORCH_CUDA_ARCH_LIST="8.0"`, `MAX_JOBS=32` |
+| Meta's SilverTorch, adapted (the study's arm) | the `official-fork/` workspace member (`silvertorch-fork`, ops `torch.ops.stfork.*`): Meta's code vendored at `21aa35e`, synced to upstream `22c2007`, with our changes listed in its `CHANGES.md`; built `-O3`; on `dev/meta-fork` until its review accepts ([meta-published-vs-adapted](meta-published-vs-adapted.md)) |
+| Meta's SilverTorch as published (the parity reference) | `silvertorch` **1.0.0** at commit **`21aa35e28b6dd9a91e9ee35efb0857715e86bda7`** (`meta-recsys/silvertorch`, Apache-2.0), installed through the repo's `official` extra. Build: **2 m 17 s**, `ninja`, 10 translation units, `TORCH_CUDA_ARCH_LIST="8.0"`, `MAX_JOBS=32` |
 | linter | `ruff` **0.15.6** |
 | environment manager | one `uv` workspace, one lockfile. **`uv sync --extra official --all-packages`** — the plain `--extra official` at the workspace root *uninstalls* `pytest`, which lives in the members' `dev` groups |
 | our code | the library is pinned per record by `env.code_version`, the **git tree hash of `retrieve/src/retrieve`**, alongside `env.commit`, `env.git_branch` and two dirtiness flags (§3) |
@@ -175,16 +181,18 @@ reports:
   cell, no duplicate and no recomputation);
 - cross-backend parity: SilverTorch `torch` vs `triton` **exactly 1.0**
   `jaccard@100` with `score_max_abs_diff 0.0` on both datasets and both probe
-  widths;
+  widths (both backends of the Triton reimplementation, now out of the study);
 - Meta's official kernels end to end on goodreads at `jaccard@100` **0.999849**
   (probe 24) / **0.999805** (probe 32) against our Triton, with the expression
-  plan cache **off** so the per-forward parse is paid.
+  plan cache **off** so the per-forward parse is paid (history: the study's
+  parity gate is the adapted code against Meta's code as published,
+  [meta-published-vs-adapted §3](meta-published-vs-adapted.md#3-the-parity-gate)).
 
 Two things that arm did **not** establish, stated rather than buried: the
 official arm reaches only **0.985** on arXiv — since explained by roadmap B3 as
 fp16 resolution against arXiv's score distribution rather than a filter effect,
 costing 3.1e-4 recall@100
-([official-vs-reimplementation.md](official-vs-reimplementation.md) §6.1) — and
+([O §16.4](../artifacts/official-silvertorch/b3/tables.md)) — and
 the LiNR V2 backend divergence, which turned out to be a real precision defect
 in our own kernel (see
 [reproduction-deviations.md](reproduction-deviations.md) §7 D-1).
@@ -201,21 +209,12 @@ the item is not paper material (CLAUDE.md rule 2).
 
 | item | waits on |
 |---|---|
-| ~~any Triton-vs-official **kernel or end-to-end speed** comparison~~ — **B3's gate passed 2026-09-15**; the comparison, with its own limits, is [official-vs-reimplementation.md](official-vs-reimplementation.md) | done |
-| confidence intervals, paired tests and a second seed behind **any** of B3's ratios | **D1-b** |
-| every quality, latency, memory, QPS and pass-rate table in the paper | **D1**, then **D4** |
-| fp32 accumulation in `fused_masked_knn_topk`, the reduction-width audit across every Triton kernel, and the fp64-oracle parity file that would have caught the class | **L5** |
-| multi-seed cells, bootstrap CIs, paired tests for every "A is faster than B" sentence | **D1** (gap G4) |
-| mean / p95 / p99 latency, per-query latency vectors, closed- and open-loop QPS under a P99 budget | **D1** (gap G3) |
-| external baselines at matched recall (Faiss GPU/CPU, HNSW, cuBLAS floor; then cuVS, filtered-graph CPU indexes) | out of the study: model-based retrieval compares ops that run inside a model graph, and these are standalone ANN services ([backlog](../backlog.md#baselines-outside-the-study)); the baseline is generic torch plus the torch-importable arms ([decisions](../decisions.md#campaign-v2-user-2026-10-08)) (gaps G5, G13, G14) |
-| bloom false-positive rate and memory against filter width on **real** attributes, for our bloom and Meta's | **D3** (gap G6) |
-| the SilverTorch co-design ablation (full mask → IVF vs fused partial bloom) as scratch memory and latency vs probe count | roadmap V-CODESIGN (campaign v2) |
-| the LiNR V1/V2 pass-rate crossover and the liquidity curve on a controlled sweep | the `synth` suite, campaign v2 (gap G11) |
-| the V3 bit-width sweep and the "keep 1 %" operating point | **G-b** (gap G15) |
-| a Triton transposed bloom index, and any claim about the paper's transposed-index win in current code | **G-a** |
-| scale beyond 5.4 M items (10 M real, synthetic ladder, the 240 M and 1 B stress points) | **G-b** (gap G10); the large datasets are **E2**–**E4**, deferred on disk |
-| the YFCC-10M and PubMed cells under the final grid | campaign v2 ([roadmap](../roadmap.md)); Semantic Scholar, OpenAlex and KuaiRand are out of the study |
-| the packaged artifact: tagged release, Zenodo DOI including the pinned official sdist, HF data and oracles, one-command reproduction | **F4** |
+| the adapted SilverTorch code: parity with Meta's code as published, host syncs, capture, its speed | roadmap **META-FORK** (review ACCEPT), then T3 from **FORK-RERUN** |
+| every SilverTorch quality and latency number in the paper | **FORK-RERUN** on the adapted backend; the final pass's Triton SilverTorch records are not paper material |
+| every LiNR number | the final pass (`campaign-final`), declared by **D1-G** in **FINAL-AGG** (the batching check's 25 failures are the user's call) |
+| confidence intervals and paired tests behind every "A is faster than B" | seeds and interleaved rounds in the final pass and FORK-RERUN (item 5: SilverTorch and LiNR interleaved) |
+| external baselines at matched recall (Faiss GPU/CPU, HNSW, cuBLAS floor; cuVS, filtered-graph CPU indexes) | out of the study: model-based retrieval compares ops that run inside a model graph, and these are standalone ANN services ([backlog](../backlog.md#baselines-outside-the-study)); the baseline is generic torch plus the torch-importable arms ([decisions](../decisions.md#campaign-v2-user-2026-10-08)) |
+| the packaged artifact: tagged release, Zenodo DOI with the adapted source and Meta's pinned sdist, HF data and oracles, one-command reproduction | **F4** |
 
 ## 7. Data provenance
 

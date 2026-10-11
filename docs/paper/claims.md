@@ -1,7 +1,7 @@
 ---
 title: claims
 created: 2026-10-08
-updated: 2026-10-08
+updated: 2026-10-11
 type: summary
 tags: [paper]
 sources: [arXiv:2407.13218v3, arXiv:2511.14881v5, docs/validation.md, docs/roadmap.md]
@@ -10,7 +10,10 @@ sources: [arXiv:2407.13218v3, arXiv:2511.14881v5, docs/validation.md, docs/roadm
 # The papers' quantitative claims, and what tests them
 
 Every quantitative claim of the two papers we reproduce, with its section
-and figure or table, then the claim-to-evidence matrix C1-C7 that drives
+and figure or table, then the claim-to-evidence matrix C1-C7, re-stated for
+the study: Meta's official SilverTorch code, adapted by us, against LiNR
+V1-V3 ([decisions](../decisions.md#goal-and-scheduling)); our Triton
+SilverTorch reimplementation is not in it. The matrix drives
 the campaign ([decisions](../decisions.md#campaign-v2-user-2026-10-08):
 claims drive cells). Read from the arXiv versions — LiNR
 **arXiv:2407.13218v3** (CIKM '24) and SilverTorch **arXiv:2511.14881v5**
@@ -58,31 +61,42 @@ reproducible and are listed so the paper can say so.
 | S-11 | Co-design at 20 M × 128: scratch **35.6 MB → 18.2 MB** at probe 32 (bloom scratch 18.2 → 0.14 MB), latency **1.55 → 0.72 ms**; **1.79-2.15×** latency improvement on average | §6.2.3, Figure 9 | yes: **C5** |
 | S-12 | Co-design at 81 M items, 9,000 clusters, 256 probes: only 2.3 M items (2.8 %) processed, **30×** less filtering compute and scratch | §4.3 | the ratio is arithmetic on cluster sizes; checkable on our indexes |
 | S-13 | Probe-then-filter and filter-then-probe give identical recall for a given number of probes | §4.3, §7 | yes: bit-exact by construction (library gate, [validation](../validation.md)) |
-| S-14 | The transposed bloom layout lets one 64-bit AND match 64 items; 40 M items → 625,000 partitions | §4.1, Figure 4 | the layout is ours too (TF-1); its N-scaling is **C4** |
+| S-14 | The transposed bloom layout lets one 64-bit AND match 64 items; 40 M items → 625,000 partitions | §4.1, Figure 4 | not on the study's arm: Meta's released code builds a per-2048-doc bundle bloom, not this layout ([OF-1](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper)); our transposed layout was in the Triton reimplementation, out of the study. Stated as a paper-vs-code finding |
 | S-15 | Recall with OverArch + Value Model: E-Task +2.4-35.5 %, C-Task +1.12-3 %; QPS 1210 → 771 | §6.2.4, Table 3 | no (models) |
 | S-16 | Selective filters may need more probes ("an inherent property of IVF-based search"; recommendation filters are broad) | §7 | yes: **C6** on the synth axis (n95 vs p) |
 
 ## Claim-to-evidence matrix
 
 "Exhibit" names the paper's planned tables and figures (T1 claims, T2
-real-filter headline, T3 official vs Triton, F1 latency vs pass rate, F2
-recall vs pass rate, F3 Pareto, F4a bloom FPR/memory, F4b co-design).
-"Reusable records" are judged by the reuse rule
-([decisions](../decisions.md#campaign-v2-user-2026-10-08)) from the record
-inventory ([artifact](../artifacts/campaign-v2/README.md)); "status so
-far" is read from [validation](../validation.md) and is NOT CITABLE.
+real-filter headline, T3 Meta as published vs adapted, F1 latency vs pass
+rate, F2 recall vs pass rate, F3 Pareto, F4a bloom FPR/memory, F4b
+co-design). Each claim is re-stated for the study and marked **keep**
+(unchanged), **change** (its SilverTorch half moves to the adapted code, or
+its subject changes) or **drop**. "Runs" names what feeds it: LiNR from the
+final pass (`campaign-final`, not rerun), SilverTorch from the adapted
+backend's rerun (roadmap
+[FORK-RERUN](../roadmap.md#2-fork-rerun-every-silvertorch-cell-on-the-adapted-backend)).
+Records of our Triton SilverTorch feed no claim. "Status so far" is read
+from [validation](../validation.md) (the final pass's EXHIBITS and D1-G rows,
+the META-FORK gates) and is **NOT CITABLE**; no number here is new.
 
-| id | claim (original) | exhibit | cells (suite · datasets · arms · params) | reusable records | missing (roadmap step) | status so far |
-|---|---|---|---|---|---|---|
-| C1 | LiNR V1 beats V2 at high pass rate, V2 wins at low (L-3, L-4, L-5) | F1, T1 row | `synth` · goodreads, arXiv, YFCC · V1, V2 triton, bs {1, 16}, k {100, 1000}, 7 (YFCC 5) pass rates, 3 seeds, V1-vs-V2 interleaved | none (no controlled pass-rate axis exists) | V-PILOT, V-AX-SYNTH, V-YFCC | not located; arXiv V2 0.905 ms < V1 1.520 ms at bs 1 hints that fused V2 may win everywhere (L-12's own prediction) |
-| C2 | V3 retaining ~1 % gives ~10 % speedup at near-parity recall (L-6) | F2, T1 row | `synth` V3 pool {1 %, 5 %} of passing; `deep` V3 pool {0.5, 1, 2, 5, 10 %} on goodreads, arXiv, YFCC | none: D1's arXiv `deep` V3 cells ran absolute pools (2k-32k), which no v2 cell (`candidate_pool_frac`) keys to ([reuse](../artifacts/campaign-v2/README.md#reuse-entries)) | V-PILOT, V-AX-SYNTH, V-GR-DEEP, V-YFCC | at pool 5000, V3 recall 0.50-0.88 and slower than V2 on arXiv (1.39 vs 0.91 ms): likely not reproduced. Our V3 runs 128 bits at D 128 against LiNR's 512 ([LN-8](reproduction-deviations.md#4-linr-v1v4--deviations)), a gap in the recall half of the claim |
-| C3 | Custom filter kernel ~100× faster than native masking/indexing (L-2) | T1 row, T2 | `synth` V1/V2 torch (eager and `torch.compile`) at p {0.01, 0.1, 1.0} vs triton, goodreads and arXiv (YFCC/PubMed only if those two leave C3 ambiguous); `filter` postfilter α {1, 8}; SilverTorch torch reference at n_probe 24 | none: D1-a's torch-vs-triton ratios are on gSASRec goodreads and pre-license-fix arXiv (history) | V-PILOT, V-AX-SYNTH, V-GR-FILTER | 4.2× (V1), 7.3× (V2), 10.2× (V3) at d128: same direction, far smaller |
-| C4 | Bloom FPR ~0.067 % at 1024 bits, memory, 291-523× vs inverted index, transposed layout flat in N (S-8, S-9, S-10, S-14) | F4a | `bloomwidth` · goodreads, arXiv, PubMed `c0_mesh` · triton and official bloom · m_bits 64-2048 × k_hash {3, 5}, quality-only + one timed point per width at bs 16 | none at the new widths; `bloom_fp_rate` at 1024 on existing bloom cells (0 false positives seen) | D3 | 0 FP at 1024 bits so the sweep goes lower; transposed-index scaling reproduced with Meta's code (2.0× at 0.8 M, 6.1× at 3 M), not validated |
-| C5 | Co-design 1.79-2.15× lower latency than full mask then IVF (S-3, S-11) | F4b | `codesign` · arXiv, goodreads · official bloom, `bloom_path` {partial, full}, n_probe {8, 32, 128}, 3 sweeps, 3 seeds, interleaved | none: arXiv 60/60 at `c0e42d1`, 58 unstable, not interleaved — fails the timing half of the rule | V-CODESIGN | arXiv leg run but unstable; goodreads not run |
-| C6 | Int8 IVF with the filter in the probe kernel: high QPS, recall ceiling < 0.95 at production settings, more probes for selective filters (S-6, S-7, S-16) | F3, T2, F2 | `deep` (goodreads, arXiv, YFCC), `synth` SilverTorch clause n_probe {24, 64, 128, 256, 512, 1024} (YFCC {24, 256, 1024}) + bloom {24, 256}, `filter` n_probe {24, n95}, the PubMed `n95` probe | in the manifest: none; arXiv `deep` SilverTorch quality at `72e5a90` passes the rule on 162 cells (perf on 51) but its groups lack v2's `n_probe` 16 / 64, and a manifest `match` cannot name params ([reuse](../artifacts/campaign-v2/README.md#reuse-entries)) | V-GR-DEEP, V-YFCC, V-SEEDS, V-PUBMED | recall at n_probe 24 falls with N: 0.84 (3 M), 0.55 (YFCC), 0.67 (PubMed); Triton < 1 ms at bs 1 up to 10 M d192 |
-| C7 (ours) | Our Triton reimplementation matches official int32 bit-exactly and is faster end to end, Meta's scorer faster in isolation | T3, lessons | `h2h` · goodreads E1c, arXiv · triton, official fp16, official int32 · none + bloom, n_probe 24, interleaved, 5 repeats, `--profile`; L6 parity gate at d 64-768 | none (b3 and kernel-opt h2h are history, superseded) | CV2-LIB (L6), H2H-FINAL | b3 "citable, contested"; after CSR/transposed bloom, kernel-only bloom 0.90× (goodreads) / 1.24× (arXiv), not validated |
+| id | claim (original) | for this study | decision | why | runs | exhibit | status so far (NOT CITABLE) |
+|---|---|---|---|---|---|---|---|
+| C1 | LiNR V1 beats V2 at high pass rate, V2 wins at low (L-3, L-4, L-5) | unchanged | **keep** | LiNR only; untouched by the reframe | final pass: `synth` V1 / V2 Triton at 0.8-30 M, bs {1, 16}, seeds 0-2 on the crossover cells (`seeds-c1`) | F1, T1 | changed at campaign-v2.12: the bs 16 crossover is near p 0.017-0.026 at 0.8 / 3 / 10 / 30 M, V2's bs 16 edge at most 13 %; at bs 1 the crossover is 0.76-0.98 |
+| C2 | V3 retaining ~1 % gives ~10 % speedup at near-parity recall (L-6) | unchanged; GRID-EXT item 7 adds V3 as a pool curve against SilverTorch at matched recall | **keep** | LiNR only | final pass: `synth` / `deep` V3 pools, `v3bits`, V3-BITS-PUBMED; GRID-EXT | F2, T1 | does not hold so far; our V3 runs at most D bits against LiNR's 512 at d128 ([LN-8](reproduction-deviations.md#4-linr-v1v4--deviations)) |
+| C3 | Custom filter kernel ~100× faster than native masking / indexing (L-2) | LiNR's custom filter kernels (Triton) against native torch masking (eager and `torch.compile`) | **change** | the SilverTorch torch-reference arm leaves with the Triton reimplementation; LiNR's torch arms carry the claim alone | final pass: V1 / V2 torch vs Triton on `synth`, C3 coverage on real filters, the postfilter | T1, T2 | does not hold: same direction, far smaller than ~100× |
+| C4 | Bloom FPR ~0.067 % at 1024 bits, memory, 291-523× vs inverted index, transposed layout flat in N (S-8, S-9, S-10, S-14) | the adapted SilverTorch bloom's FPR, memory and recall against width (configured width C12, recheck C13), beside Meta's bloom as published; the transposed-layout half is not testable on the study's arm (S-14) | **change** | Meta's published bloom ignores `m_bits` (OF-10) and admits bundle false positives (OF-12); the adaptation changes both, so the width curve must come from the adapted code | META-FORK gate R; FORK-RERUN `bloomwidth`; Meta-as-published D3 records for the "as published" column | F4a | Meta's published bloom: false positives in the results at 30 M (OF-12), width not followed (OF-10); the adapted bloom: gate R running |
+| C5 | Co-design 1.79-2.15× lower latency than full mask then IVF (S-3, S-11) | partial (co-designed) vs full mask on the adapted backend, beside Meta's code as published | **change** | the Triton "ours" half (C5-OURS) leaves; the adapted code builds the partial mask inside its payload kernels (C8), so the published code's host-bound partial path is no longer the only answer | FORK-RERUN `codesign` (adapted and published, interleaved) incl. 30 M | F4b | Meta's code as published (`-O3`): full / partial above 1 at 30 M (the co-design wins), reversed below 30 M; the adapted code not yet timed |
+| C6 | Int8 IVF with the filter in the probe kernel: high QPS, recall ceiling < 0.95 at production settings, more probes for selective filters (S-6, S-7, S-16) | the same, on the adapted code, reported at the tuned point per dataset size with per-filter probe curves (FORK-RERUN items 1-3) | **change** (arm only) | the int32 path is bit-exact with Meta's published one, so recall cannot differ by implementation; the numbers still come from the adapted rerun | FORK-RERUN `deep`, `synth`, `filter`, ceiling checks, the LAION N-sweep | F3, T2, F2 | holds (recall ceiling below 0.95 at the cap at 10 M; more probes for selective filters), on the Triton records; to be re-read on the adapted code |
+| C7 (ours) | Our Triton reimplementation matches official int32 bit-exactly and is faster end to end; Meta's scorer faster in isolation | Meta's official code, adapted, is bit-exact with the code as published (int32, fp16) except where a change alters the bloom on purpose, captures in a CUDA graph, and is faster than the published code (`-O3`) end to end | **change** | the subject was our Triton reimplementation, which is out of the study; the comparison that remains is Meta as published vs adapted ([page](meta-published-vs-adapted.md)) | META-FORK gates (X, R, S, capture, compile); FORK-RERUN `h2h` (adapted vs published, interleaved, both score paths) | T3 | X: every cell of the ≤ 10 M gate grid `torch.equal` (hub-index `artifacts/meta-fork/head-82fafb6`); faster than the published `-O3` code on that grid; review pending |
+
+**The study's own comparison.** SilverTorch (adapted) against LiNR is not a
+claim of either paper; it is what the exhibits show side by side: T2 (real
+filters), F1 / F2 (pass rate), F3 (recall-latency Pareto at the tuned point
+per dataset size, [decisions](../decisions.md#campaign-v2-user-2026-10-08)),
+with paired CIs from FORK-RERUN item 5 (interleaved SilverTorch vs LiNR).
 
 Claims marked "no" above enter T1 as *untestable* with the reason, so the
 table covers the papers whole. Every planned cell of the
-[roadmap](../roadmap.md) maps to one of C1-C7; a cell that maps to none
-leaves it.
+[roadmap](../roadmap.md) maps to one of C1-C7 or to the study's own
+comparison; a cell that maps to none leaves it.

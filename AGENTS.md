@@ -7,23 +7,40 @@ behind an open dependency.
 
 ## What this is
 
-`retrieve/` is a GPU retrieval library (PyTorch + Triton; package name
-`torchretrieve`, not yet on PyPI; imports as `retrieve`) that reimplements two industry
-papers — SilverTorch (Meta, `articles/silvertorch.md`) and LiNR (LinkedIn,
-`articles/linr.md`) — from their text. `evaluation/` is the benchmark and
+`retrieve/` is a GPU retrieval library (PyTorch + Triton; on PyPI as
+`torchretrieve`, imports as `retrieve`). `evaluation/` is the benchmark and
 training harness that produces the numbers for a master's thesis
 (its sources are kept out of this repository) and, now, a reproducibility paper
-([`docs/decisions.md`](docs/decisions.md)). It is a uv
+([`docs/decisions.md`](docs/decisions.md#goal-and-scheduling)). It is a uv
 workspace with one `.venv` at the root; `README.md` has the layout and the
 install commands.
 
-Naming that must stay straight in code, docs and prose: our `SilverTorch`
-layer is *SilverTorch Algorithm 1 reimplemented* (in the thesis it was
-called QuantizedIVF — retired 2026-09-15 in the thesis and `docs/paper/`;
-the already-delivered defense talk still says it and stays that way); `meta-recsys/silvertorch`
-is Meta's *official* code and, once integrated, `backend="official"`; the
-LiNR variants are V1–V3 as in the paper (our int8 V4 leaves the
-library in campaign v2; [decisions](docs/decisions.md#campaign-v2-user-2026-10-08)).
+**The study** (user, 2026-10-11): SilverTorch (Meta,
+`articles/silvertorch.md`) as **Meta's official SilverTorch code, adapted**
+— `meta-recsys/silvertorch` with our listed improvements, each gated —
+against **LiNR** (LinkedIn, `articles/linr.md`) V1–V3, which we implement
+from the paper's text. That comparison is the paper and the released code.
+
+Naming that must stay straight in code, docs and prose:
+- **The adapted official code** lives in the `official-fork/` workspace
+  member (package `silvertorch_fork`, `backend="official-fork"`, changes in
+  its `CHANGES.md`; on `dev/meta-fork` until the META-FORK review accepts).
+  Those code names stay until the roadmap's RENAME step; in the paper and
+  user docs it is "Meta's official SilverTorch code, adapted (improvements
+  listed in CHANGES)", never "a fork".
+- **Meta's code as published** is `backend="official"`, pinned `21aa35e`:
+  the bit-exact parity reference and the "as published" column of
+  [Meta as published vs adapted](docs/paper/meta-published-vs-adapted.md),
+  not an arm of the study.
+- **Our Triton SilverTorch reimplementation** (`SilverTorch(backend="triton")`
+  and its `backend="torch"` reference: SilverTorch Algorithm 1
+  reimplemented, called QuantizedIVF in the thesis — retired 2026-09-15 in
+  the thesis and `docs/paper/`; the already-delivered defense talk still
+  says it and stays that way) is **out of the paper and out of the
+  released code**. It stays in the repository, recorded and unused, until
+  the roadmap deletes it (rule 5); its records are never cited.
+- **LiNR** variants are V1–V3 as in the paper (our int8 V4 left the
+  library in campaign v2; [decisions](docs/decisions.md#campaign-v2-user-2026-10-08)).
 
 ## Where things are documented
 
@@ -59,14 +76,18 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
 - `retrieve/docs/`: the library user guide that ships in the sdist.
 - `docs/paper/`: the reproducibility paper's own sections, each number
   traced to [`validation.md`](docs/validation.md) or an artifact:
+  [`claims.md`](docs/paper/claims.md) (the papers' claims and C1–C7 for
+  this study),
   [`reproduction-deviations.md`](docs/paper/reproduction-deviations.md) (paper
   vs us, Meta's code vs Meta's paper, defects reproducing found in our own
-  code, and the unexplained residuals) and
+  code, and the unexplained residuals),
+  [`meta-published-vs-adapted.md`](docs/paper/meta-published-vs-adapted.md)
+  (what our adaptation of Meta's code changed, and the parity gate that
+  holds it to the published code),
   [`provenance-and-disclosure.md`](docs/paper/provenance-and-disclosure.md)
-  (hardware, software, what may be cited, what was and was not compared) and
-  [`official-vs-reimplementation.md`](docs/paper/official-vs-reimplementation.md)
-  (Meta's kernels against ours: end to end, kernel-only, phase 2, parity,
-  memory, and what the comparison cannot say).
+  (hardware, software, what may be cited, what was and was not compared),
+  [`ecir-criteria.md`](docs/paper/ecir-criteria.md) and
+  [`release-and-licenses.md`](docs/paper/release-and-licenses.md).
 - `articles/`: pandoc renderings of the papers. Frozen; cite, never edit.
   Gitignored, not shipped in git (likely copyrighted third-party text) —
   present on a working box, but a fresh clone won't have it; citations to
@@ -114,7 +135,10 @@ lists every page; [`docs/SCHEMA.md`](docs/SCHEMA.md) holds the conventions
 5. **Deletion is gated.** Never delete a kernel that still has no
    validated replacement. The model: the two hand-written SilverTorch
    backends went at roadmap B4 only after the official backend's parity
-   gate (B2) was green; tag `cuda-cute-backends-final` holds them.
+   gate (B2) was green; tag `cuda-cute-backends-final` holds them. The
+   Triton SilverTorch backend goes the same way, after the adapted
+   official backend's review ACCEPT and rerun, behind the tag
+   `triton-silvertorch-final` ([roadmap](docs/roadmap.md)).
 6. **Commits and branches.** Commit only when the user asks. One branch per
    roadmap step (`dev/<step>`) off `staging`. Session scripts go under
    `docs/artifacts/<plan>/`, not in the packages; raw outputs (records,
