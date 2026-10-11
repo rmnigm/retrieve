@@ -63,6 +63,7 @@ How the code works today. Code comments cite these pages by section.
   [official vs reimplementation](paper/official-vs-reimplementation.md),
   [claims](paper/claims.md),
   [results draft](paper/results.md),
+  [abstract draft](paper/abstract.md),
   [ECIR criteria](paper/ecir-criteria.md),
   [release and licenses](paper/release-and-licenses.md)).
 - [artifacts/](artifacts/): raw scripts behind measured numbers, one
