@@ -176,6 +176,12 @@ class SilverTorch(RetrievalModule):
             official_mod.ensure_loaded(backend)
             ops_for("triton")  # exact mode packs our clause_mask into the official bit mask
         self.official: OfficialConfig = official if official is not None else OFFICIAL_DEFAULT
+        if backend == "official-fork" and self.official.bloom_path == "full":
+            raise ValueError(
+                "OfficialConfig(bloom_path='full') does not apply to backend='official-fork': the "
+                "fork evaluates the bloom over the probed columns on both paths (kernels.md § "
+                "official-fork, K fix 17); the full-N ablation is backend='official'"
+            )
 
         if filter_mode == "bloom":
             # On the official backend the bloom width comes from OfficialConfig.b_multiplier,
@@ -656,10 +662,9 @@ class SilverTorch(RetrievalModule):
     ) -> tuple[Tensor, Tensor]:
         """Phases 2+3 on our fork of Meta's ops in one ``torch.ops.stfork.search`` call
         (kernels.md § official-fork): ``bloom`` → the plans ``prepare_queries`` put on the device,
-        evaluated over the probed clusters for either ``OfficialConfig.bloom_path`` (the full
-        path's result is the same), its survivors rechecked exactly unless
-        ``OfficialConfig.recheck`` is off; ``exact`` → the clauses tested over the probed docs
-        inside the fork."""
+        evaluated over the probed clusters (``OfficialConfig.bloom_path`` is ``partial`` only),
+        its survivors rechecked exactly unless ``OfficialConfig.recheck`` is off; ``exact`` → the
+        clauses tested over the probed docs inside the fork."""
         probe_ids = self._phase1_probe_ids(query)
         cfg = self.official
         exact = None

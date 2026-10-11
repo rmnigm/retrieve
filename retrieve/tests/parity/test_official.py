@@ -686,15 +686,14 @@ def test_c12_fork_configured_bloom_width():
         OfficialConfig(bloom_width="configured").width_for("official")
 
 
-@pytest.mark.parametrize("bloom_path", ["partial", "full"])
-def test_c13_fork_recheck_equals_exact(data, bloom_path, record_property):
+def test_c13_fork_recheck_equals_exact(data, record_property):
     """META-FORK C13: the fork's bloom with its survivors rechecked (``OfficialConfig.recheck``,
     the fork's default) returns the exact filter's result on the same index: ids and scores
     ``torch.equal`` up to ties to the fork's own exact path and to Triton's exact path at int32,
     with no false positive; without the recheck, the bloom's false positives are recorded."""
     if OB != "official-fork":
         pytest.skip("fork-only gate (META-FORK C13)")
-    cfg = {"score_path": "int32", "bloom_path": bloom_path, "n_stored_hashes": HASH_K}
+    cfg = {"score_path": "int32", "n_stored_hashes": HASH_K}
     tri = _layer(data, "triton", "exact")
     exact = _layer(data, OB, "exact", official=OfficialConfig(score_path="int32"))
     rechecked = _layer(data, OB, "bloom", official=OfficialConfig(**cfg), m_bits=64)
@@ -709,7 +708,7 @@ def test_c13_fork_recheck_equals_exact(data, bloom_path, record_property):
     passing = clause_subset_match(data["attrs"][ids.clamp_min(0)], qa, tri.clause_is_reverse)
     fp = int(((ids >= 0) & ~passing).sum())
     record_property("bloom_m64_false_positives_without_recheck", fp)
-    print(f"C13 {bloom_path}: {fp} false positives at m_bits 64 without the recheck, 0 with it")
+    print(f"C13: {fp} false positives at m_bits 64 without the recheck, 0 with it")
 
 
 @pytest.mark.parametrize("d", [128, 192, 768])
@@ -892,7 +891,12 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
     """Official bloom through the layer (their hash, ``m_bits=None``): the result is the
     exact-mode Triton result on the same index up to bloom false positives — every
     returned id that passes the exact predicate is in Triton's exact top-K (or tied at its
-    boundary), and the two bloom paths (partial vs full mask) agree bit for bit."""
+    boundary), and the two bloom paths (partial vs full mask) agree bit for bit. The fork has
+    one path and refuses ``bloom_path="full"``."""
+    if OB == "official-fork" and bloom_path == "full":
+        with pytest.raises(ValueError, match="does not apply to backend='official-fork'"):
+            _layer(data, OB, "bloom", official=OfficialConfig(bloom_path="full"))
+        return
     cfg = OfficialConfig(
         score_path="int32", bloom_path=bloom_path, b_multiplier=B_MULT, n_stored_hashes=HASH_K
     )
@@ -1133,8 +1137,11 @@ def test_t7_layer_forward_sync_count(data, record_property):
         "bloom[partial]": _layer(
             data, OB, "bloom", official=OfficialConfig(bloom_path="partial", **cfg)
         ),
-        "bloom[full]": _layer(data, OB, "bloom", official=OfficialConfig(bloom_path="full", **cfg)),
     }
+    if OB == "official":
+        modules["bloom[full]"] = _layer(
+            data, OB, "bloom", official=OfficialConfig(bloom_path="full", **cfg)
+        )
     for name, module in modules.items():
         prepared = None if name == "none" else module.prepare_queries(data["q_attrs"])
         module(data["query"], prepared)  # warm-up: first-call lazy work is not the steady state

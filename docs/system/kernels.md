@@ -1841,11 +1841,13 @@ file. `CHANGES.md` lists every change; each has its gate row in
    fp64 rounded to fp32; the scale `abs_max · fp32(1/127)`, as torch divides by a CPU scalar), and
    one block for the probed clusters' ids, lengths and offsets, the warp sizes and the scorer's
    three cumsums.
-2. **Filter, into the payloads.** Bloom (either `bloom_path`): the payload kernels evaluate the
+2. **Filter, into the payloads.** Bloom (`bloom_path="partial"` only; `SilverTorch` raises on
+   `"full"` for this backend): the payload kernels evaluate the
    prepared plan (one per distinct expression) on the ≤ 2 bloom columns a payload's docs span and
    cut the same mask bits upstream's payload kernels cut from `column_mask_response`, so no column
-   search runs; the scorer reads no other bit of Meta's full-`N` mask, so the full path returns
-   the same result without scanning all `N` (Meta's full path stays on `backend="official"`).
+   search runs; the scorer reads no other bit of Meta's full-`N` mask, so the result is the one Meta's full
+   path returns, without its scan of all `N`. A `full` label would time the same code as
+   `partial`, so the S9 / C5 partial-vs-full ablation stays on `backend="official"`.
    Each filter's full-warp and remainder payload kernels are one launch (the blocks split
    between the two), so their latencies overlap at small batches. `exact`: the clauses are
    tested over the probed docs only, one warp per 32-doc payload with `__brev(__ballot_sync(…))`

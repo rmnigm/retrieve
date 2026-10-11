@@ -23,7 +23,7 @@ and the false positives (returned ids failing the exact predicate).
 
     cd evaluation && PYTHONPATH=.:../retrieve/src:PKGS python gate_fork.py DATASET DIM MODE SWEEPS N_LISTS \
         NPROBES BSS OUT.json [--k 100,1000] [--arms fork,upstream,triton] [--graph] [--swap] [--aa] \
-        [--score-path int32|fp16] [--bloom-path partial|full]
+        [--score-path int32|fp16] [--bloom-path partial|full]   (the fork arm always runs partial)
       MODE none | exact | bloom; SWEEPS comma list of the dataset's sweeps (``-`` for none)
 """
 
@@ -135,7 +135,11 @@ def make_arm(
         else {}
     )
     cfg = (
-        OfficialConfig(score_path=score_path, bloom_path=bloom_path, **semantics)
+        OfficialConfig(
+            score_path=score_path,
+            bloom_path="partial" if backend == "official-fork" else bloom_path,
+            **semantics,
+        )
         if official
         else None
     )

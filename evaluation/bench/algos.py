@@ -82,7 +82,8 @@ def official_config(
     H2H-final arms) build params as ``OfficialConfig`` on the two official backends; ``None``
     (the library default, ``partial`` / ``fp16``) when both keys are absent or the backend is
     triton. ``bloom_path`` means something on ``silvertorch / bloom`` on official, official-fork
-    and triton (there the layer's own ``bloom_path``, C5-OURS), ``score_path`` on ``silvertorch``
+    (``partial`` only; the layer refuses ``full``) and triton (there the layer's own
+    ``bloom_path``, C5-OURS), ``score_path`` on ``silvertorch``
     on the official backends; each raises anywhere else."""
     kw = {k: params[k] for k in ("bloom_path", "score_path") if k in params}
     if not kw:

@@ -134,8 +134,8 @@ class OfficialConfig:
       over the probed clusters + ``fused_kmean_ann_with_partial_masks`` (the paper's
       co-design, default); ``"full"`` → ``bloom_index_search_batch(return_bool_mask=False)``
       over all ``N`` + ``fused_kmean_ann(filtering_bit_mask=…)`` (the S9 ablation). On
-      ``"official-fork"`` both evaluate the bloom over the probed clusters only (the full
-      path's result, without its scan of all ``N``).
+      ``"official-fork"`` only ``"partial"`` (the fork evaluates the bloom over the probed
+      clusters only; ``SilverTorch`` refuses ``"full"`` there).
     - ``b_multiplier``: bloom width per bundle = ``max_terms_per_doc · k · b_multiplier``
       bits per doc (``bloom_indexer.cpp:52-66``); must be ``> 1.0``. Matched-memory /
       matched-FPR calibration against our ``m_bits`` is roadmap D3.

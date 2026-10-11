@@ -549,7 +549,7 @@ the index. Its `query:` params (`n_probe`, `candidate_pool`,
 `set_query_params` to the built index, so `deep` is two k-means per
 `(dataset, sweep, seed)`, not ten. Putting a query param under `build:`
 (or the reverse) is a `ConfigError`. So is a param on an arm where it has
-no meaning: `bloom_path` off silvertorch / bloom / (official, official-fork, triton), `score_path` off silvertorch / (official, official-fork), `m_bits` /
+no meaning: `bloom_path` off silvertorch / bloom / (official, official-fork, triton) (on official-fork only `partial`: the layer raises on `full`), `score_path` off silvertorch / (official, official-fork), `m_bits` /
 `k_hash` off silvertorch / bloom ([bloom widths](#bloom-widths-as-build-params)),
 `compile` off a torch arm ([compiled arms](#compiled-arms)),
 `candidate_pool_frac` off `linr_v3` ([pool fractions](#pool-fractions)), and `k_bits` off

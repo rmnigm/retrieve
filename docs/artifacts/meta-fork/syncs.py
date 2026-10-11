@@ -126,6 +126,8 @@ def main():
     rows = []
     with torch.inference_mode():
         for mode, path in CELLS:
+            if path == "full" and a.backend == "official-fork":
+                continue  # the fork has one bloom path
             m = build(a.backend, mode, path, items, attrs, a.score_path)
             for bs in map(int, a.bs.split(",")):
                 q = torch.randn(bs, a.d, device=DEV, generator=g)

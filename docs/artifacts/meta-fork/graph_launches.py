@@ -115,6 +115,8 @@ def main():
     attrs = make_attrs(a.n, c=2, a_max=2)
     rows = []
     for mode, path in CELLS:
+        if path == "full" and a.backend == "official-fork":
+            continue  # the fork has one bloom path
         m = build(a.backend, mode, path, items, attrs, a.score_path)
         for bs in map(int, a.bs.split(",")):
             pool = torch.randn(N_POOL, bs, a.d, device=DEV, generator=g)
