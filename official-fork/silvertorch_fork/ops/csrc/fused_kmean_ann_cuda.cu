@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C3: no host sync in fused_kmean_ann / _with_partial_masks (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -289,6 +289,25 @@ __inline__ __device__ void store_with_direct_query(
   *indices = static_cast<int32_t>(embeddings_index);
 }
 
+// The cluster a warp slot belongs to: the first i with inclusive_cumsum[i] > w, which is
+// repeat_interleave(arange(n), cluster_warp_size)[w] without the host. Needs w < cumsum[n-1].
+__device__ __forceinline__ int32_t warp_slot_cluster(
+    const int32_t* __restrict__ inclusive_cumsum,
+    int32_t n,
+    int64_t w) {
+  int32_t lo = 0;
+  int32_t hi = n - 1;
+  while (lo < hi) {
+    int32_t mid = (lo + hi) >> 1;
+    if (inclusive_cumsum[mid] > w) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return lo;
+}
+
 __global__ void generate_cluster_warp_size(
     const int64_t* selected_cluster_lengths,
     int64_t cluster_length_size,
@@ -450,6 +469,40 @@ __global__ void generate_remaining_payload_kernel(
 
 } // namespace
 
+namespace {
+
+// Static capacities of the payload buffers (the device totals are the cumsums' last
+// elements). A row's clusters fit its max_tensor_size_per_row slots (the op's contract: its
+// writes land in [row * max, (row + 1) * max)), so a row holds at most max / 32 full warps
+// and min(31 * P, max) remainder docs.
+int64_t warp_capacity(const Tensor& cluster_ids, int64_t max_tensor_size_per_row) {
+  return cluster_ids.numel() == 0
+      ? 0
+      : cluster_ids.size(0) * (max_tensor_size_per_row / kWarpThreadCount);
+}
+
+int64_t remaining_capacity(
+    const Tensor& cluster_ids,
+    int64_t max_tensor_size_per_row) {
+  if (cluster_ids.numel() == 0) {
+    return 0;
+  }
+  return cluster_ids.size(0) *
+      std::min(
+             (kWarpThreadCount - 1) * cluster_ids.size(1),
+             max_tensor_size_per_row);
+}
+
+// The device total a payload kernel reads: an int32 cumsum's last element (nullptr when
+// empty; no kernel is launched then).
+const int32_t* last_element_ptr(const Tensor& inclusive_cumsum) {
+  return inclusive_cumsum.numel() == 0
+      ? nullptr
+      : inclusive_cumsum.const_data_ptr<int32_t>() + inclusive_cumsum.numel() - 1;
+}
+
+} // namespace
+
 std::tuple<Tensor, int64_t> generate_remaining_payload(
     const Tensor& selected_cluster_lengths,
     const Tensor& cluster_offsets,
@@ -463,7 +516,8 @@ std::tuple<Tensor, int64_t> generate_remaining_payload(
   TORCH_CHECK(cluster_warp_rounded_length_cumsum.dim() == 2);
   TORCH_CHECK(cluster_remaining_length_cumsum.dim() == 1);
 
-  int64_t remaining_docs = cluster_remaining_length_cumsum[-1].item<int32_t>();
+  int64_t remaining_docs =
+      remaining_capacity(selected_cluster_ids, max_tensor_size_per_row);
   auto remaining_payloads = at::empty(
       {remaining_docs * static_cast<int64_t>(sizeof(RemainingPayload))},
       selected_cluster_lengths.options().dtype(at::kChar),
@@ -473,7 +527,7 @@ std::tuple<Tensor, int64_t> generate_remaining_payload(
       (selected_cluster_lengths.numel() + kBlockSize - 1) / kBlockSize,
       128L * at::cuda::getCurrentDeviceProperties()->multiProcessorCount);
 
-  TORCH_DSA_KERNEL_LAUNCH(
+  MAYBE_TORCH_DSA_KERNEL_LAUNCH(
       generate_remaining_payload_kernel,
       grid_size,
       kBlockSize,
@@ -500,23 +554,24 @@ __global__ void generate_warp_payload_kernel(
     const PackedTensorAccessor64<int64_t, 1> cluster_offsets,
     const PackedTensorAccessor64<int64_t, 2> selected_cluster_ids,
     const PackedTensorAccessor32<int32_t, 2> cluster_warp_rounded_length_cumsum,
-    const int32_t* per_warp_index_in_selected_cluster_ids,
     const int32_t* cluster_warp_size_cumsum,
     const uint64_t* filtering_bitmask_ptr,
     WarpPayload* warp_payloads,
     int64_t filtering_bitmask_column,
     const uint64_t* filtering_bitmask_index_ptr,
-    int64_t total_needed_warps,
     int64_t max_tensor_size_per_row,
     TORCH_DSA_KERNEL_ARGS) {
   int64_t clusters_per_row = selected_cluster_ids.size(1);
+  int32_t n_clusters =
+      static_cast<int32_t>(selected_cluster_ids.size(0) * clusters_per_row);
+  int64_t total_needed_warps = cluster_warp_size_cumsum[n_clusters - 1];
 
   for (int64_t process_warp = blockIdx.x * blockDim.x + threadIdx.x;
        process_warp < total_needed_warps;
        process_warp += blockDim.x * gridDim.x) {
     WarpPayload warp_payload;
-    int32_t cluster_id_index =
-        per_warp_index_in_selected_cluster_ids[process_warp];
+    int32_t cluster_id_index = warp_slot_cluster(
+        cluster_warp_size_cumsum, n_clusters, process_warp);
 
     int32_t row = static_cast<int32_t>(cluster_id_index / clusters_per_row);
     int64_t cluster_ids_column = cluster_id_index % clusters_per_row;
@@ -559,7 +614,7 @@ __global__ void generate_warp_payload_kernel(
 } // namespace
 
 std::tuple<Tensor, int64_t> generate_warp_payload(
-    const Tensor& cluster_warp_size,
+    const Tensor& cluster_warp_size_cumsum,
     const Tensor& cluster_offsets,
     const Tensor& selected_cluster_ids,
     const Tensor& cluster_warp_rounded_length_cumsum,
@@ -567,24 +622,16 @@ std::tuple<Tensor, int64_t> generate_warp_payload(
     int64_t filtering_bitmask_column,
     const uint64_t* filtering_bitmask_index_ptr,
     int64_t max_tensor_size_per_row) {
-  TORCH_CHECK(cluster_warp_size.dim() == 1);
+  TORCH_CHECK(cluster_warp_size_cumsum.dim() == 1);
   TORCH_CHECK(cluster_warp_rounded_length_cumsum.dim() == 2);
-  auto per_warp_index_in_selected_cluster_ids =
-      torch::arange(
-          cluster_warp_size.numel(),
-          cluster_warp_size.options().dtype(at::kInt))
-          .repeat_interleave(cluster_warp_size);
 
-  auto cluster_warp_size_cumsum = cluster_warp_size.cumsum(
-      /*dim=*/0, /*dtype=*/at::kInt);
-
+  int64_t total_needed_warps =
+      warp_capacity(selected_cluster_ids, max_tensor_size_per_row);
   auto warp_payloads = at::empty(
-      {per_warp_index_in_selected_cluster_ids.numel() *
-       static_cast<int64_t>(sizeof(WarpPayload))},
-      per_warp_index_in_selected_cluster_ids.options().dtype(at::kChar),
+      {total_needed_warps * static_cast<int64_t>(sizeof(WarpPayload))},
+      cluster_warp_size_cumsum.options().dtype(at::kChar),
       at::MemoryFormat::Contiguous);
 
-  int64_t total_needed_warps = per_warp_index_in_selected_cluster_ids.numel();
   auto grid_size = std::min(
       (total_needed_warps + kBlockSize - 1) / kBlockSize,
       128L * at::cuda::getCurrentDeviceProperties()->multiProcessorCount);
@@ -598,13 +645,11 @@ std::tuple<Tensor, int64_t> generate_warp_payload(
       cluster_offsets.packed_accessor64<int64_t, 1>(),
       selected_cluster_ids.packed_accessor64<int64_t, 2>(),
       cluster_warp_rounded_length_cumsum.packed_accessor32<int32_t, 2>(),
-      per_warp_index_in_selected_cluster_ids.data_ptr<int32_t>(),
       cluster_warp_size_cumsum.data_ptr<int32_t>(),
       filtering_bitmask_ptr,
       reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>()),
       filtering_bitmask_column,
       filtering_bitmask_index_ptr,
-      total_needed_warps,
       max_tensor_size_per_row);
 
   return std::make_tuple(std::move(warp_payloads), total_needed_warps);
@@ -616,23 +661,25 @@ __global__ void generate_warp_payload_with_partial_masks_kernel(
     const PackedTensorAccessor64<int64_t, 1> cluster_offsets,
     const PackedTensorAccessor64<int64_t, 2> cluster_ids,
     const PackedTensorAccessor32<int32_t, 2> cluster_warp_rounded_length_cumsum,
-    const int32_t* assigned_cluster_id_index,
     const int32_t* cluster_warp_size_cumsum,
     WarpPayload* warp_payloads,
     const int32_t* partial_mask_column_counts_cumsum,
     const int8_t* partial_mask_first_item_offset_in_column,
     const uint64_t* partial_mask_column_results,
     const uint64_t* filtering_bitmask_index_ptr,
-    int64_t total_needed_warps,
     int64_t max_tensor_size_per_row,
     TORCH_DSA_KERNEL_ARGS) {
   int64_t clusters_per_row = cluster_ids.size(1);
+  int32_t n_clusters =
+      static_cast<int32_t>(cluster_ids.size(0) * clusters_per_row);
+  int64_t total_needed_warps = cluster_warp_size_cumsum[n_clusters - 1];
 
   for (int64_t process_warp = blockIdx.x * blockDim.x + threadIdx.x;
        process_warp < total_needed_warps;
        process_warp += blockDim.x * gridDim.x) {
     WarpPayload warp_payload;
-    int32_t cluster_id_index = assigned_cluster_id_index[process_warp];
+    int32_t cluster_id_index = warp_slot_cluster(
+        cluster_warp_size_cumsum, n_clusters, process_warp);
 
     int32_t row = static_cast<int32_t>(cluster_id_index / clusters_per_row);
     int64_t cluster_ids_column = cluster_id_index % clusters_per_row;
@@ -679,31 +726,25 @@ __global__ void generate_warp_payload_with_partial_masks_kernel(
 } // namespace
 
 std::tuple<Tensor, int64_t> generate_warp_payload_with_partial_masks(
-    const Tensor& cluster_warp_size,
     const Tensor& cluster_offsets,
     const Tensor& cluster_ids,
     const Tensor& cluster_warp_rounded_length_cumsum,
     const Tensor& cluster_warp_size_cumsum,
-    int32_t total_warps,
     const int32_t* partial_mask_column_counts_cumsum,
     const int8_t* partial_mask_first_item_offset_in_column,
     const uint64_t* partial_mask_column_results,
     const uint64_t* filtering_bitmask_index_ptr,
     int64_t max_tensor_size_per_row) {
-  TORCH_CHECK(cluster_warp_size.dim() == 1);
+  TORCH_CHECK(cluster_warp_size_cumsum.dim() == 1);
   TORCH_CHECK(cluster_warp_rounded_length_cumsum.dim() == 2);
 
-  auto input = torch::arange(
-      cluster_warp_size.numel(), cluster_warp_size.options().dtype(at::kInt));
-  auto assigned_cluster_id_index = input.repeat_interleave(cluster_warp_size);
-
+  int64_t total_needed_warps =
+      warp_capacity(cluster_ids, max_tensor_size_per_row);
   auto warp_payloads = at::empty(
-      {assigned_cluster_id_index.numel() *
-       static_cast<int64_t>(sizeof(WarpPayload))},
-      assigned_cluster_id_index.options().dtype(at::kChar),
+      {total_needed_warps * static_cast<int64_t>(sizeof(WarpPayload))},
+      cluster_warp_size_cumsum.options().dtype(at::kChar),
       at::MemoryFormat::Contiguous);
 
-  int64_t total_needed_warps = assigned_cluster_id_index.numel();
   auto grid_size = std::min(
       (total_needed_warps + kBlockSize - 1) / kBlockSize,
       128L * at::cuda::getCurrentDeviceProperties()->multiProcessorCount);
@@ -717,14 +758,12 @@ std::tuple<Tensor, int64_t> generate_warp_payload_with_partial_masks(
       cluster_offsets.packed_accessor64<int64_t, 1>(),
       cluster_ids.packed_accessor64<int64_t, 2>(),
       cluster_warp_rounded_length_cumsum.packed_accessor32<int32_t, 2>(),
-      assigned_cluster_id_index.data_ptr<int32_t>(),
       cluster_warp_size_cumsum.data_ptr<int32_t>(),
       reinterpret_cast<WarpPayload*>(warp_payloads.mutable_data_ptr<int8_t>()),
       partial_mask_column_counts_cumsum,
       partial_mask_first_item_offset_in_column,
       partial_mask_column_results,
       filtering_bitmask_index_ptr,
-      total_needed_warps,
       max_tensor_size_per_row);
 
   return std::make_tuple(std::move(warp_payloads), total_needed_warps);
@@ -819,7 +858,6 @@ std::tuple<Tensor, int64_t> generate_remaining_payload_with_partial_masks(
     const Tensor& cluster_ids,
     const Tensor& cluster_warp_rounded_length_cumsum,
     const Tensor& cluster_remaining_length_cumsum,
-    int32_t remaining_docs,
     const int32_t* partial_mask_column_counts_cumsum,
     const int8_t* partial_mask_first_item_offset_in_column,
     const uint64_t* partial_mask_column_results,
@@ -828,6 +866,8 @@ std::tuple<Tensor, int64_t> generate_remaining_payload_with_partial_masks(
   TORCH_CHECK(cluster_warp_rounded_length_cumsum.dim() == 2);
   TORCH_CHECK(cluster_remaining_length_cumsum.dim() == 1);
 
+  int64_t remaining_docs =
+      remaining_capacity(cluster_ids, max_tensor_size_per_row);
   auto remaining_payloads = at::empty(
       {remaining_docs * static_cast<int64_t>(sizeof(RemainingPayload))},
       cluster_length.options().dtype(at::kChar),
@@ -837,7 +877,7 @@ std::tuple<Tensor, int64_t> generate_remaining_payload_with_partial_masks(
       (cluster_length.numel() + kBlockSize - 1) / kBlockSize,
       128L * at::cuda::getCurrentDeviceProperties()->multiProcessorCount);
 
-  TORCH_DSA_KERNEL_LAUNCH(
+  MAYBE_TORCH_DSA_KERNEL_LAUNCH(
       generate_remaining_payload_with_partial_masks_kernel,
       grid_size,
       kBlockSize,
@@ -975,11 +1015,12 @@ __global__ void process_cluster(
     const WarpPayload* __restrict__ warp_payloads,
     RETURN_T* results,
     int32_t* indices,
-    int32_t total_needed_warps,
+    const int32_t* __restrict__ total_needed_warps_ptr,
     DIVISOR_INPUT divisor_for_int8,
     TORCH_DSA_KERNEL_ARGS) {
   constexpr int kWarpsInBlock = kBlockSize / kWarpThreadCount;
   __shared__ EMBEDDING_T shared_queries[kWarpsInBlock][DIM];
+  const int32_t total_needed_warps = *total_needed_warps_ptr;
 
   for (uint32_t warp_index = blockIdx.x * blockDim.y + threadIdx.y;
        warp_index < total_needed_warps;
@@ -1043,9 +1084,10 @@ __global__ void process_cluster_remaining(
     const RemainingPayload* __restrict__ remaining_payloads,
     RETURN_T* results,
     int32_t* indices,
-    int32_t remaining_docs,
+    const int32_t* __restrict__ remaining_docs_ptr,
     DIVISOR_INPUT divisor_for_int8,
     TORCH_DSA_KERNEL_ARGS) {
+  const int32_t remaining_docs = *remaining_docs_ptr;
   for (uint32_t process_index = blockIdx.x * blockDim.x + threadIdx.x;
        process_index < remaining_docs;
        process_index += blockDim.x * gridDim.x) {
@@ -1196,7 +1238,7 @@ inline bool try_launch_pipelined_kernel(
     int32_t total_needed_warps,
     int32_t divisor_for_int8,
     const Tensor& remaining_payloads,
-    int32_t remaining_docs,
+    const int32_t* remaining_docs_ptr,
     int64_t grid_size,
     int64_t remaining_grid_size) {
   if constexpr (
@@ -1235,7 +1277,7 @@ inline bool try_launch_pipelined_kernel(
               remaining_payloads.data_ptr<int8_t>()),
           results.mutable_data_ptr<RETURN_TYPE>(),
           indices.mutable_data_ptr<int32_t>(),
-          remaining_docs,
+          remaining_docs_ptr,
           divisor_for_int8);
       return true;
     }
@@ -1253,8 +1295,10 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
     bool has_filtering_bitmask,
     const Tensor& warp_payloads,
     int64_t total_needed_warps,
+    const int32_t* total_needed_warps_ptr,
     const Tensor& remaining_payloads,
     int64_t remaining_docs,
+    const int32_t* remaining_docs_ptr,
     const std::optional<Tensor>& per_embedding_scale,
     bool query_on_shared_mem = false) {
 #if defined(USE_ROCM)
@@ -1298,7 +1342,7 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             reinterpret_cast<WarpPayload*>(warp_payloads.data_ptr<int8_t>()), \
             results.mutable_data_ptr<RETURN_TYPE>(),                          \
             indices.mutable_data_ptr<int32_t>(),                              \
-            static_cast<int32_t>(total_needed_warps),                         \
+            total_needed_warps_ptr,                                           \
             per_embedding_scale.value().mutable_data_ptr<at::Half>());        \
       } else {                                                                \
         MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                        \
@@ -1318,7 +1362,7 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             reinterpret_cast<WarpPayload*>(warp_payloads.data_ptr<int8_t>()), \
             results.mutable_data_ptr<RETURN_TYPE>(),                          \
             indices.mutable_data_ptr<int32_t>(),                              \
-            static_cast<int32_t>(total_needed_warps),                         \
+            total_needed_warps_ptr,                                           \
             per_embedding_scale.value().mutable_data_ptr<at::Half>());        \
       }                                                                       \
                                                                               \
@@ -1339,7 +1383,7 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
               remaining_payloads.data_ptr<int8_t>()),                         \
           results.mutable_data_ptr<RETURN_TYPE>(),                            \
           indices.mutable_data_ptr<int32_t>(),                                \
-          static_cast<int32_t>(remaining_docs),                               \
+          remaining_docs_ptr,                                                 \
           per_embedding_scale.value().mutable_data_ptr<at::Half>());          \
     } else {                                                                  \
       if (query_on_shared_mem) {                                              \
@@ -1360,7 +1404,7 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             reinterpret_cast<WarpPayload*>(warp_payloads.data_ptr<int8_t>()), \
             results.mutable_data_ptr<RETURN_TYPE>(),                          \
             indices.mutable_data_ptr<int32_t>(),                              \
-            static_cast<int32_t>(total_needed_warps),                         \
+            total_needed_warps_ptr,                                           \
             static_cast<int32_t>(divisor_for_int8));                          \
       } else {                                                                \
         MAYBE_TORCH_DSA_KERNEL_LAUNCH(                                        \
@@ -1380,7 +1424,7 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             reinterpret_cast<WarpPayload*>(warp_payloads.data_ptr<int8_t>()), \
             results.mutable_data_ptr<RETURN_TYPE>(),                          \
             indices.mutable_data_ptr<int32_t>(),                              \
-            static_cast<int32_t>(total_needed_warps),                         \
+            total_needed_warps_ptr,                                           \
             static_cast<int32_t>(divisor_for_int8));                          \
       }                                                                       \
                                                                               \
@@ -1401,7 +1445,7 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
               remaining_payloads.data_ptr<int8_t>()),                         \
           results.mutable_data_ptr<RETURN_TYPE>(),                            \
           indices.mutable_data_ptr<int32_t>(),                                \
-          static_cast<int32_t>(remaining_docs),                               \
+          remaining_docs_ptr,                                                 \
           static_cast<int32_t>(divisor_for_int8));                            \
     }                                                                         \
   }
@@ -1888,9 +1932,11 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda(
       cluster_warp_rounded_length.cumsum(/*dim=*/1, /*dtype=*/at::kInt);
   auto cluster_remaining_length_cumsum =
       cluster_remaining_length.cumsum(/*dim=*/0, /*dtype=*/at::kInt);
+  auto cluster_warp_size_cumsum =
+      cluster_warp_size.cumsum(/*dim=*/0, /*dtype=*/at::kInt);
 
   auto [warp_payloads, total_needed_warps] = generate_warp_payload(
-      cluster_warp_size,
+      cluster_warp_size_cumsum,
       cluster_offsets,
       cluster_ids,
       cluster_warp_rounded_length_cumsum,
@@ -1920,8 +1966,10 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda(
       filtering_bitmask_ptr != nullptr,
       warp_payloads,
       total_needed_warps,
+      last_element_ptr(cluster_warp_size_cumsum),
       remaining_payloads,
       remaining_docs,
+      last_element_ptr(cluster_remaining_length_cumsum),
       per_embedding_scale,
       /*query_on_shared_mem=*/false);
 }
@@ -2050,27 +2098,20 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_with_partial_masks(
         cluster_warp_size_tensor.cumsum(/*dim=*/0, /*dtype=*/at::kInt);
   }
 
-  int32_t total_warps_computed = (total_cluster_rounded_warps > 0)
-      ? total_cluster_rounded_warps
-      : cluster_warp_size_cumsum_tensor[-1].item<int32_t>();
-
+  // total_cluster_rounded_warps / total_cluster_remaining_warps are accepted and ignored:
+  // the totals stay on the device.
   auto [warp_payloads, total_needed_warps] =
       generate_warp_payload_with_partial_masks(
-          cluster_warp_size_tensor,
           cluster_offsets,
           cluster_ids,
           cluster_warp_rounded_length_cumsum_tensor,
           cluster_warp_size_cumsum_tensor,
-          total_warps_computed,
           partial_mask_column_counts_cumsum_ptr,
           partial_mask_first_item_offset_in_column_ptr,
           partial_mask_column_results_ptr,
           filtering_bitmask_index_ptr,
           max_tensor_size_per_row);
 
-  int32_t total_remaining_docs_computed = (total_cluster_remaining_warps > 0)
-      ? total_cluster_remaining_warps
-      : cluster_remaining_length_cumsum_tensor[-1].item<int32_t>();
   auto [remaining_payloads, remaining_docs] =
       generate_remaining_payload_with_partial_masks(
           cluster_length,
@@ -2078,7 +2119,6 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_with_partial_masks(
           cluster_ids,
           cluster_warp_rounded_length_cumsum_tensor,
           cluster_remaining_length_cumsum_tensor,
-          total_remaining_docs_computed,
           partial_mask_column_counts_cumsum_ptr,
           partial_mask_first_item_offset_in_column_ptr,
           partial_mask_column_results_ptr,
@@ -2095,8 +2135,10 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_with_partial_masks(
       true,
       warp_payloads,
       total_needed_warps,
+      last_element_ptr(cluster_warp_size_cumsum_tensor),
       remaining_payloads,
       remaining_docs,
+      last_element_ptr(cluster_remaining_length_cumsum_tensor),
       per_embedding_scale);
 }
 
