@@ -66,7 +66,7 @@ How the code works today. Code comments cite these pages by section.
   [Meta as published vs adapted](paper/meta-published-vs-adapted.md),
   [claims](paper/claims.md),
   [results draft](paper/results.md),
-  [abstract draft](paper/abstract.md),
+  [abstract (submitted)](paper/abstract.md),
   [ECIR criteria](paper/ecir-criteria.md),
   [release and licenses](paper/release-and-licenses.md)).
 - [artifacts/](artifacts/): raw scripts behind measured numbers, one
