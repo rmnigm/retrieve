@@ -101,7 +101,9 @@ legs:
     item: [1, 2]
     tree: fork
     depends_on: A0-k1000-check
-    cmds: ["RUN --suite n-curve-q-all --dataset {ds}   # yfcc10m, yfcc10m-synth (or the A0 fallback)"]
+    cmds:
+      - "RUN --suite n-curve-q --dataset {ds}   # yfcc10m, yfcc10m-synth: done (numbers/A1-yfcc)"
+      - "RUN --suite n-curve-q-yfcc-cap --dataset {ds}   # after A0 (--k 100 if A0 failed at k 1000): one quality-only point per filter, 16384 lists at the cap 4096; C6 evidence, never timed. No wide half, no 65536 (controller: YFCC is int8-capped)"
     upload: numbers/A1-yfcc
     est_gpu_h: 0.8
   - id: A1-laion10m
@@ -169,9 +171,9 @@ legs:
     item: [1, 2, 5, 6]
     tree: fork
     depends_on: A1-yfcc
-    cmds: ["RUN --suite n-timed-d192 --interleave --dataset {ds}   # yfcc10m, yfcc10m-synth"]
+    cmds: ["RUN --suite n-timed-d192 --interleave --dataset {ds}   # yfcc10m, yfcc10m-synth (4096 lists only)"]
     upload: numbers/A2-yfcc
-    est_gpu_h: 3.0
+    est_gpu_h: 1.5
   - id: A2-laion10m
     item: [1, 2, 3, 5, 6]
     tree: fork
@@ -207,6 +209,6 @@ legs:
 
 totals:
   linr_only_gpu_h: 9.3
-  adapted_gpu_h: 38.6      # A0 0.4 + A1 11.9 + A1b 0.5 + A2 24.0 + A2b 0.8 + A3 1.0
-  all_gpu_h: 47.9          # +20 % process start / data load / compile -> ~56
-  per_queue_gpu_h: {d0: 13.0, d1: 11.9, p1: 16.0, b0: 7.0}   # d0 17.0 if it also runs A2-laion30m-synth
+  adapted_gpu_h: 37.1      # A0 0.4 + A1 11.9 + A1b 0.5 + A2 22.5 + A2b 0.8 + A3 1.0
+  all_gpu_h: 46.4          # +20 % process start / data load / compile -> ~56
+  per_queue_gpu_h: {d0: 13.0, d1: 10.4, p1: 16.0, b0: 7.0}   # d0 17.0 if it also runs A2-laion30m-synth

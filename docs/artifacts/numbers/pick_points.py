@@ -34,7 +34,14 @@ V12 = [
 ]
 
 df = pd.concat([pd.read_parquet(p) for p in sys.argv[1:]], ignore_index=True)
-df = df[(df.backend == "official-fork") & (df.status == "ok")]
+CURVES = (
+    "n-curve-q",
+    "n-curve-q-wide",
+    "n-curve-q-all",
+    "n-curve-q-laion-small",
+    "n-curve-q-laion-small-wide",
+)  # not n-curve-q-yfcc-cap (quality only)
+df = df[(df.backend == "official-fork") & (df.status == "ok") & df.suite.isin(CURVES)]
 p = df.params.map(json.loads)
 df = df.assign(
     n_lists=p.map(lambda d: d["n_lists"]), n_probe=p.map(lambda d: d["n_probe"])

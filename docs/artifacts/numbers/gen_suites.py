@@ -134,6 +134,10 @@ def small_lists_arms(wide, backend="official-fork"):
 
 ALL = list(BENCH)
 BIG = [d for d in ALL if BENCH[d][1] == BIG_LISTS]
+YFCC = ["yfcc10m", "yfcc10m-synth"]
+WIDE = [
+    d for d in BIG if d not in YFCC
+]  # YFCC is int8-capped (A1-yfcc): no wide curve, one cap point instead (n-curve-q-yfcc-cap)
 blocks = {
     "bloom": {"m_bits": 1024, "k_hash": 5},
     # LiNR-only legs (library e16512f5, start now)
@@ -227,8 +231,8 @@ blocks = {
         perf=False,
     ),
     "n-curve-q-wide": suite(
-        BIG,
-        curve_arms(BIG, wide=True),
+        WIDE,
+        curve_arms(WIDE, wide=True),
         [100, 1000],
         [16],
         kinds=("clause", "bloom"),
@@ -273,9 +277,25 @@ blocks = {
         [16],
         perf=False,
     ),
+    # C6 evidence for YFCC (controller): one quality-only point per filter at 16384 lists and their cap; read by no picker
+    "n-curve-q-yfcc-cap": suite(
+        YFCC,
+        [
+            {
+                "algo": "silvertorch",
+                "backends": ["official-fork"],
+                "filter_kinds": ["clause"],
+                "build": {"n_lists": [16384]},
+                "query": {"n_probe": [4096]},
+            }
+        ],
+        [100, 1000],
+        [16],
+        perf=False,
+    ),
     "n-curve-q-all": suite(
-        BIG,
-        curve_arms(BIG, wide=None),
+        WIDE,
+        curve_arms(WIDE, wide=None),
         [100, 1000],
         [16],
         kinds=("clause", "bloom"),
