@@ -1282,6 +1282,106 @@ __global__ void process_cluster_remaining_multi_emb(
   }
 }
 
+// fork (C11): the full-warp scorer with the warp's 32 docs read cooperatively, for wide rows.
+// Upstream's lane loads its own doc in 16-byte pieces strided by DIM (32 rows a request); here
+// the warp reads its 32 consecutive rows linearly, a column chunk of kPart int4s per row at a
+// time (the whole row up to 256 bytes, so each request is 512 contiguous bytes), into a padded
+// shared tile, and each lane accumulates its doc's dp4a dot from its tile row. The int32 dot is
+// the same sum and post_process is upstream's, so scores are equal. A payload with fewer than 16
+// passing docs keeps upstream's per-lane loads. DIM a multiple of 64; int8, an int32 divisor.
+constexpr int64_t kCoopBlockSize = 128L;
+
+template <int DIM>
+constexpr int coop_part() {
+  constexpr int row = DIM / 16;
+  return row % 16 == 0 ? 16 : row % 12 == 0 ? 12 : row % 8 == 0 ? 8 : 4;
+}
+
+template <typename RETURN_T, int DIM, bool FILTER>
+__global__ void __launch_bounds__(kCoopBlockSize) process_cluster_coop(
+    const int8_t* __restrict__ embeddings,
+    const int8_t* __restrict__ queries,
+    const WarpPayload* __restrict__ warp_payloads,
+    RETURN_T* results,
+    int32_t* indices,
+    const int32_t* __restrict__ total_needed_warps_ptr,
+    int32_t divisor_for_int8,
+    bool write_failed,
+    BlockKeys block_keys,
+    TORCH_DSA_KERNEL_ARGS) {
+  constexpr int kWarpsInBlock = kCoopBlockSize / kWarpThreadCount;
+  constexpr int kRow = DIM / 16; // int4s a row
+  constexpr int kPart = coop_part<DIM>(); // int4s a row in one chunk
+  constexpr int kPitch = kPart + 1;
+  __shared__ int4 tile[kWarpsInBlock][kWarpThreadCount * kPitch];
+  const int lane = threadIdx.x % kWarpThreadCount;
+  const int warp = threadIdx.x / kWarpThreadCount;
+  const int32_t total = *total_needed_warps_ptr;
+  for (int64_t w = static_cast<int64_t>(blockIdx.x) * kWarpsInBlock + warp; w < total;
+       w += static_cast<int64_t>(gridDim.x) * kWarpsInBlock) {
+    WarpPayload payload;
+    payload.payload =
+        __ldg(reinterpret_cast<const int4* __restrict__>(warp_payloads) + w);
+    const int64_t doc = payload.doc_start_index + lane;
+    const int64_t write = payload.write_index + lane;
+    const bool pass = get_filtering_mask<FILTER>(payload.filtering_mask, lane);
+    if (FILTER && __popc(payload.filtering_mask) < 16) {
+      store<int8_t, RETURN_T, DIM, FILTER, int32_t>(
+          embeddings,
+          queries,
+          doc,
+          static_cast<int64_t>(payload.cluster_ids_row),
+          divisor_for_int8,
+          results + write,
+          indices + write,
+          pass,
+          write_failed);
+    } else {
+      const int4* base = reinterpret_cast<const int4*>(
+          embeddings + static_cast<int64_t>(payload.doc_start_index) * DIM);
+      const int4* query = reinterpret_cast<const int4*>(
+          queries + static_cast<int64_t>(payload.cluster_ids_row) * DIM);
+      int32_t acc = 0;
+#pragma unroll 1
+      for (int c = 0; c < kRow; c += kPart) {
+        int4 staged[kPart];
+#pragma unroll
+        for (int i = 0; i < kPart; ++i) {
+          const int l = lane + kWarpThreadCount * i;
+          staged[i] = __ldg(base + (l / kPart) * kRow + c + l % kPart);
+        }
+#pragma unroll
+        for (int i = 0; i < kPart; ++i) {
+          const int l = lane + kWarpThreadCount * i;
+          tile[warp][(l / kPart) * kPitch + l % kPart] = staged[i];
+        }
+        __syncwarp();
+#pragma unroll
+        for (int part = 0; part < kPart; ++part) {
+          const int4 e = tile[warp][lane * kPitch + part];
+          const int4 q = __ldg(query + c + part);
+          acc = __dp4a(e.x, q.x, acc);
+          acc = __dp4a(e.y, q.y, acc);
+          acc = __dp4a(e.z, q.z, acc);
+          acc = __dp4a(e.w, q.w, acc);
+        }
+        __syncwarp();
+      }
+      if (pass) {
+        results[write] = post_process<int32_t, RETURN_T, int32_t>(acc, divisor_for_int8);
+        indices[write] = static_cast<int32_t>(doc);
+      } else if (write_failed) {
+        results[write] = cuda_mm_types<RETURN_T>::C_MIN_NEG;
+        indices[write] = -1;
+      }
+    }
+    if (block_keys.keys != nullptr) {
+      fold_block_keys_warp<RETURN_T>(
+          block_keys, payload.cluster_ids_row, write, pass, results);
+    }
+  }
+}
+
 } // namespace
 
 template <typename EMBEDDING_TYPE, typename RETURN_TYPE, int DIM, bool FILTER>
@@ -1361,7 +1461,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
     const std::optional<Tensor>& per_embedding_scale,
     bool query_on_shared_mem = false,
     bool write_failed = false,
-    BlockKeys block_keys = BlockKeys{}) {
+    BlockKeys block_keys = BlockKeys{},
+    bool coop = false) {
 #if defined(USE_ROCM)
   query_on_shared_mem = true;
 #endif
@@ -1386,6 +1487,83 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
             static_cast<int32_t>(invalid_index_value),
             c10::TensorOptions().dtype(at::kInt).device(
                 selected_cluster_ids.device()));
+
+  if (coop && embeddings.scalar_type() == at::kChar && !per_embedding_scale.has_value() &&
+      embeddings.size(1) % 64 == 0) {
+    const bool half = divisor_for_int8 != c_INVALID_DIVISOR_FOR_INT8;
+    auto opts = c10::TensorOptions()
+                    .dtype(half ? at::kHalf : at::kInt)
+                    .device(selected_cluster_ids.device());
+    results = write_failed ? at::empty({total_result_size}, opts)
+        : half             ? at::full({total_result_size}, cuda_mm_types<c10::Half>::C_MIN_NEG, opts)
+                           : at::full({total_result_size}, cuda_mm_types<int32_t>::C_MIN_NEG, opts);
+    auto launch = [&](auto ret, auto dim, auto filter) {
+      using R = decltype(ret);
+      constexpr int D = decltype(dim)::value;
+      constexpr bool F = decltype(filter)::value;
+      MAYBE_TORCH_DSA_KERNEL_LAUNCH(
+          (process_cluster_coop<R, D, F>),
+          std::min(
+              (total_needed_warps * kWarpThreadCount + kCoopBlockSize - 1) / kCoopBlockSize,
+              384L * at::cuda::getCurrentDeviceProperties()->multiProcessorCount),
+          kCoopBlockSize,
+          0,
+          at::cuda::getCurrentCUDAStream(),
+          embeddings.data_ptr<int8_t>(),
+          queries.data_ptr<int8_t>(),
+          reinterpret_cast<WarpPayload*>(warp_payloads.data_ptr<int8_t>()),
+          results.mutable_data_ptr<R>(),
+          indices.mutable_data_ptr<int32_t>(),
+          total_needed_warps_ptr,
+          static_cast<int32_t>(divisor_for_int8),
+          write_failed,
+          block_keys);
+      MAYBE_TORCH_DSA_KERNEL_LAUNCH(
+          (process_cluster_remaining<int8_t, R, D, F, int32_t>),
+          remaining_grid_size,
+          kBlockSize,
+          0,
+          at::cuda::getCurrentCUDAStream(),
+          embeddings.data_ptr<int8_t>(),
+          queries.data_ptr<int8_t>(),
+          reinterpret_cast<RemainingPayload*>(remaining_payloads.data_ptr<int8_t>()),
+          results.mutable_data_ptr<R>(),
+          indices.mutable_data_ptr<int32_t>(),
+          remaining_docs_ptr,
+          static_cast<int32_t>(divisor_for_int8),
+          write_failed,
+          block_keys);
+    };
+    auto by_filter = [&](auto ret, auto dim) {
+      if (has_filtering_bitmask) {
+        launch(ret, dim, std::true_type{});
+      } else {
+        launch(ret, dim, std::false_type{});
+      }
+    };
+    auto by_dim = [&](auto ret) {
+      switch (embeddings.size(1)) {
+        case 64: by_filter(ret, std::integral_constant<int, 64>{}); break;
+        case 128: by_filter(ret, std::integral_constant<int, 128>{}); break;
+        case 192: by_filter(ret, std::integral_constant<int, 192>{}); break;
+        case 256: by_filter(ret, std::integral_constant<int, 256>{}); break;
+        case 384: by_filter(ret, std::integral_constant<int, 384>{}); break;
+        case 512: by_filter(ret, std::integral_constant<int, 512>{}); break;
+        case 768: by_filter(ret, std::integral_constant<int, 768>{}); break;
+        case 1024: by_filter(ret, std::integral_constant<int, 1024>{}); break;
+        case 1280: by_filter(ret, std::integral_constant<int, 1280>{}); break;
+        default: TORCH_CHECK(false, "unsupported DIM ", embeddings.size(1));
+      }
+    };
+    if (half) {
+      by_dim(c10::Half{0.0f});
+    } else {
+      by_dim(int32_t{0});
+    }
+    return std::make_tuple(
+        results.reshape({selected_cluster_ids.size(0), -1}),
+        indices.reshape({selected_cluster_ids.size(0), -1}));
+  }
 
 #define INVOKE_KERNEL_WITH_TYPE_DIM_FILTER(                                   \
     EMBEDDING_TYPE, RETURN_TYPE, DIM, FILTER)                                 \
@@ -2075,7 +2253,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_precomputed(
     const Tensor& cluster_warp_size_cumsum,
     bool query_on_shared_mem,
     bool write_failed,
-    BlockKeys block_keys) {
+    BlockKeys block_keys,
+    bool coop) {
   const uint64_t* filtering_bitmask_ptr = nullptr;
   int64_t filtering_bitmask_column = 0;
   if (filtering_bit_mask) {
@@ -2128,7 +2307,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_precomputed(
       std::nullopt,
       query_on_shared_mem,
       write_failed,
-      block_keys);
+      block_keys,
+      coop);
 }
 
 std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_with_partial_masks(

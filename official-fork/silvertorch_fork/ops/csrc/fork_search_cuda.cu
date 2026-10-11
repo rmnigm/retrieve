@@ -35,8 +35,8 @@ namespace {
 constexpr int kPrepThreads = 1024;
 // Average full warps per probed cluster from which the payload kernels run a warp per cluster.
 constexpr int64_t kPerClusterWarps = 40;
-// ... and only with enough clusters (warps) to fill the GPU.
-constexpr int64_t kPerClusterMinClusters = 1024;
+// ... and only with many clusters (K fix 14: per-warp won at 1536 and 4096 clusters, per-cluster at 16384).
+constexpr int64_t kPerClusterMinClusters = 8192;
 
 
 struct MaxOp {
@@ -1176,6 +1176,18 @@ bool scorer_query_on_shared_mem(int64_t dim, int64_t rows) {
   return false;
 }
 
+// C11: the cooperative-load scorer per D (process_cluster_coop). STFORK_COOP=0/1 forces it.
+bool scorer_coop(int64_t dim) {
+  static const int forced = [] {
+    const char* v = std::getenv("STFORK_COOP");
+    return v == nullptr ? -1 : std::atoi(v);
+  }();
+  if (forced >= 0) {
+    return forced == 1;
+  }
+  return dim >= 128;
+}
+
 struct Prep {
   Tensor codes;
   Tensor scales;
@@ -1347,6 +1359,7 @@ std::tuple<Tensor, Tensor> search_cuda(
   }
 
   const bool query_shared = scorer_query_on_shared_mem(item_codes.size(1), cluster_ids.size(0));
+  const bool coop = scorer_coop(item_codes.size(1));
   // our select reads only each row's written slots, so the scorer need not pre-fill (K fix 10)
   const bool write_failed = k <= kSelectMaxK;
   // very wide rows go through the block prefilter (K fix 9), whose block maxima the scorer
@@ -1382,7 +1395,8 @@ std::tuple<Tensor, Tensor> search_cuda(
         std::nullopt,
         query_shared,
         write_failed,
-        bk);
+        bk,
+        coop);
   } else {
     std::tie(raw, idx) =
         st::ops::fused_kmean_ann::fused_kmean_ann_cuda_precomputed(
@@ -1399,7 +1413,8 @@ std::tuple<Tensor, Tensor> search_cuda(
             prep.warp_size_cumsum,
             query_shared,
             write_failed,
-            bk);
+            bk,
+            coop);
   }
 
   // The epilogue of retrieve.ops.official.official_probe_score: top-k on the raw scores (pads at

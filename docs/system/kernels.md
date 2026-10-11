@@ -1847,10 +1847,15 @@ file. `CHANGES.md` lists every change; each has its gate row in
    tested over the probed docs only, one warp per 32-doc payload with `__brev(__ballot_sync(…))`
    as its mask, an inactive clause a warp-uniform skip. Full bloom: the prepared search's full-`N`
    mask, read by the scorer as upstream's.
-3. **Scorer**: upstream's payload scorer (`process_cluster` / `_remaining`). On `search`'s path its
-   `[B, width]` buffers are not pre-filled: lanes failing the filter write the sentinels themselves
-   and each row's written width (from the prep kernel) bounds what the select reads. Payload
-   kernels use a warp-parallel cluster search, or one warp per cluster at wide probes.
+3. **Scorer**: upstream's payload scorer (`process_cluster` / `_remaining`), except that for
+   D ≥ 128 full warps go to `process_cluster_coop` (`scorer_coop`, `STFORK_COOP=0/1` forces it):
+   the warp reads its 32 consecutive rows linearly (≤ 256 bytes a row a chunk) into a padded
+   shared tile and each lane takes its row's `dp4a` dot from there; a payload with < 16 passing
+   docs keeps upstream's per-lane loads, and the int32 sum and `post_process` are upstream's, so
+   scores are equal. On `search`'s path its `[B, width]` buffers are not pre-filled: lanes failing
+   the filter write the sentinels themselves and each row's written width (from the prep kernel)
+   bounds what the select reads. Payload kernels use a warp-parallel cluster search, or one warp
+   per cluster at wide probes (≥ 40 full warps a cluster and ≥ 8192 probed clusters).
 4. **Top-k on the raw scores, ours (k ≤ 1024)**: a radix select per row chunk of 8192 slots in a
    512-thread CTA (keys that order like the scores, held in registers; four 8-bit warp-aggregated
    histogram passes; keys equal to the k-th taken in index order, as `torch.topk` takes them, so

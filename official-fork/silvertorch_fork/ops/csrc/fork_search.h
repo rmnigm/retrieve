@@ -31,7 +31,8 @@ std::tuple<at::Tensor, at::Tensor> fused_kmean_ann_run_payloads(
     const std::optional<at::Tensor>& per_embedding_scale,
     bool query_on_shared_mem,
     bool write_failed,
-    BlockKeys block_keys);
+    BlockKeys block_keys,
+    bool coop);
 
 std::tuple<at::Tensor, at::Tensor> fused_kmean_ann_cuda_precomputed(
     const at::Tensor& cluster_offsets,
@@ -47,7 +48,8 @@ std::tuple<at::Tensor, at::Tensor> fused_kmean_ann_cuda_precomputed(
     const at::Tensor& cluster_warp_size_cumsum,
     bool query_on_shared_mem,
     bool write_failed,
-    BlockKeys block_keys);
+    BlockKeys block_keys,
+    bool coop);
 
 } // namespace st::ops::fused_kmean_ann
 
