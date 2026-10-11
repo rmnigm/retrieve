@@ -1852,7 +1852,7 @@ file. `CHANGES.md` lists every change; each has its gate row in
    as its mask, an inactive clause a warp-uniform skip. A given full-`N` `filtering_bit_mask`
    is read by the scorer as upstream's.
 3. **Scorer**: upstream's payload scorer (`process_cluster` / `_remaining`), except that for
-   D ≥ 128 full warps go to `process_cluster_coop` (`scorer_coop`, `STFORK_COOP=0/1` forces it):
+   D ≥ 128 full warps go to `process_cluster_coop` (fixed in `search`; no switch):
    the warp reads its 32 consecutive rows linearly (≤ 256 bytes a row a chunk) into a padded
    shared tile and each lane takes its row's `dp4a` dot from there; a payload with < 16 passing
    docs keeps upstream's per-lane loads, and the int32 sum and `post_process` are upstream's, so

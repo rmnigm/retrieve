@@ -16,7 +16,6 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/block/block_scan.cuh>
 
-#include <cstdlib>
 #include <limits>
 #include <optional>
 #include <tuple>
@@ -1185,32 +1184,6 @@ const int32_t* last_element(const Tensor& inclusive_cumsum) {
       : inclusive_cumsum.const_data_ptr<int32_t>() + inclusive_cumsum.numel() - 1;
 }
 
-// C11: the scorer's variant per (D, rows). STFORK_QUERY_SHARED=0/1 overrides it (the sweep).
-bool scorer_query_on_shared_mem(int64_t dim, int64_t rows) {
-  static const int forced = [] {
-    const char* v = std::getenv("STFORK_QUERY_SHARED");
-    return v == nullptr ? -1 : std::atoi(v);
-  }();
-  if (forced >= 0) {
-    return forced == 1;
-  }
-  (void)dim;
-  (void)rows;
-  return false;
-}
-
-// C11: the cooperative-load scorer per D (process_cluster_coop). STFORK_COOP=0/1 forces it.
-bool scorer_coop(int64_t dim) {
-  static const int forced = [] {
-    const char* v = std::getenv("STFORK_COOP");
-    return v == nullptr ? -1 : std::atoi(v);
-  }();
-  if (forced >= 0) {
-    return forced == 1;
-  }
-  return dim >= 128;
-}
-
 struct Prep {
   Tensor codes;
   Tensor scales;
@@ -1369,8 +1342,9 @@ std::tuple<Tensor, Tensor> search_cuda(
         mask);
   }
 
-  const bool query_shared = scorer_query_on_shared_mem(item_codes.size(1), cluster_ids.size(0));
-  const bool coop = scorer_coop(item_codes.size(1));
+  // C11: the cooperative-load scorer from D 128; the query stays in registers (no consistent winner)
+  const bool query_shared = false;
+  const bool coop = item_codes.size(1) >= 128;
   // our select reads only each row's written slots, so the scorer need not pre-fill (K fix 10)
   const bool write_failed = k <= kSelectMaxK;
   // very wide rows go through the block prefilter (K fix 9), whose block maxima the scorer
