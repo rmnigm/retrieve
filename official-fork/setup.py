@@ -45,8 +45,8 @@ cuda_sources = [
     "silvertorch_fork/ops/csrc/faster_repeat_interleave.cu",
     "silvertorch_fork/ops/csrc/fused_kmean_ann_cuda.cu",
     # fork (OF-6): registered upstream but absent from its build
-    "silvertorch_fork/ops/csrc/is_topk.cu",
-    "silvertorch_fork/ops/csrc/fresh_index_post_processing.cu",
+    "silvertorch_fork/ops/csrc/is_topk_cuda.cu",
+    "silvertorch_fork/ops/csrc/fresh_index_post_processing_cuda.cu",
 ]
 
 # Resolve paths relative to this file
