@@ -11,7 +11,29 @@ A100-SXM4-80GB, pod b GPU 0; SM clocks cannot be locked, every script samples th
 | [`syncs.py`](syncs.py) | per forward (none / exact / bloom partial / full × bs × k) of one backend: the forward under `set_sync_debug_mode("error")`, and per call over 10 profiled forwards the sync API calls, D2H copies, pageable H2D copies, launches and kernels | gate **S** (plan §1.1); the evidence for F1 / F2 / F4 |
 | [`graph_launches.py`](graph_launches.py) | one `torch.cuda.graph` capture on static buffers replayed over 16 pool batches (`torch.equal` to eager), and the harness `graph` mode (`graph_callable`): `cudaGraphLaunch` per call, launches outside the graph, outputs against eager | gate **S** (plan §1.2) |
 | [`gate_fork.py`](gate_fork.py) | fork / upstream `-O3` / Triton v2.12 (`retrieve_v212`) in one process on one shared IVF layout and a real dataset: equality (`equal`, `scores_equal`, `ids_up_to_ties`; per-score id sets above the k-th score), the two official bloom builds `torch.equal`, then 8 rounds of 30-call windows per arm, eager and `--graph`, ratios fork / upstream and fork / Triton; `--swap` (build and time order), `--aa` (fork against fork, the floor) | gates **X**, **K**, **T** (plan §5) |
+| [`c0_coexist.py`](c0_coexist.py) | C0: both packages in one process, both namespaces registered, the fork's upstream-shaped `fused_kmean_ann` `torch.equal` to upstream's (int32 / fp16, with and without a mask) | gate **X** at C0 |
+| [`build.sh`](build.sh) | builds the fork at one commit (CPU): the build tree `/scratch/wt/meta-fork-build` detached at the commit, `silvertorch-fork` editable into `/venvs/meta-fork` (a copy of the final pass's `/venvs/final-ext-o3`, whose `silvertorch` is the `-O3` upstream arm), both `.so` sha256 recorded | every gate |
+| [`gpu.sh`](gpu.sh) | one GPU block on pod b GPU 0: phase flag set and trap-removed, `flock /scratch/gpu0.lock`, `/scratch/gpu0.timed` around timed jobs, the build tree on `PYTHONPATH`, an inductor cache per commit | every gate |
 | [`make_pkg.sh`](make_pkg.sh) | a tagged library as a renamed package (`make_pkg.sh <repo> campaign-v2.12 retrieve_v212 <dir>`) | the Triton arm |
 
 Arms in one process: `silvertorch` (the pinned upstream, built `-O3` in the final pass's venv) and `silvertorch_fork`
 register disjoint op namespaces (`torch.ops.st`, `torch.ops.stfork`).
+
+## Running a gate
+
+A change's gate runs on its own commit: `build.sh <commit> <logs>` (CPU, outside any timed leg), then the
+GPU blocks through `gpu.sh`, each under 15 min. The scripts are run from this directory with the build tree on
+`PYTHONPATH`, so one checkout of them serves every commit:
+
+```bash
+A=/scratch/wt/meta-fork/docs/artifacts/meta-fork; PY=/venvs/meta-fork/bin/python; T=/scratch/wt/meta-fork-build
+$A/build.sh <commit> /scratch/meta-fork/logs
+$A/gpu.sh 0 /scratch/meta-fork/logs/c0_coexist.log $PY $A/c0_coexist.py
+$A/gpu.sh 0 /scratch/meta-fork/logs/pytest_fork.log $PY -m pytest $T/official-fork/silvertorch_fork -q -p no:cacheprovider
+$A/gpu.sh 0 /scratch/meta-fork/logs/pytest_official.log $PY -m pytest $T/retrieve/tests/parity/test_official.py -q -p no:cacheprovider
+$A/gpu.sh 0 /scratch/meta-fork/logs/syncs_fork.log $PY $A/syncs.py official-fork /scratch/meta-fork/logs/syncs_fork.json
+(cd $T/evaluation && $A/gpu.sh 1 /scratch/meta-fork/logs/gate.log $PY $A/gate_fork.py arxiv 128 bloom c0_maincat 2048 24,256 1,16,64 /scratch/meta-fork/logs/gate.json --graph)
+```
+
+The Triton arm is `make_pkg.sh /workspace/retrieve campaign-v2.12 retrieve_v212 /scratch/meta-fork/pkgs`
+(on `PYTHONPATH` through `gpu.sh`).
