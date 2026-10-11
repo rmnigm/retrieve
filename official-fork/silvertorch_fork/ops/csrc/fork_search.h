@@ -40,7 +40,8 @@ std::tuple<at::Tensor, at::Tensor> fused_kmean_ann_cuda_precomputed(
     int64_t divisor_for_int8,
     const at::Tensor& cluster_warp_rounded_length_cumsum,
     const at::Tensor& cluster_remaining_length_cumsum,
-    const at::Tensor& cluster_warp_size_cumsum);
+    const at::Tensor& cluster_warp_size_cumsum,
+    bool query_on_shared_mem);
 
 } // namespace st::ops::fused_kmean_ann
 

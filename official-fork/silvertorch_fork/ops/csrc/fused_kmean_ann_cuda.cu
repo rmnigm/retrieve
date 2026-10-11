@@ -1976,7 +1976,8 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_precomputed(
     int64_t divisor_for_int8,
     const Tensor& cluster_warp_rounded_length_cumsum,
     const Tensor& cluster_remaining_length_cumsum,
-    const Tensor& cluster_warp_size_cumsum) {
+    const Tensor& cluster_warp_size_cumsum,
+    bool query_on_shared_mem) {
   const uint64_t* filtering_bitmask_ptr = nullptr;
   int64_t filtering_bitmask_column = 0;
   if (filtering_bit_mask) {
@@ -2027,7 +2028,7 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_precomputed(
       remaining_docs,
       last_element_ptr(cluster_remaining_length_cumsum),
       std::nullopt,
-      /*query_on_shared_mem=*/false);
+      query_on_shared_mem);
 }
 
 std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_with_partial_masks(

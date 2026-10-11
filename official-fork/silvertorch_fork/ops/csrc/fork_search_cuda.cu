@@ -16,6 +16,7 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/block/block_scan.cuh>
 
+#include <cstdlib>
 #include <limits>
 #include <optional>
 #include <tuple>
@@ -1051,6 +1052,20 @@ const int32_t* last_element(const Tensor& inclusive_cumsum) {
       : inclusive_cumsum.const_data_ptr<int32_t>() + inclusive_cumsum.numel() - 1;
 }
 
+// C11: the scorer's variant per (D, rows). STFORK_QUERY_SHARED=0/1 overrides it (the sweep).
+bool scorer_query_on_shared_mem(int64_t dim, int64_t rows) {
+  static const int forced = [] {
+    const char* v = std::getenv("STFORK_QUERY_SHARED");
+    return v == nullptr ? -1 : std::atoi(v);
+  }();
+  if (forced >= 0) {
+    return forced == 1;
+  }
+  (void)dim;
+  (void)rows;
+  return false;
+}
+
 struct Prep {
   Tensor codes;
   Tensor scales;
@@ -1216,6 +1231,7 @@ std::tuple<Tensor, Tensor> search_cuda(
         mask);
   }
 
+  const bool query_shared = scorer_query_on_shared_mem(item_codes.size(1), cluster_ids.size(0));
   Tensor raw;
   Tensor idx;
   if (payloads) {
@@ -1235,7 +1251,7 @@ std::tuple<Tensor, Tensor> search_cuda(
         remainders,
         last_element(prep.remaining_length_cumsum),
         std::nullopt,
-        /*query_on_shared_mem=*/false);
+        query_shared);
   } else {
     std::tie(raw, idx) =
         st::ops::fused_kmean_ann::fused_kmean_ann_cuda_precomputed(
@@ -1249,7 +1265,8 @@ std::tuple<Tensor, Tensor> search_cuda(
             divisor_for_int8,
             prep.warp_rounded_length_cumsum,
             prep.remaining_length_cumsum,
-            prep.warp_size_cumsum);
+            prep.warp_size_cumsum,
+            query_shared);
   }
 
   // The epilogue of retrieve.ops.official.official_probe_score: top-k on the raw scores (pads at
