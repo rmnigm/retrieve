@@ -50,6 +50,7 @@ and tags for both trees: [SCHEMA.md](SCHEMA.md). Structural changes:
   [provenance](paper/provenance-and-disclosure.md),
   [Meta as published vs adapted](paper/meta-published-vs-adapted.md),
   [claims](paper/claims.md),
+  [outline](paper/outline.md),
   [results draft](paper/results.md),
   [abstract (submitted)](paper/abstract.md),
   [ECIR criteria](paper/ecir-criteria.md),
