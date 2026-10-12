@@ -55,7 +55,7 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
       const sp = [1, 16, 64].map(b => r.sp[b]).filter(v => v != null);
       if (!sp.length) {
         el("rect", { x: x0, y: y - 7, width: x1 - x0, height: 14, rx: 3, fill: "url(#hatch)" }, svg);
-        el("text", { x: x0 + 8, y: y + 4, class: "axis", style: "fill:var(--ink-2)" }, svg, `never reaches ${t.toFixed(2)} (top ${r.top}): exact LiNR ${r.linr} wins`);
+        el("text", { x: x0 + 8, y: y + 4, class: "axis", style: "fill:var(--ink-2)" }, svg, `not reached within a 25 % scan (top ${r.top})`);
       } else {
         el("line", { x1: sx(Math.min(...sp)), x2: sx(Math.max(...sp)), y1: y, y2: y, stroke: "var(--st-soft)", "stroke-width": 4 }, svg);
         [1, 16, 64].forEach(b => {
@@ -65,7 +65,7 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
         el("text", { x: cx, y: y + 4, class: "axis" }, svg, r.cfg);
       }
       const hit = el("rect", { x: 0, y: y - 14, width: 700, height: rh - 2, class: "hit" }, svg);
-      bindTip(hit, `<b>${r.ds} · ${r.sweep}</b><br>pass rate ${pct(r.pass_rate)}<br>` + (sp.length ? `${r.cfg}, recall ${r.recall}<br>bs 1 / 16 / 64: ${[1, 16, 64].map(b => r.sp[b] == null ? "–" : r.sp[b] + "×").join(" / ")} faster` : `SilverTorch tops out at recall ${r.top}<br>exact LiNR ${r.linr} wins by default`));
+      bindTip(hit, `<b>${r.ds} · ${r.sweep}</b><br>pass rate ${pct(r.pass_rate)}<br>` + (sp.length ? `${r.cfg}, recall ${r.recall}<br>bs 1 / 16 / 64: ${[1, 16, 64].map(b => r.sp[b] == null ? "–" : r.sp[b] + "×").join(" / ")} faster` : `SilverTorch tops out at recall ${r.top}<br>no SilverTorch point within a 25 % scan`));
     });
     const ly = top + rows.length * rh + 26;
     [[1, "one query"], [16, "batch of 16"], [64, "batch of 64"]].forEach(([b, n], i) => {
@@ -168,7 +168,7 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
   draw();
 })();
 
-/* 4. matched recall map */
+/* 4. winner map at the recall targets */
 (function () {
   const tbl = document.getElementById("c-map"), ctl = document.getElementById("ctl-map");
   let t = 0.95;
@@ -188,7 +188,7 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
         const r = rows.find(x => x.ds === k.ds && x.sweep === k.sweep && x.kind === k.kind && x.bs === bs && x.k === kk);
         if (!r) { h += `<td class="na">–</td>`; return; }
         const f = r.flag ? "†" : "";
-        const info = r.win === "ST" ? `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time` : (r.np == null ? `SilverTorch tops out at recall ${r.maxrec}; LiNR ${r.linr} wins by default` : `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time`);
+        const info = r.win === "ST" ? `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time` : (r.np == null ? `SilverTorch tops out at recall ${r.maxrec} within a 25 % scan` : `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time`);
         h += r.win === "ST" ? `<td class="st" data-tip="${info}">${r.ratio.toFixed(2)}${f}</td>` : `<td class="li${r.np == null ? " def" : ""}" data-tip="${info}">${r.np == null ? r.linr : r.ratio.toFixed(2)}${f}</td>`;
       });
       h += "</tr>";
@@ -266,12 +266,12 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
 /* 7. claims */
 (function () {
   const C = [
-    ["C1", "ok", "reproduced at bs 1", "<b>LiNR: V2 beats V1 at low pass rates.</b> Holds for one query at a time at every N. At bs 16 V2 wins only below about 2 % passing, by at most 25 %; at bs 64 and 256 V1 wins on every real filter."],
+    ["C1", "part", "shape, not location", "<b>LiNR: V2 beats V1 at low pass rates.</b> A crossover exists for one query at a time, but at a pass rate of 0.79-0.97, not LiNR's 0.11; at LiNR's operating point V2 wins. At bs 16 V2 wins only below about 2 % passing, by at most 25 %; at bs 64 and 256 V1 wins on every real filter."],
     ["C2", "part", "not comparable", "<b>LiNR V3 (1-bit, keep 1 %): about 10 % faster at near-equal recall.</b> LiNR's recall is end-task recall with an unpublished protocol. Under our metric, a 1 % pool reaches 0.89 (median) and is 17 % faster than V2 at bs 16; parity needs a 20 % pool, where V3 is no faster."],
     ["C3", "part", "direction only", "<b>LiNR: native masking is about 100× slower than a custom kernel.</b> We see 1.4–2× (bs 1) and 6–7× (bs 16) against eager PyTorch; torch.compile is about as fast at bs 1."],
-    ["C4", "ok", "better than claimed", "<b>SilverTorch bloom filter: about 0.067 false positives at 1024 bits.</b> We see 0 on arXiv and Goodreads and 0.001 % on PubMed at 1024 bits. The adapted code rechecks bloom hits exactly, so it returns none by design."],
+    ["C4", "ok", "better than claimed", "<b>SilverTorch bloom filter: about 0.067 % false positives at 1024 bits.</b> On SilverTorch's own bloom, with no recheck, we measure 0 on arXiv and Goodreads and 4e-8 on PubMed at 1024 bits, and no false negatives. What the false positives cost in recall comes from the bloom legs."],
     ["C5", "part", "only at scale", "<b>SilverTorch co-design: 1.79–2.15× faster.</b> Holds at 30 M items with Meta's code (more at bs 64). Below 10 M it is reversed (0.78–0.89×)."],
-    ["C6", "part", "partially", "<b>SilverTorch int8 cannot reach 0.95 recall; selective filters need more probes.</b> The second half holds strongly. 0.95 is reached on Goodreads, arXiv, LAION tags at 10–30 M and most synthetic filters, not on LAION's domain filter, PubMed or YFCC (where int8 rounding is 9 % of the whole top-100 score spread)."],
+    ["C6", "part", "partially", "<b>SilverTorch int8 cannot reach 0.95 recall; selective filters need more probes.</b> The second half holds strongly, and per query recall follows the local pass rate. 0.95 is reached on Goodreads, arXiv, LAION tags at 10-30 M and most synthetic filters, not on LAION's domain filter or PubMed."],
     ["C7", "ok", "holds", "<b>Our adaptation keeps Meta's results.</b> Identical ids and scores in all 1,536 gate cells, and 0.12–0.82 of Meta's eager time (median per dataset and filter)."],
   ];
   const box = document.getElementById("claims");

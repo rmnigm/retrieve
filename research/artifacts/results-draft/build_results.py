@@ -9,9 +9,9 @@ results.parquet and artifacts/meta-fork/<gate>/out/*.json. Every number is read 
 The head-to-head is the NUMBERS A2 / A3 legs only: SilverTorch (backend "official-fork") at the picked points, interleaved
 with LiNR V1 / V2 in one process per cell group. A cell measured twice (A2-small and its rerun, A2b and its rerun, A2-small
 and A2b at LAION 1 / 3 M) keeps its stable record, the later leg's when both are stable; a cell unstable in every run keeps
-its record and the flag. yfcc10m-synth LiNR at k 1000 is kept and flagged: fp16 item storage against the fp32 oracle
-(HB-6; the user's YFCC allowance covers k 1000). LiNR V2 at bs 256 on PubMed c3_journal_reverse / all5 and YFCC is a
-TIMEOUT (no usable result after 3.6-9.8 h at 80 GB), shown as such in linr_numbers. LiNR's
+its record and the flag. YFCC is out of the study (user, 2026-10-13: uint8 L2 descriptors, not trained for inner product), so
+every yfcc* record, final pass, NUMBERS or gate grid, is dropped on load. LiNR V2 at bs 256 on PubMed c3_journal_reverse / all5
+is a TIMEOUT (no usable result after hours at 80 GB), shown as such in linr_numbers. LiNR's
 claims (C1-C3) read campaign-final plus the LiNR-only NUMBERS legs (L1-L4); C4 reads NUMBERS A4 (adapted widths) and Meta's
 code as published (final pass), C5 Meta's code as published, C6 the adapted code's curves, ceiling split and local pass rate
 (ADAPTED), C7 the gates. No Triton SilverTorch record feeds a table.
@@ -50,7 +50,6 @@ TIMED = [  # later wins between two stable records of one cell
     "A2b-laion-small-lists",
     "A2b-laion-small-lists-rerun",
     "A2-pubmed",
-    "A2-yfcc",
     "A2-laion10m",
     "A2-laion30m-real",
     "A2-laion30m-synth",
@@ -63,7 +62,6 @@ ADAPTED = (
 CURVES = [
     "A1-small",
     "A1-pubmed",
-    "A1-yfcc",
     "A1-laion10m",
     "A1-laion30m",
     "A1-laion30m-synth",
@@ -102,13 +100,21 @@ def params(df):
     return df
 
 
+def no_yfcc(df):
+    return df[~df.dataset.str.startswith("yfcc")]
+
+
 def leg(name):
-    return pd.read_parquet(HUB / "numbers" / name / "results.parquet").assign(leg=name)
+    return no_yfcc(pd.read_parquet(HUB / "numbers" / name / "results.parquet")).assign(
+        leg=name
+    )
 
 
 def load_records():
     """campaign-final plus the LiNR-only NUMBERS legs (claims C1-C6)."""
-    parts = [pd.read_parquet(HUB / "campaign-final/merged-4016/results.parquet")]
+    parts = [
+        no_yfcc(pd.read_parquet(HUB / "campaign-final/merged-4016/results.parquet"))
+    ]
     parts += [leg(name) for name in LINR_LEGS]
     df = params(pd.concat(parts, ignore_index=True))
     df["suite_rank"] = df.suite.map({s: i for i, s in enumerate(SUITE_PREF)}).fillna(99)
@@ -120,9 +126,6 @@ def load_timed():
     raw = params(pd.concat([leg(n).assign(leg_rank=i) for i, n in enumerate(TIMED)]))
     df = raw[raw.perf_mode.notna()]
     df["unstable"] = df.unstable.fillna(False).astype(bool)
-    df["fp16_flag"] = (
-        (df.dataset == "yfcc10m-synth") & df.algo.isin(LINR) & (df.perf_k >= 1000)
-    )
     key = CELL + ["algo", "backend", "n_lists", "n_probe", "perf_mode"]
     df = df.sort_values(["unstable", "leg_rank"], ascending=[True, False])
     return raw, df.drop_duplicates(key)
@@ -144,7 +147,7 @@ def load_gate():
             for c in json.load(open(f)):
                 c["gate"] = gate
                 rows.append(c)
-    g = pd.DataFrame(rows)
+    g = no_yfcc(pd.DataFrame(rows))
     g["fork_graph"] = g.graph_ms.map(
         lambda d: d.get("fork") if isinstance(d, dict) else np.nan
     )
@@ -219,19 +222,19 @@ def linr_arm(df):
 
 
 def head_to_head(timed, mode="graph"):
-    """Every SilverTorch point against the faster exact LiNR (V1 / V2) of its cell, same process, same mode."""
+    """Every SilverTorch point (clause or bloom) against the faster exact LiNR (V1 / V2, clause filter) of its cell, same leg,
+    same mode. LiNR with a bloom filter is not in the study (user, 2026-10-13)."""
     x = timed[timed.perf_mode == mode]
     st = x[x.algo == "silvertorch"]
-    li = x[x.algo.isin(["linr_v1_filter_mask", "linr_v2"])].assign(
-        v=lambda d: d.algo.map(LINR)
-    )
-    ms = li.pivot_table(index=CELL, columns="v", values="perf_median_ms")
-    ms["linr_unstable"] = (
-        li.groupby(CELL).unstable.any() | li.groupby(CELL).fp16_flag.any()
-    )
+    li = x[
+        x.algo.isin(["linr_v1_filter_mask", "linr_v2"]) & (x.filter_kind == "clause")
+    ].assign(v=lambda d: d.algo.map(LINR))
+    on = [c for c in CELL if c != "filter_kind"]
+    ms = li.pivot_table(index=on, columns="v", values="perf_median_ms")
+    ms["linr_unstable"] = li.groupby(on).unstable.any()
     ms["linr_ms"] = ms[["V1", "V2"]].min(axis=1)
     ms["linr_best"] = ms[["V1", "V2"]].idxmin(axis=1)
-    h = st.merge(ms.reset_index(), on=CELL)
+    h = st.merge(ms.reset_index(), on=on)
     h = h.assign(
         n_items=h.n_items,
         st_ms=h.perf_median_ms,
@@ -325,7 +328,9 @@ def linr_numbers(df):
             ["L1-linr-bs64", "L1b-linr-bs64-laion", "L3-linr-corr", "L4-linr-k2048"]
         )
     ]
-    x = x[x.perf_mode == "graph"].assign(v=lambda d: d.algo.map(LINR))
+    x = x[(x.perf_mode == "graph") & (x.filter_kind == "clause")].assign(
+        v=lambda d: d.algo.map(LINR)
+    )
     pv = x.pivot_table(
         index=[
             "leg",
@@ -341,16 +346,9 @@ def linr_numbers(df):
         values="perf_median_ms",
     ).reset_index()
     pv["V2_status"] = "ok"
-    timeout = pv.dataset.isin(["pubmed", "yfcc10m"]) & (pv.perf_bs == 256)
-    timeout &= pv.sweep.isin(["c3_journal_reverse", "all5", "tags_and"])
+    timeout = (pv.dataset == "pubmed") & (pv.perf_bs == 256)
+    timeout &= pv.sweep.isin(["c3_journal_reverse", "all5"])
     pv.loc[timeout, ["V2", "V2_status"]] = [np.nan, "TIMEOUT"]
-    missing = [
-        dict(leg="L1-linr-bs64", dataset=ds, dim=d, filter_kind="clause", sweep=sw)
-        | dict(perf_bs=256, perf_k=k, V2_status="TIMEOUT")
-        for ds, d, sw in [("yfcc10m", 192, "tags_and")]
-        for k in [100, 1000]
-    ]
-    pv = pd.concat([pv, pd.DataFrame(missing)], ignore_index=True)
     pv["v2_over_v1"] = pv.V2 / pv.V1
     return pv
 
@@ -426,7 +424,6 @@ def c1_real(linr):
                 "arxiv",
                 "goodreads",
                 "pubmed",
-                "yfcc10m",
                 "laion30m",
                 "laion10m",
                 "laion3m",
@@ -443,6 +440,7 @@ def c1_real(linr):
 def c2(df):
     x = df[
         (df.algo.isin(["linr_v2", "linr_v3"]))
+        & (df.filter_kind == "clause")
         & (df.perf_mode == "graph")
         & (df.seed == 0)
         & (df.perf_k == 100)
@@ -520,23 +518,16 @@ def c3(df):
 
 def c4():
     """C4 on SilverTorch's own bloom (user's bloom-reporting ruling): its false-positive rate per width over the whole index
-    (BLOOM_FP, fp_adapted.py, recheck off) beside the adapted code's recall and index size at that width (NUMBERS A4). The A4 records'
-    `bloom_fp_rate` is our standalone LiNR bloom's, so it goes to linr_bloom_fp, never beside SilverTorch's."""
+    (BLOOM_FP, fp_adapted.py, recheck off) beside the adapted code's recall and index size at that width (NUMBERS A4). The A4
+    records' `bloom_fp_rate` comes from the harness's standalone filter module, not SilverTorch's index, and is not reported."""
     fp = pd.read_csv(HUB / BLOOM_FP / "fp_adapted.csv")
-    a4 = params(leg("A4-bloomwidth"))
-    a4 = a4.drop_duplicates(["dataset", "sweep", "m_bits", "k_hash"])
-    a4 = a4[["dataset", "sweep", "m_bits", "k_hash", "oracle_recall@100", "index_mib"]]
-    st = fp.merge(
-        a4, on=["dataset", "sweep", "m_bits", "k_hash"], suffixes=("_bloom", "_index")
-    )
-    linr = params(leg("A4-bloomwidth")).drop_duplicates(
+    a4 = params(leg("A4-bloomwidth")).drop_duplicates(
         ["dataset", "sweep", "m_bits", "k_hash"]
     )
-    linr = linr[["dataset", "sweep", "m_bits", "k_hash", "bloom_fp_rate"]].rename(
-        columns={"bloom_fp_rate": "linr_bloom_fp_rate"}
-    )
-    keys = ["dataset", "sweep", "k_hash", "m_bits"]
-    return st.sort_values(keys), linr.sort_values(keys)
+    a4 = a4[["dataset", "sweep", "m_bits", "k_hash", "oracle_recall@100", "index_mib"]]
+    keys = ["dataset", "sweep", "m_bits", "k_hash"]
+    st = fp.merge(a4, on=keys, suffixes=("_bloom", "_index"))
+    return st.sort_values(["dataset", "sweep", "k_hash", "m_bits"])
 
 
 def c5(df, gc):
@@ -595,7 +586,7 @@ def c6(curves):
             )
         )
     keys = ["dataset", "filter_kind", "sweep", "n_lists", "n_probe"]
-    return q.sort_values(keys), pd.DataFrame(ceil)
+    return q.sort_values(keys), no_yfcc(pd.DataFrame(ceil))
 
 
 def linr_vs_n(df):
@@ -620,7 +611,10 @@ def linr_vs_n(df):
 def memory(df, timed):
     """Index size and build time: LiNR and Meta's code from the final pass, the adapted code from the NUMBERS legs."""
     x = df[(df.suite == "filter") & (df.seed == 0)]
-    x = x[x.algo.isin(LINR) | ((x.algo == "silvertorch") & (x.backend == "official"))]
+    x = x[
+        (x.algo.isin(LINR) & (x.filter_kind == "clause"))
+        | ((x.algo == "silvertorch") & (x.backend == "official"))
+    ]
     x = x.assign(arm=x.algo.map(LINR).fillna("SilverTorch, Meta as published"))
     st = timed[(timed.algo == "silvertorch") & timed.index_mib.notna()]
     st = st.assign(arm="SilverTorch, adapted")
@@ -778,8 +772,7 @@ def main():
         "linr_numbers": linr_numbers(df),
         "c2_v3": c2(df),
         "c3_torch": c3(df),
-        "c4_bloom": c4b[0],
-        "linr_bloom_fp": c4b[1],
+        "c4_bloom": c4b,
         "c5_meta": meta5,
         "c5_adapted": adapted5,
         "c6_recall": c6q,

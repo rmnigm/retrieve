@@ -87,7 +87,7 @@ paper; it appears below only where a harness or LiNR fact depends on it.
 | builds not byte-reproducible | each pod's `_C.so` differs (four sha256 in the final pass's recipe; pod b's rebuild differs from pod 1's) | `research/artifacts/campaign-final/recipe.yaml` `official_so_sha256`; validation NUMBERS "Provenance" | citable |
 | coexistence | fork installs as `silvertorch-fork`, ops `torch.ops.stfork.*`, beside upstream `torch.ops.st.*` in one process (parity and interleaved timing in one process) | CHANGES "Coexistence" | citable |
 | phase 1 | k-means (Lloyd, 10 iters, random init), global int8 codes, top-`n_probe` probe selection, query prep: ours, shared by both columns | [meta-published-vs-adapted §1](../meta-published-vs-adapted.md#1-what-the-studys-silvertorch-is), [deviations ST-5, ST-7](../reproduction-deviations.md#3-silvertorch-as-we-run-it--deviations-from-the-paper) | citable (design) |
-| study configuration | int32 score path; bloom = configured width (C12) + exact recheck (C13); Meta's bloom semantics only for the parity gate and the "as published" column; fp16 a reported variant | [decisions → goal](../../decisions.md#goal-and-scheduling); roadmap NUMBERS item 4 | citable (decision) |
+| study configuration | int32 score path; bloom = configured width (C12), recheck (C13) **off** (user, 2026-10-12: no recheck in timed code; false positives cost recall at grading); Meta's bloom semantics for the parity gate and the "as published" column; fp16 a reported variant; LiNR exact filter only (user, 2026-10-13) | [decisions → goal](../../decisions.md#goal-and-scheduling) | citable (decision) |
 
 ### Q5. Every change in `official-fork/CHANGES.md`, by kind
 
@@ -296,7 +296,7 @@ Fixed since C2 collected them (results-draft `e7119b3`, `85c4ec8`): claims C4 / 
 |---|---|---|---|
 | [roadmap](../../roadmap.md) NUMBERS | legs "at the `campaign-fork` tag" | they ran at FORK_HEAD `cc595da` (default path identical per N1) | controller |
 | [provenance](../provenance-and-disclosure.md) §1 | 1410 MHz "on every under-load sample of every run recorded to date" | final pass: 1,377 of 12,527 perf entries sampled below 1410 MHz (1155 and 1140 most common); 873 records `unstable`, 835 of them `clocks_drift` (Q12) | results-draft |
-| [results](../results.md), [validation](../../validation.md) NUMBERS A4 row, [claims](../claims.md) C4 | "the adapted bloom's false-positive rate falls with width" | `bloom_fp_rate` on `official` / `official-fork` cells is the harness's standalone library `BloomFilter` (Triton) at the job's width, not the SilverTorch index's ([outline](../outline.md) open item 4) | controller ruling, then results-draft |
+| [results](../results.md), [validation](../../validation.md) NUMBERS A4 row, [claims](../claims.md) C4 | "the adapted bloom's false-positive rate falls with width" | **resolved**: C4 now reports SilverTorch's own bloom, measured on its index (`fp_adapted.py`); the harness's `bloom_fp_rate` column is not used | results-draft |
 | main checkout `articles/` | the papers are on the box | empty on pod 1; quote from arXiv | — |
 
 ## 6. Needs the user

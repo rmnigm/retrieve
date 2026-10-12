@@ -43,36 +43,17 @@ need a decision or an action only the user (or the controller) can take:
    goodreads checkpoints, Re-LAION vectors, PubMed slice, the public result
    repos, `eval-results` shape, GitHub visibility. §8's availability
    paragraph depends on them.
-3. **C1 verdict wording.** Proposed: "reproduced in shape, not in
-   location": a V1 / V2 crossover exists at bs 1 at every N and d, but at
+3. **C1 verdict wording** — *ruled* (user, 2026-10-13): "reproduced in
+   shape, not in location": a V1 / V2 crossover exists at bs 1 at every N and d, but at
    pass rate 0.79-0.97, where LiNR's high-pass point (≈ 0.11) has V1 3.0×
    faster and ours has V2 faster (0.29-0.68 of V1). The mechanism is our
    fused V2 (LN-1), which LiNR §6 itself predicts (L-12).
-4. **C4's false-positive rates come from the harness's standalone bloom,
-   not from the SilverTorch index** (found by this consolidation; for the
-   controller). On `official` and `official-fork` cells the harness maps
-   the filter backend to `triton` (`evaluation/bench/algos.py`
-   `filter_backend`), and `bloom_fp_rate` is the library `BloomFilter`'s at
-   the job's `m_bits` / `k_hash`
-   ([evaluation](../../docs/system/evaluation.md#measurement-protocol),
-   "An official cell's `bloom_fp_rate` is the standalone Triton filter's").
-   The adapted and published rows of `c4_bloom.csv` carry identical rates
-   (PubMed `c0_mesh` 9.345737e-6 at 1024 / k_hash 3 in both), which
-   confirms it. So "the adapted bloom's FPR falls from 2.4 % at 64 bits to
-   9e-6 at 1024" (results.md, validation A4 row, claims C4) describes the
-   library's bloom filter (the LiNR arm's), not the adapted index's. What
-   the A4 leg does measure on the adapted index: recall identical at every
-   width (the recheck) and index memory against width. Options: (a) keep
-   the FPR curve, labelled as the library bloom at the same width, and say
-   that the adapted index's own pre-recheck rate is not recorded; (b) a
-   small harness change plus a quality-only leg that counts the adapted
-   index's bloom survivors; (c) cut the FPR half of C4 to "0 false
-   positives after the recheck". Until ruled, §4.4 uses (a)'s wording.
-   The user's bloom directive (2026-10-12: SilverTorch with its
-   probabilistic filter, no recheck in timed code) makes the A1-bloom
-   curves measure what the index's false positives cost in recall
-   directly, which is the quantity C4 needs; the FPR itself still comes
-   from the library bloom unless (b) is done.
+4. **C4's false-positive rates** — *resolved* (controller and user,
+   2026-10-13): the harness's `bloom_fp_rate` is its standalone filter
+   module's, not SilverTorch's, and is not used. C4 reports SilverTorch's
+   own bloom, measured on the adapted index with no recheck
+   (`fp_adapted.py`, Hub `artifacts/results-draft/20261013-bloom-fp`); what
+   its false positives cost in recall comes from the bloom legs.
 5. **Mention repository stars (34 / 13 forks) and citation counts?**
    OpenAlex gives LiNR 1, SilverTorch 0 (a floor). The material page argues
    impact from deployment scale and released code instead.
@@ -87,7 +68,7 @@ Every number in the paper comes from one of four sources, all citable
 | LiNR final pass | every LiNR V1-V3 number, the postfilter and `torch.compile` arms (C1-C3); Meta's code as published for C5 | Hub `campaign-final/merged-4016/results.parquet` (library `e16512f5`); [validation](../validation.md#campaign-v2-phase-v), rows EXHIBITS and D1-G (green, user 2026-10-11) |
 | NUMBERS legs | every SilverTorch number on the adapted code (C4 recall and memory, C6, the head-to-head), LiNR beside it where a leg ran it (V3 pools, bs 64 / 256, k 2048, correlated filters) | Hub `numbers/*` ([hub-index](../artifacts/hub-index.md)); [validation](../validation.md#numbers-adapted-silvertorch-over-the-study-grid) (green, controller ACCEPT 2026-10-12, three exclusions) |
 | META-FORK gates | the adapted code against Meta's code as published (C7, T3) | Hub `artifacts/meta-fork/*`; [validation](../validation.md#meta-fork-backendofficial-fork) (review ACCEPT at `1f6fed8`) |
-| bloom legs (**pending**, due 2026-10-13 16:00Z) | SilverTorch's bloom without recheck (curves, timed), LiNR V1 / V2 under exact and bloom filters interleaved (T4, F5, the bloom side of §5) | Hub `numbers/A1-bloom`, `numbers/A2-bloom`; validation NUMBERS once their gate is green |
+| bloom legs (**pending**, due 2026-10-13 16:00Z) | SilverTorch's bloom without recheck (curves, timed), LiNR V1 / V2 with the exact filter interleaved (the bloom side of §5) | Hub `numbers/A1-bloom`, `numbers/A2-bloom`; validation NUMBERS once their gate is green |
 | results-draft checks | the end-task bridge, YFCC score gaps, the C6 ceiling split and local pass rate on adapted indexes | Hub `artifacts/results-draft/20261012-checks`, `-adapted`; validation NUMBERS rows |
 
 The tables and figures are built by
@@ -117,15 +98,15 @@ together (the end-task bridge, §3).
 | 2 | The originals, their claims, related work | 1.0 | T1 (claims and verdicts) |
 | 3 | Reproduction setup | 1.75 | T-data (datasets) |
 | 4 | The claims, one by one | 3.25 | F1, F2, F4 |
-| 5 | SilverTorch against LiNR, and what the probabilistic filter costs | 2.25 | F3, T2, T4, F5 |
+| 5 | SilverTorch against LiNR | 2.25 | F3, T2 |
 | 6 | Meta's code as published and as adapted | 0.75 | T3 |
 | 7 | Deviations, difficulties, communication | 0.75 | — |
 | 8 | Limitations, availability, conclusion | 0.75 | — |
-| | **total** | **12.0** | 5 tables, 5 figures |
+| | **total** | **12.0** | 4 tables, 4 figures |
 
 The survey's LNCS papers never let results drop below 4 pages; §4 + §5
 hold 5.5. If the paper runs long, cut in this order: related work in §2
-to three sentences; F5 into T4 (one exhibit for the filter cost); F4 to text (C4 and C5 are each one sentence and one
+to three sentences; F4 to text (C4 and C5 are each one sentence and one
 range); T-data merged into the §3 prose; §7's residuals to one line.
 Nothing goes to an appendix (appendices count toward the 12).
 
@@ -144,7 +125,8 @@ Nothing goes to an appendix (appendices count toward the 12).
   modes: adapting released code and implementing from text.
 - What we do: test every testable quantitative claim on five public
   datasets (0.8-30 M items, d 128-768) with real and synthetic filters on
-  one A100, and compare the two systems at matched recall.
+  one A100, and compare SilverTorch at recall 0.90 / 0.95 with exact LiNR,
+  and with LiNR V3 at the same recall (the matched-recall row).
 - Contributions, as a numbered list (survey pattern): (1) claim verdicts
   for both papers; (2) the first head-to-head, as a regime map over pass
   rate, N and batch size; (3) Meta's code adapted, held bit-exact to the
@@ -234,7 +216,8 @@ C1-C7 matrix); verdicts from [results](results.md#claim-verification) and
   contains (kernels only; query preparation outside, reported apart).
 - **Tuning.** IVF `n_lists` per dataset size (4096, 16384, 65536 from
   10 M) and the probe curve (`n_probe` doubling from 8 to `n_lists` / 4);
-  results at matched recall 0.90 / 0.95, and at the papers' operating
+  SilverTorch at recall targets 0.90 / 0.95 (against exact LiNR, and against
+  LiNR V3 at the same recall), and at the papers' operating
   point (24 probes) as a reference row; k 100 and 1000, k 2048 on a subset
   (the papers' own k); bs 1 / 16 / 64 (256 for LiNR where it fits); seed 0,
   seeds 0-2 on the C1 crossover cells.
@@ -264,7 +247,7 @@ SilverTorch.
 | 4.1 | **C1** V1 beats V2 at high pass rate, V2 wins at low (L-3…L-5) | a crossover exists at bs 1 at every N and d, at p 0.79-0.97 (LiNR: below 0.11); V2 1.6-5.1× faster at p 0.001. At bs 16 V2 wins only below p ≈ 0.02-0.065, by at most 25 %, never on laion1m or yfcc10m-synth. At bs 64 V2 is slower on every real filter (1.3-35×); at bs 256 it times out on three. Correlated filters change nothing. Seeds 0-2 at the crossover cells move V2 / V1 by ≤ 0.011. Mechanism: fused V2 (LN-1, L-12); batching favours V1's one shared matrix | **F1** (V2 / V1 latency vs pass rate, bs 1 and bs 16, one line per N): `c1_curves.csv`, `c1_crossover.csv`, `c1_real.csv`, `linr_numbers.csv`, figure `fig_c1_v2_over_v1` |
 | 4.2 | **C2** V3 keeping ~1 % gives ~10 % at near-parity recall (L-6) | not comparable as stated (end-task recall, unpublished protocol). Under our metric a 1 % pool reaches median 0.89 at 0.83 of V2 at bs 16 and 1.08 at bs 1; parity (0.99) needs 20 %, where V3 is no faster. LAION 1-30 M: 1 % reaches 0.89, 1.11× V2 at bs 1, 0.97× at bs 16. Our code length is capped at d (LN-8; LiNR 512 bits); near parity at 1 % needs 768 bits (PubMed). On Goodreads' end task a 1 % pool keeps 0.89-0.95 of the exact scan's recall at k 100 | text + one line in F3: `c2_v3.csv` (NUMBERS L2, L2b), `product_recall.csv` |
 | 4.3 | **C3** custom filter kernel ~100× over native masking (L-2) | direction holds, size far below 100×: eager torch 1.4-2.0× slower at bs 1, 5.8-6.8× at bs 16; `torch.compile` max-autotune 0.5-1.06× of ours at bs 1 (mostly faster: another reduction order and fp16 top-k keys), 1.5-4.8× slower at bs 16 | text with ranges: `c3_torch.csv`; mechanism: [validation](../validation.md#library-gates) V1-FUSE row |
-| 4.4 | **C4** Bloom FPR ≈ 0.067 at 1024 bits, memory (S-8…S-10, S-14) | the adapted code (configured width + exact recheck) returns 0 false positives at every width 64-2048, so recall is the same at every width and width costs only memory: PubMed index 9.1 → 11.4 GiB from 64 to 2048 bits, 1,221 MiB per 1024 bits at 10 M items, which is N · m_bits / 8 bytes, the arithmetic behind the paper's own memory figures (5 GB at 1024 bits for 40 M). The FPR curve before the recheck is the library bloom's at the same width (open item 4): 2.4 % at 64 bits to 9e-6 at 1024 on PubMed `c0_mesh`, 0 from 256 bits on arXiv and Goodreads, below the paper's 0.067 (%) under either reading. Meta's code as published admits false positives that cost recall: PubMed `c0_mesh` recall@100 0.649 against the adapted code's 0.664 (k_hash 3), and at 30 M (OF-12). The paper's two FPR figures disagree (S-9 vs S-10); the transposed layout is not in Meta's released code (OF-1) **Pending A1-bloom:** SilverTorch's bloom without the recheck (the user's study setting): recall@k against the exact oracle at m_bits 1024 / k_hash 5, i.e. what the index's false positives cost, per real bloom sweep. **F4a** (memory and FPR vs bits): `c4_bloom.csv` (NUMBERS A4 `numbers/A4-bloomwidth`; final-pass `bloomwidth` for the "as published" rows) |
+| 4.4 | **C4** Bloom FPR ≈ 0.067 at 1024 bits, memory (S-8…S-10, S-14) | SilverTorch's own bloom, measured on the adapted index with no recheck: its false-positive rate falls with width (PubMed `c0_mesh`, k_hash 3: 2.3 % at 64 bits, 7.7e-6 at 1024) and at the study's 1024 bits / k_hash 5 is 0 on arXiv and Goodreads and 4.3e-8 on PubMed, far below the paper's 0.067 (%) under either reading; no false negatives. Width costs memory: PubMed index 9.1 → 11.4 GiB from 64 to 2048 bits, 1,221 MiB per 1024 bits at 10 M items, which is N · m_bits / 8 bytes, the arithmetic behind the paper's own memory figures (5 GB at 1024 bits for 40 M). Meta's code as published admits false positives that cost recall: PubMed `c0_mesh` recall@100 0.649 against the adapted code's 0.664 (k_hash 3), and at 30 M (OF-12). The paper's two FPR figures disagree (S-9 vs S-10); the transposed layout is not in Meta's released code (OF-1). **Pending A1-bloom:** what the false positives cost in recall per real bloom sweep (recall without the recheck against the exact filter's, same index and probes). **F4a** (memory and FPR vs bits): `c4_bloom.csv` (`fp_adapted.py`, NUMBERS A4) |
 | 4.5 | **C5** co-design 1.79-2.15× over full mask then probe (S-3, S-11) | evaluated on Meta's code as published only (`backend="official"`, eager): holds at 30 M (1.07-2.20 at bs 16, 1.69-5.56 at bs 64) and at 10 M bs 64 (1.13-2.35); mixed at 3 M bs 64 (0.87-1.25) and 10 M bs 16 (0.83-1.20); reversed at 0.8-3 M bs 1-16 (0.78-0.89). Mechanism: host work in the published partial path grows with the sub-query count (OF-9). The adapted code refuses `bloom_path="full"` by design (K fix 17), so its column reads "refused by design (K17)" | **F4b** (full / partial vs N, Meta's code as published): `c5_meta.csv` (final pass `codesign`, `nsweep-codesign`, `codesign-laion30m`). `c5_adapted.csv` is not cited |
 | 4.6 | **C6** int8 IVF: recall ceiling < 0.95, selective filters need more probes (S-6, S-7, S-16) | at 24 probes recall falls with selectivity (goodreads-synth 0.93 → 0.05 from p 1 to 0.001) and is far from exact on real filters (0.33-0.89). With more probes 0.95 is reached on Goodreads, arXiv, LAION `tags4` at 10 / 30 M and 18 of 31 synthetic sweeps, not on LAION `c0_domain`, PubMed or YFCC. The ceiling split on adapted indexes (int8 shipped / per-row / fp16, same probed lists): YFCC synth 0.53 / 0.75 / 0.97 and PubMed `c3_journal_reverse` 0.92 / 0.94 / 0.996, so there int8 is the limit; LAION 1 / 3 M fp16 adds ≤ 0.009, so there the partition is. YFCC's geometry explains it (a random pair's cosine 0.97; top-100 spans 0.0022). Per query, recall follows the local pass rate more than the global one (Spearman higher in 45 / 45 cells; 0.24-0.73 vs 0.01-0.60 at 32 probes) | **F2** (recall vs pass rate at fixed probes, uniform and correlated, one line per N): `c6_recall.csv` (NUMBERS A1 / A1b), `at24.csv`, `c6_ceiling.csv` and `c6_local_pass.csv` (Hub `artifacts/results-draft/20261012-adapted`), `score_gaps_*.json` |
 
@@ -280,13 +263,18 @@ Neither paper ran this comparison; it is the study's own result and the
 novelty the call asks for. Kept apart from §4 (survey pattern 2).
 
 **Claims.**
-- Where SilverTorch reaches the target on a real filter, it is faster than
-  the best exact LiNR at every size from 0.8 M to 30 M: 0.045-0.71 of
+- Where SilverTorch reaches recall 0.90 on a real filter, it is faster than
+  the best exact LiNR at every size from 0.8 M to 30 M (not matched recall:
+  LiNR's recall is ≈ 1.0): 0.045-0.71 of
   LiNR's latency at 0.90, every batch size; at 0.95 its lead shrinks at
   bs 64 (up to 0.98).
-- Where it cannot reach the target, exact LiNR wins by default: a recall
-  ceiling, not a speed loss (LAION `c0_domain` up to 10 M, LAION 1 M,
-  YFCC, PubMed `all5`, 0.95 on PubMed). 0.99 is reached nowhere.
+- Where it does not reach the target within a 25 % scan (`n_probe` ≤
+  `n_lists` / 4) there is no SilverTorch point (LAION `c0_domain` up to
+  10 M, LAION 1 M, YFCC, PubMed `all5`, 0.95 on PubMed). 0.99 is reached
+  nowhere.
+- **Matched recall (pending, after the bloom legs):** LiNR V3 (approximate)
+  at 0.90 / 0.95, timed and interleaved with SilverTorch's bloom at the same
+  points (user, 2026-10-13).
 - At its production setting (24 probes) SilverTorch is faster in all 363
   cells (0.016-0.99 of LiNR at bs 1) but its recall there is far from
   exact: a reference row, not a comparison at equal quality.
@@ -307,58 +295,10 @@ novelty the call asks for. Kept apart from §4 (survey pattern 2).
   grading only: recall against the exact oracle counts a false positive as
   a miss); SilverTorch's exact clause mode is our adaptation and leaves the
   head-to-head (at most a reference row). The bloom-side head-to-head
-  (SilverTorch bloom against LiNR exact and LiNR bloom, interleaved per
-  cell) comes from `numbers/A1-bloom` (curves) and `numbers/A2-bloom`
+  (SilverTorch bloom against LiNR exact, interleaved per cell) comes from `numbers/A1-bloom` (curves) and `numbers/A2-bloom`
   (timed), due 2026-10-13 16:00Z (controller bloom plan, chain note
   `numbers/2026-10-12-211500000-controller-bloom-plan.md`). The clause-filter claims above stand as
   measured; which of them stay in §5 is set when the leg lands.
-
-### §5.2 What the probabilistic filter costs: LiNR exact vs bloom
-
-Neither paper measures it: LiNR ships only exact attribute matching, and
-SilverTorch reports the bloom's FPR and speed but never what its false
-positives cost in recall. LiNR is the clean place to measure it, because
-its V1 and V2 run either filter over the same exhaustive scan, so recall
-lost is the filter's alone (an exact scan with an exact filter is recall
-1.0 up to HB-6).
-
-**Claims (numbers pending).**
-- Per dataset (real bloom sweeps) and batch size, for LiNR V1 and V2:
-  recall@k with the exact clause filter and with the bloom filter, and the
-  latency of each, side by side; the bloom's recall loss and its speed-up
-  (exact / bloom latency, interleaved in one process).
-- Where the bloom is worth it: the pass rate and batch size at which the
-  speed gain outweighs the recall lost, and where it is not (rare-value
-  filters such as PubMed `c0_mesh`, where a few false positives are a large
-  share of the true pass set).
-- The bloom's own false-positive rate per sweep at its width (`bloom_fp_rate`,
-  the library `BloomFilter` the LiNR arms use) beside the recall it costs.
-- What the bloom cannot express: reverse (NOT) clauses (Goodreads
-  `c1_lang_reverse`, PubMed `c3_journal_reverse`) and YFCC `tags_and` have
-  no bloom sweep; those rows read "no bloom form".
-
-**Exhibit T4** (LiNR exact vs bloom): rows dataset × sweep × bs (1 / 16 /
-64), k 100 (k 1000 if the leg's priority 3a ran); columns V1 exact /
-bloom recall and ms, V2 exact / bloom recall and ms, the bloom's
-recall loss and speed-up, `bloom_fp_rate`. **Exhibit F5**: recall lost
-against speed-up, one point per (dataset, sweep, variant, bs), coloured by
-pass rate. Width: m_bits 1024, k_hash 5 (the suites' `bloom` block).
-
-**Sources.** **Pending:** Hub `numbers/A2-bloom` (B2, `n-bloom-timed`:
-LiNR V1 / V2 under both filters on the same sweep, interleave groups split
-by filter kind in one process, bs 1 / 16 / 64, graph + eager); its row in
-[hub-index](../artifacts/hub-index.md) and validation's NUMBERS section
-when it lands; the table is to be built by `build_results.py` (a new
-`linr_filter` output). **Existing records, for a first look and as a
-cross-check** (citable, final pass at library `e16512f5`): the `filter`
-suite's LiNR V1 / V2 clause and bloom cells on the same sweeps (arXiv
-`c0_maincat` / `c3_nversions` / `all4`, Goodreads `c0_genre`, PubMed
-`c0_mesh`, LAION 30 M `c0_domain` / `tags4`, at the suite's default width)
-in `campaign-final/merged-4016`, and the bloom rows of `h2h.csv` (LiNR V1 /
-V2 beside SilverTorch on bloom sweeps, NUMBERS A2). These ran exact and
-bloom in separate interleave groups or legs, so their ratios are not
-paired; A2-bloom replaces them. Material: **C3**
-([LiNR exact vs bloom](material/results.md#linr-exact-vs-bloom-52-pending)).
 
 **Exhibits.**
 - **F3** recall-latency Pareto per dataset (SilverTorch probe curve against
@@ -366,7 +306,8 @@ paired; A2-bloom replaces them. Material: **C3**
   panel per dataset size, bs 16. Source: `h2h.csv` (graph, interleaved
   with LiNR V1 / V2, 1,677 rows, 30 flagged), `c2_v3.csv` for V3; figures
   `fig_h2h_synth`, `fig_tuned_vs_n` as drafts.
-- **T2** matched-recall winner table (dataset × filter × bs → winner and
+- **T2** winner table, SilverTorch at 0.90 / 0.95 against exact LiNR, with
+  the LiNR V3 matched-recall row (dataset × filter × bs → winner and
   ratio), point ratios without CIs (seed 0; CIs come with FULL-RERUN).
   Source: `tuned.csv`, `by_size.csv`; memory from `memory.csv`.
 
@@ -448,8 +389,8 @@ The strongest results the material supports, ranked by what they add to
 the paper, each with its source. All seed 0, citable. Items marked *new*
 are not yet carried by the sections above or by the results draft.
 
-1. **SilverTorch wins wherever it reaches the target; it loses only to its
-   own recall ceiling.** Real filters, k 100: 35 of 49 cells reach 0.90,
+1. **At recall 0.90, SilverTorch is faster than exact LiNR wherever it
+   reaches the target within a 25 % scan.** Real filters, k 100: 35 of 49 cells reach 0.90,
    and SilverTorch is faster in all 35 at bs 1 (0.045-0.71 of the best
    exact LiNR); 0.99 is reached nowhere. Its edge grows with N where it
    reaches the target: tuned bs 1 ratio 0.51-0.58 on Goodreads 0.8 M,
@@ -513,11 +454,3 @@ are not yet carried by the sections above or by the results draft.
     and easier at p 0.01** (0.95 at 256 probes against 512 for uniform),
     while LiNR's V2 / V1 does not change (0.35-0.41 at bs 1). (`c6_recall.csv`,
     `linr_numbers.csv`; §4.6, §4.1)
-13. *New, pending the paired leg:* **LiNR's bloom filter is not faster
-    than its exact filter on single-clause sweeps.** In the final pass at
-    the default width it costs ≤ 1e-4 recall@100 but runs at 0.67-0.97 of
-    the exact filter's speed on arXiv `c0_maincat` / `c3_nversions`,
-    Goodreads `c0_genre` and PubMed `c0_mesh`, and wins only on the
-    four-clause arXiv `all4` (1.04-2.12× faster). Not interleaved;
-    A2-bloom decides it. (`campaign-final/merged-4016` `filter` suite;
-    [material C3](material/results.md#linr-exact-vs-bloom-52-pending); §5.2)

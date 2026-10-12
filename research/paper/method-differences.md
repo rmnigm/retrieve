@@ -46,8 +46,8 @@ confirmed from code or text is marked **unverified**.
 
 | | exact clause filter | bloom filter |
 |---|---|---|
-| our name | `ExactAttributeFilter`, `filter_kind: clause`; SilverTorch `filter_mode="exact"` | `BloomFilter`, `filter_kind: bloom`; SilverTorch `filter_mode="bloom"` |
-| LiNR's name | attribute-based matching (ABM): clauses, one of them a "reverse matching clause" (§3.1) | none: LiNR has no bloom filter. **LiNR with a bloom filter is ours** (user: evaluate LiNR with both kinds to see the cost of a probabilistic filter) |
+| our name | `ExactAttributeFilter`, `filter_kind: clause`; SilverTorch `filter_mode="exact"` | `filter_kind: bloom` on SilverTorch only (`filter_mode="bloom"`, Meta's bloom) |
+| LiNR's name | attribute-based matching (ABM): clauses, one of them a "reverse matching clause" (§3.1) | none: LiNR has no bloom filter, and LiNR runs with its exact filter only (user, 2026-10-13) |
 | SilverTorch's name | the "forward index", the GPU baseline the paper compares its bloom index against (§4.1, §6.2.2) | the "bloom index" (§4.1) |
 | what a query can say | `C` clauses fixed at index time; per clause one query value; an item passes a clause when any of its values equals it (negated for a reverse clause); AND across clauses ([filtering](../../docs/system/filtering.md#linr-paper-31--fixed-clause-schema-no-dsl)) | the same clauses, forward only: no reverse clause, because NOT over a bloom would drop true matches (`filters.py:50`, `adapter.py:102-110`) |
 | answer | exact: no false positives or negatives | a superset of the exact answer: false positives (hash collisions), no false negatives |
@@ -58,13 +58,13 @@ confirmed from code or text is marked **unverified**.
 
 | method | exact clause filter | bloom filter | false positives |
 |---|---|---|---|
-| **LiNR V1** | over all N, fused into the score write: failing items get score −∞, then top-k (`linr.py`, `LiNRV1.forward`). Paper: multiply the scores by the 0-1 masks, so failing items score 0 (§3.1.1) | our bloom over all N, the same fused −∞ write | kept: a false positive keeps its true score and can enter the top-k |
-| **LiNR V2** | a compact list of passing ids (`clause_compact`), then gather + dot + top-k over it. Paper: slice the matrix to the passing items, then matmul and top-k (§3.1.2) | the same with `bloom_compact` | kept, as candidates |
-| **LiNR V3** | pre-filter as V2, then 1-bit Hamming top-`candidate_pool` among the survivors, then exact rescoring (`LiNRV3.forward`) | the same with the bloom | kept, as candidates |
+| **LiNR V1** | over all N, fused into the score write: failing items get score −∞, then top-k (`linr.py`, `LiNRV1.forward`). Paper: multiply the scores by the 0-1 masks, so failing items score 0 (§3.1.1) | — (exact filter only) | none |
+| **LiNR V2** | a compact list of passing ids (`clause_compact`), then gather + dot + top-k over it. Paper: slice the matrix to the passing items, then matmul and top-k (§3.1.2) | — | none |
+| **LiNR V3** | pre-filter as V2, then 1-bit Hamming top-`candidate_pool` among the survivors, then exact rescoring (`LiNRV3.forward`) | — | none |
 | **SilverTorch, paper** | not in the method | after probe selection, on the probed clusters' items only, fused with scoring (Algorithm 1, §4.3) | accepted: "eliminated by subsequent ranking stages" (§4.1) |
 | **SilverTorch, Meta's code** | no exact filter: the scorer takes any bit mask (`filtering_bit_mask`), which our adapter filled with our exact mask ([filtering](../../docs/system/filtering.md#implementation-status)) | Meta's bloom over the probed clusters (the partial path, default) or over all N (`bloom_path="full"`) | returned ([OF-12](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper)) |
 | **SilverTorch, adapted (the study)** | our exact test inside Meta's search, on the probed docs only (CHANGES C9). **Ours, not Meta's** (user: "exact on silvertorch is our adaptation") | Meta's bloom, evaluated inside the payload kernels on the probed docs only (C8); the full-N path is refused (K fix 17) | with the recheck (C13) every bloom survivor is tested exactly, so none is returned; without it they are returned as in Meta's code ([§2.4](#24-the-recheck)) |
-| **postfilter baseline** | top-`alpha·k` by score over all N, then the filter on those candidates, first k survivors kept ([evaluation](../../docs/system/evaluation.md#the-postfilter-baseline)) | the same with the bloom | kept |
+| **postfilter baseline** | top-`alpha·k` by score over all N, then the filter on those candidates, first k survivors kept ([evaluation](../../docs/system/evaluation.md#the-postfilter-baseline)) | — | none |
 
 In both SilverTorch arms the filter never sees items in unprobed clusters,
 so a passing item there is a miss whatever the filter does; that loss is
@@ -72,23 +72,21 @@ the IVF partition's, not the filter's.
 
 ### 2.3 The bloom implementations and their parameters
 
-Three different blooms appear in the study. They share nothing but the
-idea; equal widths do not give equal false-positive rates.
+Two blooms matter: the paper's and Meta's (as published and adapted).
+They share the idea, not the layout; equal widths need not give equal
+false-positive rates.
 
-| | SilverTorch paper (§4.1, §6.2.2) | Meta's code as published | adapted (the study's SilverTorch) | LiNR's bloom (ours) |
-|---|---|---|---|---|
-| layout | an M-bit signature per item, stored transposed so one 64-bit AND tests 64 items | one bloom per 2048-doc bundle ([OF-1](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper)) | Meta's bundle layout | an M-bit signature per item, row-wise `[N, M/64]` int64 ([filtering](../../docs/system/filtering.md#implementation-status)) |
-| width | M per item; 512-2048 bits measured; heuristic max values × hashes × 3 | `max terms in the bundle · k · b_multiplier` bits per doc; `m_bits` ignored ([OF-10](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper)); `b_multiplier` 10 in our config (`ops/official/__init__.py:123`) | `m_bits` per doc in every bundle (C12, `bloom_width="configured"`); **1024** in the study | `m_bits`, **1024** in the study |
-| hashes | K = 5 | murmur3 over `(feature, value, seed)`; the search ANDs the first `k` distinct of 7 stored hashes | as Meta, `k` = **5** | splitmix-style, a per-clause salt, `k_hash` = **5** ([ST-1](reproduction-deviations.md#3-silvertorch-as-we-run-it--deviations-from-the-paper)) |
-| sweep | FPR at 512 / 768 / 1024 / 2048 bits | one width | `m_bits` 64-2048, `k_hash` 3 / 5 (the bloom-width suite, quality only) | follows the suite width (`evaluation/config/suites.yaml:259`) |
-| reported FPR | 6.98 at 512 bits, 0.067 at 1024 (units not stated; read as %); elsewhere 0.00173 % at 1024 (§6.2.4), inconsistent | — | **not measured directly**: see [§2.5](#25-pass-rate-and-false-positive-rate-definitions) | the record's `bloom_fp_rate` |
+| | SilverTorch paper (§4.1, §6.2.2) | Meta's code as published | adapted (the study's SilverTorch) |
+|---|---|---|---|
+| layout | an M-bit signature per item, stored transposed so one 64-bit AND tests 64 items | one bloom per 2048-doc bundle ([OF-1](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper)) | Meta's bundle layout |
+| width | M per item; 512-2048 bits measured; heuristic max values × hashes × 3 | `max terms in the bundle · k · b_multiplier` bits per doc; `m_bits` ignored ([OF-10](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper)); `b_multiplier` 10 in our config (`ops/official/__init__.py:123`) | `m_bits` per doc in every bundle (C12, `bloom_width="configured"`); **1024** in the study |
+| hashes | K = 5 | murmur3 over `(feature, value, seed)`; the search ANDs the first `k` distinct of 7 stored hashes | as Meta, `k` = **5** |
+| sweep | FPR at 512 / 768 / 1024 / 2048 bits | one width | `m_bits` 64-2048, `k_hash` 3 / 5 (the bloom-width suite, quality only) |
+| reported FPR | 6.98 at 512 bits, 0.067 at 1024 (units not stated; read as %); elsewhere 0.00173 % at 1024 (§6.2.4), inconsistent | — | measured on its own index, no recheck: 0 (arXiv, Goodreads), 4e-8 (PubMed) at 1024 bits / k 5 ([results](results.md#claim-verification) C4) |
 
-Study defaults: `m_bits` 1024, `k_hash` 5 for both arms
+Study defaults: `m_bits` 1024, `k_hash` 5
 (`evaluation/bench/algos.py:52`, `research/artifacts/numbers/suites.yaml:1-3`).
-How a query is encoded: LiNR's bloom ORs the bit positions of every active
-`(clause, value)` into one query signature and tests `(q & sig) == q`
-([filtering](../../docs/system/filtering.md#bloom-hash-keys-clause_idx-value));
-for Meta's bloom the active clauses are rendered as `"0:v AND 1:w"`,
+How a query is encoded: for Meta's bloom the active clauses are rendered as `"0:v AND 1:w"`,
 parsed by Meta's parser into plans once per batch outside the timed call,
 and searched by Meta's ops (`adapter.py:102-131`,
 [evaluation](../../docs/system/evaluation.md#query-preparation)).
@@ -105,14 +103,12 @@ speed, not results. It is not in Meta's code or either paper.
 - **The study's setting:** **off** (user, 2026-10-12: "NO RECHECKS in timed
   code, only as part of grading the recall"). SilverTorch is evaluated with
   its probabilistic bloom, false positives allowed; the cost shows up as
-  lost recall against the exact oracle. LiNR's bloom never had a recheck.
-- **What the current numbers used:** the harness cannot yet set the flag
-  (`algos.official_config` passes only `bloom_path` / `score_path`,
-  `evaluation/bench/algos.py:87`), so **every SilverTorch bloom number in
-  [results](results.md) ran with the recheck on** and its recall equals the
-  exact filter's. The recheck-off numbers are not yet measured.
-  [decisions](../decisions.md#goal-and-scheduling) still records "recheck on
-  by default"; the user does not stand behind it.
+  lost recall against the exact oracle.
+- **What the numbers use:** the bloom legs (A1-bloom, A2-bloom) run with the
+  recheck off (a `recheck` build param in the harness); the earlier bloom
+  cells ran with it on, so their recall equals the exact filter's, and they
+  are not reported. [decisions](../decisions.md#goal-and-scheduling) records
+  the user's directive.
 
 ### 2.5 Pass rate and false-positive rate definitions
 
@@ -121,23 +117,17 @@ speed, not results. It is not in Meta's code or either paper.
 | pass rate (ours) | mean over kept queries of (items passing the **exact** filter) / N | `evaluation/bench/oracle.py:106-109` |
 | synthetic rate `p` | each item draws `u ~ U(0,1)` once; it passes the rate-`p` clause iff `u < p`, so the sets nest and are unrelated to the embeddings; `arxiv-corr-synth` instead passes the items near the query's centroid | [datasets](../../docs/system/datasets.md#synthetic-selectivity-attrs) |
 | local pass rate | the share of a query's **unfiltered** top-100 that passes; what SilverTorch's recall follows (C6) | [results](results.md#claim-verification) |
-| bloom false-positive rate | mean over queries with at least one failing item of (bloom passes − exact passes) / (N − exact passes), computed with **our standalone bloom** (LiNR's) at the cell's `m_bits` / `k_hash` | `oracle.py:112-118`, `run.py:89-102` |
+| bloom false-positive rate | per query (bloom survivors − exact passes) / (N − exact passes) on SilverTorch's own bloom index, no recheck, mean over queries; the records' `bloom_fp_rate` is the harness's standalone filter module's, not SilverTorch's, and is not reported | `research/artifacts/results-draft/fp_adapted.py`; `run.py:89-102` |
 | LiNR's "pass rate" | items passing per query: high-pass set ≈ 1.7 M of 15.5 M on average (two clauses: geo, reverse company); low-pass set adds a title clause, at most 1.2 M, most queries thousands | linr.md §5.3 |
 | SilverTorch's | no pass-rate axis; FPR against bloom bits on 5,000 production filter queries (6 features, ~10 values per item) | silvertorch.md §6.2.2 |
 
-**The false-positive rate on SilverTorch cells is not SilverTorch's.**
-On `official` and `official-fork` cells the harness builds the standalone
-filter on the Triton backend (`algos.filter_backend`) and computes
-`bloom_fp_rate` from it ([evaluation](../../docs/system/evaluation.md#bloom-widths-as-build-params)).
-The C4 rates in [results](results.md#claim-verification) (PubMed 2.4 % at 64
-bits to 9e-6 at 1024, and "Meta's code as published, 9e-6") come from that
-column (`research/artifacts/results-draft/build_results.py:521-528`), so
-they are **our** bloom's rates at the same width and hash count, not those
-of Meta's bloom with or without the recheck. The adapted bloom's own rate
-before the recheck is **unverified**; its effect on results was measured
-only as "0 false positives returned" with the recheck on
-([gate R](meta-published-vs-adapted.md#3-the-parity-gate)) and as false
-positives in Meta's results at 30 M
+**The records' `bloom_fp_rate` is not SilverTorch's.** On `official` and
+`official-fork` cells the harness builds its standalone filter module on the
+Triton backend (`algos.filter_backend`) and computes the column from it, so
+the column is not reported. SilverTorch's own rate comes from its index
+(`fp_adapted.py`, [results](results.md#claim-verification) C4); its effect on
+results is measured on the bloom legs as recall with the recheck off against
+the exact filter's, and as false positives in Meta's results at 30 M
 ([OF-12](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper)).
 
 ### 2.6 How a false positive reaches recall
@@ -169,7 +159,7 @@ code) / what we do / why / effect on the reported numbers / source.
 
 | aspect | paper | public code | we do | why | effect on numbers | source |
 |---|---|---|---|---|---|---|
-| filter | exact clause masks, multiplied into the scores (failing items → 0), then top-k | none | exact clause filter fused into the score write (failing → −∞), or our bloom | 0 would let failing items outrank passing items with negative scores; −∞ is the exact semantics | exact V1 equals the oracle up to fp16 (§4.4); bloom V1 can lose recall to false positives | linr.md §3.1.1; `linr.py` `LiNRV1`; `functional.masked_topk` |
+| filter | exact clause masks, multiplied into the scores (failing items → 0), then top-k | none | exact clause filter fused into the score write (failing → −∞) | 0 would let failing items outrank passing items with negative scores; −∞ is the exact semantics | exact V1 equals the oracle up to fp16 (§4.4) | linr.md §3.1.1; `linr.py` `LiNRV1`; `functional.masked_topk` |
 | scoring | fp16 embeddings, custom CUDA filter op, separate un-fused ops in TF / PyTorch | none | fp16 items, fp32 accumulate (cuBLAS), Triton filter kernel fused with the score write | the fusion is the point of a GPU library | our V1 is faster than an un-fused one; the V1 / V2 crossover moves ([LN-1](reproduction-deviations.md#4-linr-v1v3--deviations)) | linr.md §3.1.1, §6; [LN-1](reproduction-deviations.md#4-linr-v1v3--deviations) |
 | quality | "no recall drop" (exhaustive) | — | exact search over fp16 items, graded against the fp32 oracle | — | ≥ 0.99 recall@k everywhere except YFCC synth at k 1000 (0.983-0.995, fp16 storage, flagged) | [HB-6](reproduction-deviations.md#6-deviations-of-our-harness-against-the-papers-protocols--and-against-itself) |
 
@@ -177,15 +167,15 @@ code) / what we do / why / effect on the reported numbers / source.
 
 | aspect | paper | public code | we do | why | effect on numbers | source |
 |---|---|---|---|---|---|---|
-| filter | exact clauses first, slice the passing items | none | `clause_compact` (or `bloom_compact`): one fused filter + stream-compaction kernel, ascending item order | slicing in torch copies the matrix; the fused kernel is what makes V2 fast | V2 faster than the paper's at high pass rate | linr.md §3.1.2; [filtering](../../docs/system/filtering.md#caller-patterns) |
+| filter | exact clauses first, slice the passing items | none | `clause_compact`: one fused filter + stream-compaction kernel, ascending item order | slicing in torch copies the matrix; the fused kernel is what makes V2 fast | V2 faster than the paper's at high pass rate | linr.md §3.1.2; [filtering](../../docs/system/filtering.md#caller-patterns) |
 | scoring | matmul + top-k on the slice, each query of a batch run separately | none | one fused gather + dot (fp32 accumulate) + top-k kernel over the batch's candidate lists | batching | V2 at bs 64 / 256 slower than V1 on every real filter; PubMed `c3_journal_reverse` / `all5` and YFCC at bs 256 time out | linr.md §5.3.2; [results](results.md#claim-verification) C1 |
-| quality | exact | — | exact (clause) / bloom-limited (bloom) | — | as V1 | — |
+| quality | exact | — | exact | — | as V1 | — |
 
 ### 3.3 LiNR V3 (1-bit Sign-OPORP, then rerank)
 
 | aspect | paper | public code | we do | why | effect on numbers | source |
 |---|---|---|---|---|---|---|
-| filter | pre-filter as V2 | none | pre-filter as V2 (clause or bloom), then Hamming top-`candidate_pool` among survivors, then exact rescore | as the paper | a bloom false positive can take a pool slot | linr.md §3.2, Fig. 3; `linr.py` `LiNRV3` |
+| filter | pre-filter as V2 | none | pre-filter as V2 (exact clause), then Hamming top-`candidate_pool` among survivors, then exact rescore | as the paper | — | linr.md §3.2, Fig. 3; `linr.py` `LiNRV3` |
 | bits | 512 bits at d128 in the benchmark; "1-bit embedding of the same dimension" in §3.2 | none | at most D bits (`k_bits` = D: 128 at d128, 192 YFCC, 768 / 256 PubMed) | OPORP as defined gives at most D bins | ¼ of LiNR's bit budget at d128: stage-1 recall can only be lower | [LN-8](reproduction-deviations.md#4-linr-v1v3--deviations); [decisions](../decisions.md#goal-and-scheduling) |
 | pool | keep ~1 % of items (0.5-2.5 % swept) | — | pool as a fraction of the mean pass count (0.5-20 %), at least 2,000 | our catalogues are 1-2 orders smaller | 1 % reaches 0.89 median recall; parity needs 20 % | [evaluation](../../docs/system/evaluation.md#pool-fractions); [results](results.md#claim-verification) C2 |
 

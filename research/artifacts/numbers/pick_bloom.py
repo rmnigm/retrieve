@@ -3,8 +3,8 @@ recheck off), per (dataset, dim, sweep, n_lists) the smallest n_probe reaching r
 n_lists of the dataset as the paper's reference point. A group whose curve stops short of n_lists / 4 is skipped.
 
 Writes, per dim, `n-bloom-timed-d<dim>` (k 100, priority 2), `n-bloom-timed-k1000-d<dim>` (k 1000 picks, priority 3a) and, for the synth sets,
-`n-bloom-timed-synth-d<dim>` (k 100, priority 3b). Every suite runs SilverTorch bloom (recheck off) beside LiNR V1 / V2 under both filters
-(exact clause and bloom, the same sweep names), bs 1 / 16 / 64, interleaved by (algo, n_lists).
+`n-bloom-timed-synth-d<dim>` (k 100, priority 3b). Every suite runs SilverTorch bloom (recheck off) beside LiNR V1 / V2 with the exact clause filter on the same sweeps
+(LiNR with a bloom filter is not in the study, user 2026-10-13), bs 1 / 16 / 64, interleaved by (algo, n_lists).
 
 usage: pick_bloom.py CURVE_PARQUET [...] > suites-bloom-timed.yaml
 """
@@ -31,9 +31,9 @@ V12 = [
     {
         "algo": "linr_v1_filter_mask",
         "backends": ["triton"],
-        "filter_kinds": ["clause", "bloom"],
+        "filter_kinds": ["clause"],
     },
-    {"algo": "linr_v2", "backends": ["triton"], "filter_kinds": ["clause", "bloom"]},
+    {"algo": "linr_v2", "backends": ["triton"], "filter_kinds": ["clause"]},
 ]
 
 df = pd.concat([pd.read_parquet(p) for p in sys.argv[1:]], ignore_index=True)

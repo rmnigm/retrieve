@@ -14,7 +14,6 @@ REAL = [
     "arxiv",
     "laion3m",
     "pubmed",
-    "yfcc10m",
     "laion10m",
     "laion30m",
 ]
@@ -23,7 +22,6 @@ SYN = [
     "laion1m-synth",
     "arxiv-synth",
     "laion3m-synth",
-    "yfcc10m-synth",
     "laion10m-synth",
     "laion30m-synth",
 ]
@@ -33,7 +31,6 @@ lab = {
     "arxiv": "arXiv 3M",
     "laion3m": "LAION 3M",
     "pubmed": "PubMed 10M",
-    "yfcc10m": "YFCC 10M",
     "laion10m": "LAION 10M",
     "laion30m": "LAION 30M",
 }

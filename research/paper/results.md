@@ -69,37 +69,43 @@ faster of LiNR V1 and V2 in the same cell: below 1 means SilverTorch wins.
 
 Tables: `by_size.csv`, `tuned.csv`. Figure: `fig_tuned_vs_n`. A cell's
 tuned point is the fastest timed SilverTorch setting (lists, probes) that
-reaches the target. Real filters, exact clause filtering, k 100:
+reaches the target. This sets **SilverTorch at recall 0.90 / 0.95 against
+exact LiNR** (recall ≈ 1.0): it is not a comparison at matched recall, and
+part of SilverTorch's speed is bought with the recall it gives up. The
+matched-recall row, LiNR V3 (approximate) at the same 0.90 / 0.95, is
+pending. "Not reached" means not reached within a 25 % scan
+(`n_probe` ≤ `n_lists` / 4, the tuning cap), on our k-means index. Real
+filters, exact clause filtering, k 100:
 
 | dataset (N, d) | filter | lists / probes at 0.90 | ratio at 0.90, bs 1 / 16 / 64 | ratio at 0.95, bs 1 / 16 / 64 |
 |---|---|---|---|---|
 | Goodreads (0.8 M, 128) | `c0_genre` | 4096 / 32-128 | 0.58 / 0.25 / 0.16 | 0.58 / 0.26 / 0.19 |
 | | `c1_lang_reverse` | 4096 / 128-256 | 0.51 / 0.31 / 0.25 | 0.51 / 0.41 / 0.40 |
 | | `all4` | 4096 / 512-1024 | 0.56 / 0.46 / 0.52 | 0.56 / 0.73 / 0.82 |
-| LAION 1 M (256) | `c0_domain`, `tags4` | not reached (top 0.85 / 0.83) | LiNR | LiNR |
+| LAION 1 M (256) | `c0_domain`, `tags4` | not reached (top 0.85 / 0.83) | — | — |
 | arXiv (3 M, 128) | `c0_maincat` | 2048 / 64-128 | 0.46 / 0.18 / 0.22 | 0.57 / 0.63 / 0.98 |
 | | `c3_nversions` | 2048 / 64-128 | 0.27 / 0.19 / 0.23 | 0.31 / 0.47 / 0.65 |
 | | `all4` | 2048 / 256 | 0.29 / 0.32 / 0.39 | 0.33 / 0.53 / 0.64 |
 | LAION 3 M (256) | `tags4` | 8192 / 2048 | 0.50 / 0.43 / 0.66 | not reached (top 0.91) |
-| | `c0_domain` | not reached (top 0.87) | LiNR | LiNR |
+| | `c0_domain` | not reached (top 0.87) | — | — |
 | PubMed (10 M, 768) | `c0_mesh` | 4096 / 512 | 0.41 / 0.27 / 0.34 | not reached (top 0.9499) |
 | | `c3_journal_reverse` | 65536 / 1024 | 0.045 / 0.20 / 0.47 | not reached (top 0.92) |
-| | `all5` | not reached (top 0.90) | LiNR | LiNR |
-| YFCC (10 M, 192) | `tags_and` | not reached (top 0.72) | LiNR | LiNR |
+| | `all5` | not reached (top 0.90) | — | — |
+| YFCC (10 M, 192) | `tags_and` | not reached (top 0.72) | — | — |
 | LAION 10 M (256) | `tags4` | 4096 / 1024 or 16384 / 4096 | 0.26 / 0.39 / 0.66 | 0.41 / 0.45 / 0.78 |
-| | `c0_domain` | not reached (top 0.90) | LiNR | LiNR |
+| | `c0_domain` | not reached (top 0.90) | — | — |
 | LAION 30 M (256) | `tags4` | 16384 / 2048 or 65536 / 8192 | 0.15 / 0.20 / 0.33 | 0.22 / 0.38 / 0.63 |
 | | `c0_domain` | 16384 / 4096 | 0.42 / 0.40 / 0.71 | not reached (top 0.91) |
 
 "Top" is the highest recall at any timed point; the probe curves stop at a
 quarter of the lists.
 
-- **Where SilverTorch reaches the target on a real filter, it is faster than
-  the best exact LiNR at every size**, from 0.8 M to 30 M items: 0.045-0.71 of
+- **Where SilverTorch reaches recall 0.90 on a real filter, it is faster
+  than the best exact LiNR at every size**, from 0.8 M to 30 M items: 0.045-0.71 of
   LiNR's latency at 0.90, at every batch size. At 0.95 it stays faster, but
   its lead shrinks at bs 64 (0.98 on arXiv `c0_maincat`).
-- **Where it cannot reach the target, exact LiNR wins by default.** That is a
-  recall ceiling, not a speed loss: LAION `c0_domain` up to 10 M, LAION 1 M
+- **Where it does not reach the target within a 25 % scan, there is no
+  SilverTorch point to compare:** LAION `c0_domain` up to 10 M, LAION 1 M
   `tags4`, YFCC, PubMed `all5`, and 0.95 on PubMed. More lists do not lift it
   much: on LAION 1 M / 3 M, 4096-16384 lists end at 0.82-0.91, and fp16
   scoring would add at most 0.009, so the limit is the IVF partition rather
@@ -122,7 +128,7 @@ YFCC, 0.33-0.57 on LAION, and 0.05 on the most selective synthetic filter.
 Table: `tuned.csv`. Figure: `fig_h2h_synth`. At 0.90, k 100:
 
 - **Pass rate 0.001:** SilverTorch does not reach 0.90 on goodreads-synth,
-  LAION 1 M / 3 M synth or YFCC synth, so exact LiNR wins. It does reach it
+  LAION 1 M / 3 M synth or YFCC synth within a 25 % scan. It does reach it
   on arxiv-synth (0.57 / 0.35 / 0.59 of LiNR at bs 1 / 16 / 64) and at 10 M
   and 30 M with more lists (0.25-0.72).
 - **Pass rate 0.01 to 1:** SilverTorch wins wherever it reaches 0.90 (0.03-0.94
@@ -142,11 +148,11 @@ Table: `tuned.csv`. Figure: `fig_h2h_synth`. At 0.90, k 100:
   bs 1 (median ratio 0.42 at 0.90), but LiNR V1 wins 7 of 17 at 0.95, bs 64.
 - **k 2048** (the papers' own k; arXiv, Goodreads, PubMed): SilverTorch wins
   at 0.90 and 0.95 on arXiv `c0_maincat` (0.23-0.72) and Goodreads `c0_genre`
-  (0.30-0.81). On PubMed `c0_mesh` it stays below 0.90 at the timed points,
-  so LiNR wins.
-- **Bloom filtering** (the shipped default: configured width plus an exact
-  recheck of survivors): SilverTorch wins every bloom cell it reaches,
-  0.09-0.85 of LiNR.
+  (0.30-0.81). On PubMed `c0_mesh` it stays below 0.90 at the timed points.
+- **Bloom filtering:** the head-to-head with SilverTorch's own bloom (no
+  recheck, false positives allowed) against LiNR's exact filter comes from
+  the bloom legs, still running. The bloom cells timed so far ran with a
+  recheck, so they are not reported.
 
 ### Index memory and build time
 
@@ -166,10 +172,9 @@ apart from the head-to-head above. Claims C1-C7 are listed in
 
 | claim | verdict | evidence |
 |---|---|---|
-| C1: V1 beats V2 at high pass rate, V2 wins at low | **reproduced at bs 1, weak at bs 16, gone at bs 64 / 256.** At bs 1, V2 wins below a pass rate of 0.79-0.97 at every N and d, and by 1.6-5.1× at 0.001. At bs 16, V2 wins only below about 0.02, by at most 25 %. At bs 64 and 256, V1 is faster on every real filter (V2 1.3-35× slower at bs 64, LAION 2.0-2.2×; at bs 256 V2 times out on PubMed `c3_journal_reverse` / `all5` and YFCC). Correlated filters (arxiv-corr-synth) change nothing: V2 at 0.35-0.41 of V1 at bs 1, 0.92-1.26 at bs 16. At k 2048, V2 wins at bs 1 (0.08-0.77) and at bs 16 only on PubMed | `c1_crossover.csv`, `c1_curves.csv`, `c1_real.csv`, `linr_numbers.csv` |
+| C1: V1 beats V2 at high pass rate, V2 wins at low | **reproduced in shape, not in location.** A crossover exists at bs 1, but at a pass rate of 0.79-0.97, not LiNR's ≈ 0.11: at LiNR's own operating point V2 wins (0.29-0.68 of V1), with fused kernels the paper itself says would change the picture (LN-1, L-12). Weak at bs 16, gone at bs 64 / 256. At bs 1, V2 wins below a pass rate of 0.79-0.97 at every N and d, and by 1.6-5.1× at 0.001. At bs 16, V2 wins only below about 0.02, by at most 25 %. At bs 64 and 256, V1 is faster on every real filter (V2 1.3-35× slower at bs 64, LAION 2.0-2.2×; at bs 256 V2 times out on PubMed `c3_journal_reverse` / `all5` and YFCC). Correlated filters (arxiv-corr-synth) change nothing: V2 at 0.35-0.41 of V1 at bs 1, 0.92-1.26 at bs 16. At k 2048, V2 wins at bs 1 (0.08-0.77) and at bs 16 only on PubMed | `c1_crossover.csv`, `c1_curves.csv`, `c1_real.csv`, `linr_numbers.csv` |
 | C2: V3 keeping 1 % gives about 10 % at near-parity recall | **not comparable as stated.** LiNR's recall is end-task recall (recall@2000 against its product's relevance labels), and the evaluation protocol is not published in enough detail to rebuild. Under our metric (share of the exact filtered top-k returned), on the real filters a 1 % candidate pool reaches a median recall of 0.89, at 0.83 of V2's latency at bs 16 and 1.08 at bs 1. Parity with the exact scan (0.99) needs a 20 % pool, where V3 is no faster than V2 (1.01 at bs 16, 1.14 at bs 1). Median recall rises with the pool from 0.84 (0.5 %) to 0.99 (20 %). On LAION 1-30 M a 1 % pool reaches 0.89 and V3 runs at 1.11× V2 at bs 1 and 0.97× at bs 16; 20 % reaches 0.98 (V2 there from the final pass, not interleaved) | `c2_v3.csv` |
 | C3: the custom filter kernel is about 100× faster than native masking | **direction reproduced, size not.** Eager PyTorch is 1.4-2.0× slower at bs 1 and 5.8-6.8× at bs 16. `torch.compile` max-autotune runs at 0.5-1.06× of Triton at bs 1 (median 0.85-0.96, so mostly faster) and 1.5-4.8× slower at bs 16 | `c3_torch.csv` |
-| LiNR with a bloom filter (our adaptation: LiNR has no bloom; hash and salt ours), against LiNR's exact filter | **it costs no recall and is slower.** Recall with our bloom is at least 0.998, as with the exact filter, but the bloom path is slower: median 1.11 / 1.15 / 1.28× the exact filter's latency for V1 at bs 1 / 16 / 64 and 1.20 / 1.59 / 1.83× for V2 (NUMBERS A2 legs, same process). Compared only with LiNR's exact filter, never with SilverTorch's bloom | `linr_bloom_fp.csv`, `h2h` records |
 
 ### SilverTorch: the adapted code and Meta's code as published
 
