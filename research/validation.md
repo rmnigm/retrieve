@@ -1,7 +1,7 @@
 ---
 title: validation
 created: 2026-09-26
-updated: 2026-10-11
+updated: 2026-10-12
 type: summary
 tags: [validation, testing, harness]
 sources: [retrieve/tests/, evaluation/tests/, evaluation/golden/, evaluation/results/, research/artifacts/, research/artifacts/hub-index.md]
@@ -23,9 +23,9 @@ compare it with Meta's code): they stay as the record, are never cited, and
 leave with the code at roadmap TRITON-ST-DELETE. Rows marked **SilverTorch
 arm: Triton records** hold campaign legs whose SilverTorch numbers are
 re-measured on the adapted backend (roadmap NUMBERS); their LiNR arms stand. The
-adapted backend's own gates are the META-FORK section, on `dev/meta-fork`
-until its review accepts (artifacts in [hub-index](artifacts/hub-index.md),
-`artifacts/meta-fork/`); the paper's account is
+adapted backend's own gates are the META-FORK section (review ACCEPT at
+`1f6fed8`; artifacts in [hub-index](artifacts/hub-index.md),
+`artifacts/meta-fork/`), its measurement legs the NUMBERS section; the paper's account is
 [Meta as published vs adapted](paper/meta-published-vs-adapted.md).
 
 **Environment all rows were measured on**: A100-SXM4-80GB, torch
@@ -273,6 +273,27 @@ Triton-relative target was dropped; Triton numbers below are a record, not a gat
 | C10: cluster / tile skip | **no change**, measured | Meta's scorer already skips at lane granularity; the fork's time grows with the pass rate only through the scorer |
 | C11: scorer per D | **changed** (K fix 14) | the cooperative-load scorer for D ≥ 128; the query staged in shared memory had no consistent winner (0.954-1.101) and is not used (both fixed in `search`, no runtime switch) |
 | against Triton v2.12 (record only) | above Triton on 90 of 672 (cell, mode) pairs at head, max 1.139 | PubMed d768 none and `c3_journal_reverse` 1.001-1.080 (the d768 scorer at ~1.26 TB/s against Triton's 1.32); arXiv d128 rechecked bloom `c0_maincat` np 24 bs 16 / 64 1.03-1.14 (the recheck pass beside the scorer, against Triton's fused bloom scorer without a recheck); arXiv exact `c0_maincat` np 24 / 256 1.00-1.06; bs 1 bloom `all4` np 24 1.03-1.07 and PubMed np 1024 bs 1 1.01-1.07 (launch latency); YFCC d192 none np 1024 1.01-1.03; the rest ≤ 1.01. A cluster-major scorer that removes the d768 / d256 gap (PubMed none np 1024 bs 64 33.9 vs Triton 93.9 ms) is built on `dev/meta-fork-k19-wip`, ungated and not merged |
+
+## NUMBERS: adapted SilverTorch over the study grid
+
+The paper's measurement legs ([plan](artifacts/numbers/README.md), roadmap
+NUMBERS): the adapted backend at FORK_HEAD `cc595da` (code_version
+`eb600da1`), LiNR-only legs on the final pass's library `e16512f5`, A100-SXM4-80GB
+on pods 1, b and d, seed 0. Every leg is on the Hub as `numbers/<leg>`
+([hub-index](artifacts/hub-index.md)); the results draft reads them
+([results](paper/results.md)). **NOT CITABLE until the gate below is declared
+green.**
+
+| gate / leg | state | notes |
+|---|---|---|
+| NUMBERS gate: every planned cell ok | **met, with listed gaps** | Timed legs (A2 / A2b / A3): every picked point `ok` (5,094 perf rows after merging reruns). Gaps: yfcc10m-synth LiNR at k 1000 misses the 0.99 exact gate (V1 p01 0.9885, the fp16 storage of [HB-6](paper/reproduction-deviations.md#6-deviations-of-our-harness-against-the-papers-protocols--and-against-itself)), so YFCC synth is reported at k 100 only (controller); the k 1000 records stay on the Hub as gate misses. LiNR at bs 256 is partial on PubMed `all5` and YFCC (out of memory; bs 64 only there). The `failed` records in A2-laion30m-real (3), L1 (6) and L1b (4) are superseded by `ok` reruns in the same leg |
+| NUMBERS gate: eager and graph ids equal on every adapted cell | **pass**, 2,151 / 2,151 | canonical id hashes of every adapted (cell, bs, k) timed in both modes, all A legs |
+| NUMBERS gate: int32 scores equal to the published code where both ran | **not exercised by these legs** | no NUMBERS leg runs `backend="official"`; equality to the published code is the META-FORK X gate above (1,536 / 1,536 at ≤ 10 M, 64 / 64 bloom at 30 M) |
+| Unstable cells | **kept and flagged** | A2-small 69 unstable → all 69 stable in `A2-small-rerun` (pod b). A2b 15 → 8 stable in its rerun; 7 unstable in both (5 SilverTorch cells at ~0.2 ms on LAION 1 M, all windows 1410 MHz; 2 LiNR V2 with a clock dip, both stable in A2-small). A2-pubmed 2 and A3 1 unstable, not rerun. The results draft keeps a cell's stable record and flags the rest |
+| Probe curves (A1, A1b) | **done** | quality only, `n_probe` doubling to n_lists / 4; 4096 / 16384 / 65536 lists at 10-30 M; LAION 1 M / 3 M also at 4096 / 8192 and 8192 / 16384 lists, with the int8 / fp16 ceiling check (fp16 ≤ 0.006 above shipped: the limit is the IVF partition). k 1000 runs at every width (A0: 7 / 7 ok) |
+| Timed legs (A2, A2b, A3) | **done** | points picked by `pick_points.py` (dev/numbers); SilverTorch interleaved with LiNR V1 / V2 per cell group, bs 1 / 16 / 64, k 100 / 1000 (A3: k 2048), eager and graph |
+| LiNR-only legs (L1-L4) | **done** | L1 / L1b bs 64 / 256, L2 / L2b V3 candidate pool 0.5-20 %, L3 correlated filters, L4 k 2048 |
+| Provenance | recorded | the reran A2-small cells ran on pod b's build of the same sources (`_C.so` differs from pod 1's; the build is not byte-reproducible), so cells in one table come from two A100s; each SilverTorch / LiNR ratio is still within one process |
 
 ## Campaign v2 (Phase V): not yet validated
 
