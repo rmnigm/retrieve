@@ -205,6 +205,37 @@ def blob_path(gt_dir: Path, sweep: str, fp: str) -> Path:
     return gt_dir / f"oracle_v4_{sweep}_{fp[:16]}.pt"
 
 
+def _wider_blob(gt_dir: Path, sweep: str, k_gt: int, own: Path, fp_at) -> dict[str, Any] | None:
+    """The smallest cached blob of this sweep whose fingerprint matches these inputs at its own
+    larger ``k_gt``, cut to ``k_gt`` in memory (``fp_at(k)``: this sweep's fingerprint at k)."""
+    best = None
+    for p in sorted(gt_dir.glob(f"oracle_v4_{sweep}_{'?' * 16}.pt")):
+        if p == own:
+            continue
+        try:
+            blob = torch.load(str(p), map_location="cpu", weights_only=True)
+        except Exception:  # noqa: BLE001 — a torn / foreign file is no candidate
+            continue
+        k = blob.get("k_gt") if isinstance(blob, dict) else None
+        if (
+            blob.get("version") == BLOB_VERSION
+            and isinstance(k, int)
+            and k > k_gt
+            and blob.get("fingerprint") == fp_at(k)
+            and (best is None or k < best["k_gt"])
+        ):
+            best = blob
+    if best is None:
+        return None
+    logger.info("  oracle k_gt={} sliced from cached k_gt={} blob", k_gt, best["k_gt"])
+    return {
+        **best,
+        "topk": best["topk"][:, :k_gt].contiguous(),
+        "k_gt": k_gt,
+        "sliced_from": best["k_gt"],
+    }
+
+
 def load_or_build(
     gt_dir: Path,
     sweep: str,
@@ -220,9 +251,11 @@ def load_or_build(
     attrs_digest: str,
     device: torch.device,
     warn_missing: bool = False,
+    slice_wider: bool = False,
 ) -> dict[str, Any]:
-    """The v4 blob for one sweep: read from ``blob_path`` when present, else build and
-    save (atomically). The name carries the fingerprint, so a stale blob is simply never
+    """The v4 blob for one sweep: read from ``blob_path`` when present, else (``slice_wider``)
+    the top-``k_gt`` prefix of a cached blob of the same inputs at a larger ``k_gt``, else
+    build and save (atomically). The name carries the fingerprint, so a stale blob is simply never
     found; an unreadable file at the path (a crash mid-save) is rebuilt, not fatal.
     ``warn_missing``: the caller expected ``bench oracle`` to have built it (``bench run``)."""
     fp = fingerprint(
@@ -244,6 +277,12 @@ def load_or_build(
             return blob
         if blob is not None:
             logger.warning("  {}: not a v4 blob for this fingerprint; rebuilding", path)
+    if slice_wider:
+        blob = _wider_blob(gt_dir, sweep, k_gt, path, fp_at=lambda k: fingerprint(
+            item_embs, queries, targets, qa_sweep, clauses, k, attrs_digest=attrs_digest
+        ))  # fmt: skip
+        if blob is not None:
+            return blob
     if warn_missing:
         logger.warning("  oracle {} missing: building it here; prebuild with `bench oracle`", path)
     logger.info("  building exact oracle (k_gt={}) for sweep {}", k_gt, sweep)

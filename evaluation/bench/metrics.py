@@ -104,6 +104,14 @@ def null_if_empty(side: dict) -> dict:
     return ({m: None for m in side if m != "n"} | {"n": 0}) if side.get("n") == 0 else side
 
 
+def drop_self(ids: Tensor, self_ids: Tensor) -> Tensor:
+    """``[B, K]`` → ``[B, K - 1]``: each row without its (at most one) ``self_ids`` entry, order
+    kept; a row without it loses its last entry instead. ``-1`` padding stays ``-1``."""
+    is_self = (ids == self_ids.unsqueeze(1)) & (ids != -1)
+    is_self[:, -1] |= ~is_self.any(dim=1)
+    return ids[~is_self].reshape(ids.shape[0], ids.shape[1] - 1)
+
+
 def jaccard_at_k(ids_a: Tensor, ids_b: Tensor, k: int) -> float:
     """Mean per-row Jaccard of the top-``k`` id sets (``-1`` ignored; two empty sets → 1.0).
     The harness's cross-backend wiring check (``jaccard_vs_first@k``)."""

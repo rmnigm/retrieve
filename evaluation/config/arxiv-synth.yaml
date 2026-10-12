@@ -9,6 +9,7 @@ data_dir: data/arxiv-papers
 content_dir: {64: content_d64, 128: content_d128, 256: content}   # relative to data_dir
 dims: [64, 128, 256]
 users_limit: 10000
+self_match: true                          # queries are catalogue items (docs/system/evaluation.md § Self-match)
 filters:
   attrs: item_attrs_synth.pt             # relative to data_dir
   query_attrs: query_attrs_synth.pt

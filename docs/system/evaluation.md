@@ -257,7 +257,7 @@ which exist for `buffers()`, `.k`, `torch.compile` and because their
 |---|---|
 | [`measure.py`](../../evaluation/bench/measure.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, `official_commit` — the installed `silvertorch`'s PEP 610 `direct_url.json` `vcs_info.commit_id`, `None` when it is not installed from git — `official_build` = the extension that would load (`so_path`, `so_sha256`, `so_bytes`, and `nvcc_append_flags` from a `_build_flags.json` beside the `.so`, which [`scripts/build_official_o3.sh`](../../scripts/build_official_o3.sh) writes; `null` = Meta's `setup.py` defaults, host code at gcc `-O0`, OF-11; `null` overall without silvertorch), `official_fork_build` = the same for `silvertorch_fork` (its `setup.py` builds `-O3`), commit, `dirty` = `subtree_dirty()` over `LIB` (the imported `retrieve` package's directory, in whichever checkout holds it), `repo_dirty`, branch, `code_version` = `LIB`'s tree hash, or `files:<sha256>` of the sources on disk when it is dirty, `lib_dir` = `LIB`, host, python, started; [Resume](#resume)), `clocks()` (one `nvidia-smi` sample), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency_group(fns, bs=, mode=)` (§2.5 windows of each arm, round-robin across arms, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`, the under-load `sm_mhz`) and `latency(fn, …)`, its one-arm case, `graph_callable` (raises `NotCapturable` with the record's `reason`; no dynamo reset, so interleaved arms stay captured side by side), `profile_once` |
 | [`records.py`](../../evaluation/bench/records.py) | what a record *is*: `SCHEMA_VERSION`, `KEY_FIELDS`, `resume_key`, `record_path`, `samples_path`, `append_record` (one `write` + `fsync`), `read_records` / `read_keys` (one torn trailing line tolerated), `record_files`, `latest` (last record per key), `aggregate(results_dir) → results.parquet` (one row per perf entry — what `report.py` reads), `read_table` |
-| [`metrics.py`](../../evaluation/bench/metrics.py) | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` (returns the chunk's per-row recall, the [sidecar](#per-query-sidecar)'s values) / `finalize(acc)` (`null` metrics when `n == 0`, `null_if_empty`) — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix; `per_row`, `jaccard_at_k`. `training/evaluate.py` keeps its own frozen copy, pinned to agree (`training/test_encode.py`) |
+| [`metrics.py`](../../evaluation/bench/metrics.py) | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` (returns the chunk's per-row recall, the [sidecar](#per-query-sidecar)'s values) / `finalize(acc)` (`null` metrics when `n == 0`, `null_if_empty`) — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix; `per_row`, `jaccard_at_k`, `drop_self` ([Self-match](#self-match)). `training/evaluate.py` keeps its own frozen copy, pinned to agree (`training/test_encode.py`) |
 | [`algos.py`](../../evaluation/bench/algos.py) | the algorithm table: `ALGOS` name → class (`LiNRV1`–`LiNRV3`, `SilverTorch`; `Postfilter`, the harness's own), `FILTER_KINDS`, `BACKENDS`, `FILTER_MODE` (`clause` → `exact`), `DISPATCH` (the library's table plus the `Postfilter` row), `PATHS` **derived from it**, `filter_backend` (`official` / `official-fork` → `triton`), `build(algo, item_embs, k=, backend=, …)` (construct + `register_index`, ≈ 25 lines), `build_filter`, `is_valid_combo`, `official_config` (`bloom_path` / `score_path` → `OfficialConfig`) |
 | [`postfilter.py`](../../evaluation/bench/postfilter.py) | `Postfilter`, the generic-torch baseline ([below](#the-postfilter-baseline)) |
 | [`config.py`](../../evaluation/bench/config.py) | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below; `interleave_units`, `shared_key` (the [interleave groups](#interleaved-groups)) |
@@ -492,6 +492,7 @@ encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}       # SASRec da
 users_limit: 10000                                                    # or null
 # exact_gate: 0.9716                                                  # optional: the exact-algo floor at k_max < 1000
 # normalize: false                                                   # content_dir only: score raw dot products (pubmed)
+# self_match: true                                                    # optional: queries are catalogue items (Self-match)
 filters:                                                              # optional
   attrs: item_attrs_narrow.pt                                         # relative to data_dir
   reverse: clause_is_reverse_narrow.pt                                # optional
@@ -690,7 +691,8 @@ latency_kw=None, device=None) -> Counter` runs the jobs in order:
    the group is a filter cell); the previous inputs are freed first;
 3. per `(filter_kind, sweep, filter backend, k_max, bloom params)`:
    `sweep_qa` → `build_filters` → on filter cells `exact_filter` +
-   `oracle.load_or_build` (blob v4 at `k_max = max(ks)`) and on bloom cells
+   `oracle.load_or_build` (blob v4 at `k_max = max(ks)`, `k_max + 1` on a
+   [self-excluded](#self-match) cell) and on bloom cells
    `pass_counts` → `bloom_fp_rate`; the row masks: `keep` (not
    skip-masked), `oracle_rows` (kept with ≥ 1 survivor), `heldout_rows` (kept, ≥ 1 target, and on filter cells
    `target_in_filter`);
@@ -699,7 +701,8 @@ latency_kw=None, device=None) -> Counter` runs the jobs in order:
    `filter_mib` (the module's `filter` submodule, 0 without one); a build
    failure writes a `failed` record per cell of the job;
 5. per cell: `set_query_params` for the query part of `params`; quality
-   (`module.k = k_max`, chunks of 16 kept rows, `accumulate(...,
+   (`module.k = k_max`, `k_max + 1` on a [self-excluded](#self-match) cell
+   and back to `k_max` after the pass; chunks of 16 kept rows, `accumulate(...,
    ranked=True)` against the oracle prefix for `oracle_rows`,
    `accumulate(..., targets, n_targets)` for `heldout_rows` — on filter
    cells the targets the exact mask excludes are set to `-1` first and
@@ -743,6 +746,41 @@ samples line is appended *before* its record, so a crash between the two
 cannot leave a resumable record without its vector; `records.read_records` ignores
 (and logs) one torn trailing line — the cell in flight when the process
 died — and raises on a malformed line anywhere else.
+
+### Self-match
+
+On arXiv and PubMed (and arxiv-synth, arxiv-corr-synth, which share arXiv's queries) a query is a
+catalogue item's own text and its single held-out target is that item, which stays in the index
+([datasets](datasets.md#arxiv)), so the exact oracle's top-1 is the query itself and so is every
+method's when it finds it. Those dataset files set `self_match: true` (`Dataset.self_match`,
+default false; LAION, YFCC and OpenAlex queries are never in the catalogue, Goodreads' are user
+histories). On such a dataset every **filter** cell is self-excluded (`Job.self_excluded`; a
+`none` cell has no oracle side and is unchanged):
+
+- the self id of query `u` is its held-out target `targets[u, 0]`;
+- the oracle is requested at `k_max + 1` with `slice_wider=True`: a cached blob of the same
+  inputs at a larger `k_gt` (the k 1000 blob serves k 101) is cut to its prefix in memory
+  ([Oracle blob v4](#oracle-blob-v4)), else one is built at `k_max + 1`;
+- `metrics.drop_self(ids [B, K], self_ids [B]) → [B, K − 1]` removes the row's own item
+  wherever it ranks (order kept; a row without it loses its last entry; `-1` stays `-1`), applied
+  to the oracle row (`sweep_assets`' `oracle_topk`, `[U, k_max]`) and to the module's
+  `k_max + 1` ids before `accumulate(..., ranked=True)`; `oracle_rows` then needs a survivor
+  other than the own item. `PER_K_QUALITY` arms run at `k + 1` the same way;
+- the **held-out** side keeps the un-excluded first `k_max` ids (its target *is* the own item),
+  and so do the parity spill and the per-query sidecar's `heldout_recall@k`;
+  `recall_oracle@k` there is the self-excluded value. Held-out recall on these datasets measures
+  **self-retrieval** (does the method return the query's own document), never end-task
+  recall: every cell of a `self_match` dataset, `none` cells included, records
+  `quality.heldout_label: "self_retrieval"`;
+- the timed path is untouched: `perf` sets `module.k = k` per entry as before.
+
+`sweep_assets` logs, per sweep, the share of kept rows with a reachable target whose oracle top-1
+is the own item (near 1.0 when the flag is right; a near-duplicate document can outrank it, and `drop_self`
+removes the own item wherever it ranks) and the record carries it as
+`quality.self_top1_share`, next to `quality.self_excluded: true`. The key block gains
+`self_excluded: true` on these cells only (`Job.key`, `records.key_block`), so their resume and
+quality-cache keys, sidecar names and parity spills differ from every record written before the
+rule ([Resume](#resume)), while every other cell keeps its key.
 
 ### Arm release
 
@@ -891,6 +929,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `status` | str | `ok`, `partial` (the record does not carry everything the suite asked for), `failed` |
 | `partial_reasons` | list / null | why `partial`: any of `skip_quality`, `skip_perf`, `modes` (a `--mode` subset that drops a mode this job's module can run: an eager-only run stamps it on a capturable module, not on one with `capturable = False` such as `official`, whose `graph` entry would be `not_capturable` anyway; decided per job after the build), `ks_bs` (`--k` / `--bs` replaced the suite's lists — `Job.narrowed`) |
 | `dataset`, `dim`, `inputs`, `suite`, `filter_kind`, `sweep`, `algo`, `backend`, `params`, `seed` | | the key block = `Job.key(params)` (`KEY_FIELDS`); `params` is the native dict of build + query params (`{}` when the algo takes none); `inputs` is the input identity below |
+| `self_excluded` | bool, only when true | in the key block of a [self-excluded](#self-match) cell; absent everywhere else |
 | `path` | str | `PATHS[(algo, filter_kind, backend)]` |
 | `n_items`, `n_queries` | int | catalogue size, queries after `users_limit` |
 | `n_kept` | int | queries not skip-masked (every query on `none` cells) |
@@ -910,7 +949,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `interleave` | dict / null | `{group, arms, position}` when the cell ran in an [interleave group](#interleaved-groups); `null` otherwise |
 | `quality_source` | dict / null | `null` when this record computed its quality; `{seed, code_version}` of the record the [quality cache](#quality-cache) copied it from |
 | `per_query` | str / null | the [per-query sidecar](#per-query-sidecar) relative to the results root; `null` without quality |
-| `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); `null` with `--skip-quality` |
+| `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); on a [self-excluded](#self-match) cell `self_excluded: true` and `self_top1_share`; on every cell of a `self_match` dataset `heldout_label: "self_retrieval"` (its held-out recall is self-retrieval, not end-task recall); `null` with `--skip-quality` |
 | `perf` | list / null | one entry per `(bs, k, mode)` (table below); `null` with `--skip-perf` and on a quality-only suite (`perf: false`) |
 | `unstable` | bool | any perf entry `unstable` (window spread > 5 %), or `clocks_drift` |
 | `memory_reserved_mib` | float / null | `torch.cuda.memory_reserved()` after the cell — the leak detector across a group's cells |
@@ -1057,8 +1096,13 @@ its JSONL never flips it.
 ### Oracle blob v4
 
 `oracle.load_or_build(gt_dir, sweep, k_gt, item_embs=, queries=, targets=,
-qa_sweep=, skip_mask=, clauses=, filter_mod=, attrs_digest=, device=)` returns one dict,
-cached at `<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt`:
+qa_sweep=, skip_mask=, clauses=, filter_mod=, attrs_digest=, device=, slice_wider=False)` returns one dict,
+cached at `<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt`. With `slice_wider` (the
+[self-match](#self-match) cells) and no blob at this fingerprint, the smallest cached blob of the
+sweep whose fingerprint matches the same inputs at its own larger `k_gt` is returned with `topk`
+cut to the first `k_gt` columns, `k_gt` set and `sliced_from` naming the wider one; nothing is
+written. Its prefix can differ from a build at `k_gt` only in which of several exactly tied items
+sit at the cut:
 
 | key | value |
 |---|---|
@@ -1431,14 +1475,14 @@ trailing-whitespace hooks (the last two never on `articles/`, `research/artifact
 | `test_dependency_direction.py` | every `import` / `from` in `bench/`, `training/`, `eval_datasets/` resolved with `ast`: `bench` → `training.encode`, `eval_datasets.layout`; `training` → `eval_datasets.{hub,layout}`; `eval_datasets` → nothing; the library only from `bench`, through `retrieve` (the algo and filter classes) and `retrieve.interfaces` (`DISPATCH`, `FilterModule`). The walk must see more than 25 files, and an allow-list entry no import uses fails as stale |
 | `test_env_readers.py` | every `os.environ.get` / `os.getenv` / `os.environ[...]` of a `RETRIEVE_*` name under `evaluation/` sits in its owner (`RETRIEVE_DATA_ROOT`: `eval_datasets/hub.py`, read through `data_root()`); same file-count and stale-owner guards |
 | `bench/test_paths.py` | `PATHS == derive(DISPATCH)`: the derived table equals the harness's expected paths, the grid is complete, `DISPATCH` names every algo × backend and adds only `Postfilter` to the library's |
-| `bench/test_records.py` | `resume_key` canonical and `code_version`-sensitive; append / read round trip; one torn trailing line; `aggregate` one row per perf entry, last record per key, typed columns; two jobs differing only in `--checkpoint` key apart; a real D1 arxiv key block (schema 2) keeps today's arxiv job's resume key; a schema-2 goodreads record is gSASRec; the schema-4 columns (null on a schema-3 record) and `perf_window_medians_ms` equal to the nested entry `report._attach` joins |
+| `bench/test_records.py` | `resume_key` canonical and `code_version`-sensitive; append / read round trip; one torn trailing line; `aggregate` one row per perf entry, last record per key, typed columns; two jobs differing only in `--checkpoint` key apart; a real D1 arxiv key block (schema 2) keeps today's arxiv job's resume key once today's `self_excluded` is set aside (it is there, so the record never resumes the cell); a schema-2 goodreads record is gSASRec; the schema-4 columns (null on a schema-3 record) and `perf_window_medians_ms` equal to the nested entry `report._attach` joins |
 | `bench/test_measure.py` | `stats` vs numpy, `latency` control flow, `latency_group`'s A, B, A, B windows (G-interleave), `index_bytes` dedup, `provenance` git fields, `official_commit` from PEP 610 (git, local dir, no `direct_url.json`, not installed), `official_build` (the `.so`'s sha256, the flags file, absent package), `dirty` scoped to the library subtree with the `files:` fallback, H-PROVENANCE (`code_version` / `dirty` / `files_hash` follow an imported package in another checkout, a commit there moves the stamp, a wheel outside git gets the content hash), `atomic_write`, `clocks` shape, `graph_callable` refusals |
-| `bench/test_metrics.py` | padding / IDCG / denominator contracts; running sums equal per-row means to 1e-9; `jaccard_at_k` |
+| `bench/test_metrics.py` | padding / IDCG / denominator contracts; running sums equal per-row means to 1e-9; `jaccard_at_k`; `drop_self` (own item at rank 1, in the middle, absent, with padding) |
 | `bench/test_algos.py` | `build` on every `(algo, filter_kind)` torch cell: the `k` setter slices the top-k and changes no buffer; the filter submodule in `index_bytes`; `set_query_params`; build refusals; `postfilter` equal (`torch.equal` on ids and scores) to a hand-computed matmul → topk(`alpha*k`) → dense-mask filter → first `k` reference at every `alpha` in `{1, 2, 4, 8}`, `k` within and past `N`, clause and bloom, the sentinel path exercised; its refusals |
-| `bench/test_config.py` | job counts and keys per suite on `tests/bench/data/{mini,text,suites}.yaml`; `disabled`; build/query split; arms (filter kinds, sweeps, per-dataset overrides, empty slots); `ks_by_sweep`; gridded bloom widths, `compile`, `candidate_pool_frac`; each arm error named; narrows and `Job.narrowed`; the `-synth` YAMLs sharing their parent's inputs; `perf: false`; the interleave groups of the real suites, their parse errors, a job in two groups, the merged campaign children, `score_path` off official; G-grid (every real suite × dataset's job / cell counts and the 2026-10-08 rules on every cell); G-key (pinned resume keys of kept cells); every `config/*.yaml` × every suite through `load_matrix`, at exactly the dims the dataset and the suite share |
+| `bench/test_config.py` | job counts and keys per suite on `tests/bench/data/{mini,text,suites}.yaml`; `disabled`; build/query split; arms (filter kinds, sweeps, per-dataset overrides, empty slots); `ks_by_sweep`; gridded bloom widths, `compile`, `candidate_pool_frac`; each arm error named; narrows and `Job.narrowed`; the `-synth` YAMLs sharing their parent's inputs; `perf: false`; the interleave groups of the real suites, their parse errors, a job in two groups, the merged campaign children, `score_path` off official; G-grid (every real suite × dataset's job / cell counts and the 2026-10-08 rules on every cell); G-key (pinned resume keys of kept cells; the self_match datasets' filter cells pinned with `self_excluded`); every `config/*.yaml` × every suite through `load_matrix`, at exactly the dims the dataset and the suite share |
 | `bench/test_inputs.py` | `load_inputs` on the conftest writer, `users_limit` once, prefix and row-count checks, the legacy layout loading equal to the modern one, misalignment raising, `attrs_digest`, `filters.query_attrs` (a `.pt` replacing `eval_split.parquet`: same full-split row check, same `users_limit` prefix), `sweep_qa`, filters by filter backend, `query_pool` |
-| `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name (its row sample ending on the last row past 2^24 rows), an unreadable blob rebuilt, bloom FP rate, `code_version`; the item-chunked oracle and pass counts equal to a one-shot stable-sort reference at three chunk sizes, ties to the lower id; TF32 refused (G-oracle) |
-| `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig`, `modes` stamped per job (an eager-only uncapturable record `ok`, a capturable one `partial`), `postfilter`'s `recall_oracle` per `k` (equal to a pass at that `k`, never above the exact V1's); G-cache (seed-free arms copy, V3 / SilverTorch never, misses on other `ks` / `code_version`); a quality-only suite `ok`; G-ids (exact hash, and the canonical hash equal across a tied pair's two orders); G-dump (sidecar mean = record, upload lists it, aggregate skips it); G-interleave (same keys, one group per sweep and seed, `rounds`, whole-group resume); `frac_windows_below_max` against the device max, whichever cell ran first; `clocks_drift` against the first under-load sample (never the idle one) and `unstable` from drift or a perf entry's spread, each alone; a perf-phase OOM failing its whole interleaved group, not sticky, and resume re-running only that group; the spill's int32 ids exact past 2^24 and a `shape_mismatch`; `score_path` arms sharing the triton parity spill |
+| `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name (its row sample ending on the last row past 2^24 rows), an unreadable blob rebuilt, bloom FP rate, `code_version`; the item-chunked oracle and pass counts equal to a one-shot stable-sort reference at three chunk sizes, ties to the lower id; TF32 refused (G-oracle); `slice_wider` cutting a wider blob of the same inputs only, writing nothing |
+| `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig`, `modes` stamped per job (an eager-only uncapturable record `ok`, a capturable one `partial`), `postfilter`'s `recall_oracle` per `k` (equal to a pass at that `k`, never above the exact V1's); G-cache (seed-free arms copy, V3 / SilverTorch never, misses on other `ks` / `code_version`); a quality-only suite `ok`; G-ids (exact hash, and the canonical hash equal across a tied pair's two orders); G-dump (sidecar mean = record, upload lists it, aggregate skips it); G-interleave (same keys, one group per sweep and seed, `rounds`, whole-group resume); `frac_windows_below_max` against the device max, whichever cell ran first; `clocks_drift` against the first under-load sample (never the idle one) and `unstable` from drift or a perf entry's spread, each alone; a perf-phase OOM failing its whole interleaved group, not sticky, and resume re-running only that group; the spill's int32 ids exact past 2^24 and a `shape_mismatch`; `score_path` arms sharing the triton parity spill; [self-match](#self-match): an exact arm at oracle recall 1.0 with its own item excluded on both sides (key and record flags, the `none` cell untouched), and a finder of only the own item scoring 1.0 before the rule and 0 after |
 | `bench/test_cli.py` | `bench run` via `CliRunner`, `--checkpoint` landing as the record's `inputs` (encoder faked), a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, a restart mid-group keeping its parity spill (in-process children), zero cells → exit 1, a failed cell → `bench run` exit 1 and `bench campaign` exiting with its worst child's code, `bench report` over the campaign's own records, `bench env`'s JSON keys, the child log's start / end clock blocks and histogram, `bench oracle` prebuilding every sweep so `bench run` builds none |
 | `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, `n_records` counting only `<suite>/*.jsonl` (0 from a suite directory or a JSON-only tree), evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations (with the regenerated `results.parquet`) and `private=True`; `bench fetch` restoring a tree resume reads and refusing to overwrite a different local copy |
 | `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with its labels and no unescaped `_`; one row per postfilter alpha; an unlabelled algo (`linr_v4`) in no table; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record; paired speedups from interleaved arms and recall CIs from sidecars; T3 ids `=` / `= (ties)` / `≠` and kernel-only from `kernels_us` (top-8 fallback marked); F3 one panel per sweep × bs |

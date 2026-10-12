@@ -46,7 +46,7 @@ BLOOM_PARAMS = frozenset({"m_bits", "k_hash"})  # gridded on silvertorch/bloom: 
 COMPILE_MODES = ("max-autotune",)
 NONE_SWEEP = "full_scan"  # the one sweep of filter_kind ``none``
 _DATASET_KEYS = {"data_dir", "checkpoint", "content_dir", "dims", "encode", "users_limit"}
-_DATASET_KEYS |= {"filters", "exact_gate", "normalize"}
+_DATASET_KEYS |= {"filters", "exact_gate", "normalize", "self_match"}
 _FILTER_KEYS = {"attrs", "reverse", "query_attrs", "clause", "bloom"}
 _SUITE_KEYS = {"datasets", "dims", "filter_kinds", "ks", "batch_sizes", "arms", "seeds", "bloom"}
 _SUITE_KEYS |= {"sweeps", "ks_by_sweep", "seeds_by_sweep", "perf", "interleave"}
@@ -78,6 +78,7 @@ class Dataset:
     clauses: dict[str, dict[str, tuple[int, ...]]]  # filter_kind -> sweep -> active clauses
     exact_gate: float | None = None  # the exact-algo gate below k 1000 (fp16-stored catalogs)
     normalize: bool = True  # L2-normalise a content_dir's items and queries (false: dot product)
+    self_match: bool = False  # each query is its held-out target's own catalogue item
 
     @property
     def gt_dir(self) -> Path:
@@ -116,9 +117,15 @@ class Job:
         """``params`` of every cell of this job, in query order."""
         return [{**self.build, **q} for q in self.query]
 
+    @property
+    def self_excluded(self) -> bool:
+        """Oracle metrics drop the query's own item (docs/system/evaluation.md § Self-match)."""
+        return self.data.self_match and self.filter_kind != "none"
+
     def key(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """The record's key block; ``params`` defaults to the build params."""
-        return {
+        """The record's key block; ``params`` defaults to the build params. ``self_excluded``
+        is present only when true, so every other cell keeps its key."""
+        key = {
             "dataset": self.dataset,
             "dim": self.dim,
             "inputs": self.data.inputs,
@@ -130,6 +137,7 @@ class Job:
             "params": dict(self.build if params is None else params),
             "seed": self.seed,
         }
+        return {**key, "self_excluded": True} if self.self_excluded else key
 
     @property
     def group(self) -> tuple[str, int, str, str]:
@@ -227,6 +235,9 @@ def load_dataset(path: Path, dim: int, checkpoint: str | None = None) -> Dataset
     normalize = raw.get("normalize", True)
     if not isinstance(normalize, bool):
         raise ConfigError(f"{where}: normalize must be true or false")
+    self_match = raw.get("self_match", False)
+    if not isinstance(self_match, bool):
+        raise ConfigError(f"{where}: self_match must be a bool")
     ckpt, content = raw.get("checkpoint"), raw.get("content_dir")
     if not normalize and content is None:
         raise ConfigError(f"{where}: normalize applies to a content_dir dataset only")
@@ -248,6 +259,7 @@ def load_dataset(path: Path, dim: int, checkpoint: str | None = None) -> Dataset
         clauses=clauses,
         exact_gate=exact_gate,
         normalize=normalize,
+        self_match=self_match,
     )
 
 

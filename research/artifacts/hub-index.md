@@ -354,3 +354,4 @@ re-upload of a subtree replaces its row.
 The `d1-a` and `artifacts/*` subtrees were published by
 [H1](h1-results-storage/README.md) on 2026-09-26; their file counts and bytes
 include the regenerated `results.parquet` where a subtree holds records.
+| `artifacts/selfmatch/20261013-smoke` | G-selfmatch GPU smoke (selfmatch-dev, pod 1 GPU 0 under `flock`; [script](selfmatch/smoke.sh), [suites](selfmatch/smoke-suites.yaml)): rerun tree `run/selfmatch` (`a9b8951` + the dev/selfmatch harness; FORK_HEAD cc595da, library `eb600da1`, `/venvs/meta-fork`), arXiv d128 `c0_maincat`, quality only: V1 / V2 / V3 / postfilter / official-fork clause + bloom (recheck off) at k 100 / 1000 (oracle 1001, sliced from the cached 2048 blob) and V2 / official-fork at k 2048 (oracle 2049 built): 8 records all ok, `self_excluded` set, `self_top1_share` 0.9998; per-query sidecars; not citable | 12 | 357,441 | `5cf97dc90e167f9a4d62fd1d098dd453db0d28bd3740269a7270187076b8275e` |

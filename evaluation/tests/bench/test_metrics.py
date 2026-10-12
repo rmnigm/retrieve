@@ -22,7 +22,15 @@ import math
 import pytest
 import torch
 
-from bench.metrics import _hits, accumulate, accumulator, finalize, jaccard_at_k, per_row
+from bench.metrics import (
+    _hits,
+    accumulate,
+    accumulator,
+    drop_self,
+    finalize,
+    jaccard_at_k,
+    per_row,
+)
 
 
 def recall_at_k(cand, tgt, nt, k):
@@ -204,3 +212,25 @@ def test_jaccard_at_k():
     assert jaccard_at_k(a, b, 3) == pytest.approx((0.2 + 1.0 + 1.0) / 3)
     assert jaccard_at_k(a, b, 4) == pytest.approx((3 / 5 + 1.0 + 1.0) / 3)
     assert jaccard_at_k(a, a, 4) == 1.0
+
+
+def test_drop_self_removes_the_own_item_wherever_it_ranks():
+    ids = torch.tensor(
+        [
+            [7, 1, 2, 3],  # self at rank 1
+            [1, 7, 2, 3],  # in the middle
+            [1, 2, 3, 4],  # absent: the last entry goes
+            [7, 1, -1, -1],  # with padding
+            [1, -1, -1, -1],  # absent, padded
+        ]
+    )
+    self_ids = torch.tensor([7, 7, 7, 7, 7])
+    assert drop_self(ids, self_ids).tolist() == [
+        [1, 2, 3],
+        [1, 2, 3],
+        [1, 2, 3],
+        [1, -1, -1],
+        [1, -1, -1],
+    ]
+    # a -1 self id (no target) never matches padding
+    assert drop_self(torch.tensor([[-1, -1]]), torch.tensor([-1])).tolist() == [[-1]]

@@ -159,12 +159,14 @@ ATTRS = torch.tensor([[[0]], [[1]], [[2]], [[0]]])  # [N=4, C=1, A=1]
 REVERSE = torch.tensor([False])
 
 
-def _build(gt_dir, item_embs, queries, targets=None, clauses=(0,), attrs=ATTRS, reverse=REVERSE):
+def _build(
+    gt_dir, item_embs, queries, targets=None, clauses=(0,), attrs=ATTRS, reverse=REVERSE, k=2, **kw
+):
     _, _, qa, filt, _ = _v4_inputs()
     return load_or_build(
         gt_dir,
         "s",
-        2,
+        k,
         item_embs=item_embs,
         queries=queries,
         targets=targets,
@@ -174,6 +176,7 @@ def _build(gt_dir, item_embs, queries, targets=None, clauses=(0,), attrs=ATTRS, 
         filter_mod=filt,
         attrs_digest=oracle.attrs_digest(attrs, reverse),
         device=CPU,
+        **kw,
     )
 
 
@@ -346,3 +349,21 @@ def test_the_oracle_refuses_tf32():
             compute(torch.eye(3), torch.eye(3), None, None, None, 2, device=CPU)
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old
+
+
+def test_slice_wider_cuts_a_cached_blob_of_the_same_inputs(tmp_path):
+    """Self-match: a k_gt + 1 oracle is the prefix of a wider cached blob of the same inputs,
+    never of another input's blob, and nothing new is written; without the flag it builds."""
+    item_embs, queries, _, _, targets = _v4_inputs()
+    wide = _build(tmp_path, item_embs, queries, targets, k=4)
+    mutated = item_embs.clone()
+    mutated[0] = 0.0
+    _build(tmp_path, mutated, queries, targets, k=3)  # other inputs, narrower
+    cut = _build(tmp_path, item_embs, queries, targets, k=2, slice_wider=True)
+    assert cut["k_gt"] == 2 and cut["sliced_from"] == 4
+    assert torch.equal(cut["topk"], wide["topk"][:, :2])
+    assert torch.equal(cut["targets_in_filter"], wide["targets_in_filter"])
+    assert len(list(tmp_path.glob("oracle_v4_s_*.pt"))) == 2
+    built = _build(tmp_path, item_embs, queries, targets, k=2)
+    assert "sliced_from" not in built and torch.equal(built["topk"], cut["topk"])
+    assert len(list(tmp_path.glob("oracle_v4_s_*.pt"))) == 3

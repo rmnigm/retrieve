@@ -33,6 +33,7 @@ from click.testing import CliRunner
 from bench import measure as bench
 from bench import records, run, upload
 from bench.config import NONE_SWEEP, load_matrix
+from bench.metrics import drop_self
 
 LAT = {"warmup": 2, "n_min": 4, "n_max": 4, "windows": 3}
 EAGER = ("eager",)
@@ -345,6 +346,8 @@ def test_heldout_recall_counts_only_reachable_targets():
         "qa_s": None,
         "keep": keep,
         "blob": blob,
+        "oracle_topk": blob["topk"],
+        "self_ids": None,
         "oracle_rows": keep,
         "heldout_rows": keep & tif.any(dim=1),
     }
@@ -378,6 +381,7 @@ def test_quality_holds_torch_cpu_threads_for_the_loop_and_restores_them():
     inputs = {"queries": torch.zeros(rows, 2), "targets": torch.zeros(rows, 1, dtype=torch.long)}
     keep = torch.ones(rows, dtype=torch.bool)
     assets = {"qa_s": None, "keep": keep, "blob": None, "oracle_rows": None, "heldout_rows": keep}
+    assets |= {"oracle_topk": None, "self_ids": None}
     before = torch.get_num_threads()
     torch.set_num_threads(max(2, before))
     try:
@@ -944,3 +948,71 @@ def test_a_failed_build_is_released_after_its_traceback_is_gone(
     counts = run.run(jobs, out_dir=tmp_path / "results", modes=EAGER, **KW)
     assert dict(counts) == {"failed": 1, "partial": 2}
     assert seen[0] is True
+
+
+def _self_match_configs(tiny_configs, tmp_path):
+    """The tiny dataset with ``self_match: true`` and each query its target's own item
+    (item ``i``, held-out ``item_id`` ``i + 1``): the arXiv / PubMed shape."""
+    ds, suites = tiny_configs
+    content = tmp_path / "data" / "tiny" / "content"
+    items = torch.load(str(content / "text_emb.pt"))
+    items = torch.nn.functional.normalize(items.float(), dim=-1)
+    torch.save(items.half(), content / "text_emb.pt")
+    torch.save(items[: run.inputs.layout.pl.read_parquet(content.parent / "heldout.parquet").height]
+               .half(), content / "query_emb.pt")  # fmt: skip
+    ds.write_text(ds.read_text() + "self_match: true\n")
+    return ds, suites
+
+
+def test_self_match_excludes_the_own_item_from_oracle_and_results(tiny_configs, tmp_path):
+    """User ruling AMBER 1/3: on a self_match dataset the exact arm still scores oracle recall
+    1.0 once its own item leaves both sides; the held-out side (the target *is* that item)
+    keeps the un-excluded list; the key carries ``self_excluded``, the ``none`` cell does not."""
+    ds, suites = _self_match_configs(tiny_configs, tmp_path)
+    jobs = load_matrix(ds, suites, "untimed", sweeps=["c0"])
+    none = load_matrix(ds, suites, "e2e", algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP])
+    assert [j.self_excluded for j in jobs + none] == [True, False]
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 1}
+    (rec,) = _records(out / "untimed" / "tiny-d64.jsonl")
+    assert rec["self_excluded"] is True and records.key_block(rec) == jobs[0].key({})
+    q = rec["quality"]
+    assert q["self_excluded"] is True and q["self_top1_share"] == 1.0
+    assert q["oracle"]["recall@2"] == 1.0 and q["oracle"]["recall@4"] == 1.0
+    assert q["heldout"]["recall@2"] == 1.0  # the own item, found at rank 1
+    assert q["heldout_label"] == "self_retrieval"
+    assert "self_excluded" not in none[0].key()
+
+
+class _SelfOnly(torch.nn.Module):
+    """Finds each query's own item at rank 1, then junk (ids past the oracle's lists)."""
+
+    k = 3
+
+    def forward(self, q, qa=None):
+        own = torch.arange(q.shape[0]).unsqueeze(1)
+        ids = torch.cat([own, 100 + torch.arange(self.k - 1).repeat(q.shape[0], 1)], 1)
+        return ids, torch.linspace(1.0, 0.5, self.k).repeat(q.shape[0], 1)
+
+
+def test_self_match_no_longer_counts_the_self_hit():
+    """Old scoring counted the trivial own-item hit (oracle top-1 is the query itself);
+    with the own item dropped from both sides a method that finds only it scores 0."""
+    u = 4
+    own = torch.arange(u)
+    topk = torch.stack([own, own + 10, own + 20], 1)  # oracle at k_max + 1 = 3
+    inputs = {"queries": torch.zeros(u, 2), "targets": own.unsqueeze(1), "n_targets": torch.ones(u)}
+    keep = torch.ones(u, dtype=torch.bool)
+    base = {"qa_s": None, "keep": keep, "blob": {"targets_in_filter": keep.unsqueeze(1)},
+            "oracle_rows": keep, "heldout_rows": keep}  # fmt: skip
+    m = _SelfOnly()
+    m.k = 2
+    old = {**base, "oracle_topk": topk[:, :2], "self_ids": None}
+    out, *_ = run.quality(m, inputs, old, [1, 2], torch.device("cpu"))
+    assert out["oracle"]["recall@1"] == 1.0  # the self hit
+    m.k = 3
+    new = {**base, "oracle_topk": drop_self(topk, own), "self_ids": own, "self_top1_share": 1.0}
+    out, per_q, ids, _ = run.quality(m, inputs, new, [1, 2], torch.device("cpu"))
+    assert out["oracle"]["recall@1"] == 0.0 and out["oracle"]["recall@2"] == 0.0
+    assert out["heldout"]["recall@1"] == 1.0 and out["self_excluded"] is True
+    assert ids.shape == (u, 2) and per_q["recall_oracle@2"].tolist() == [0.0] * u
