@@ -872,6 +872,8 @@ def run(
                                 per_q.update(pk)
                         module.k = k_max
                         qual.update(parity(out_dir, job, params, ids, scores, job.ks))
+                        if job.data.self_match:  # the held-out target is the query's own item
+                            qual["heldout_label"] = "self_retrieval"
                         del ids, scores
                         rec["quality"] = qual
                         rec["per_query"] = per_query_path(job, params, code_version)

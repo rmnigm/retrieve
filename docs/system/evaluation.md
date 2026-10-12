@@ -771,7 +771,10 @@ histories). On such a dataset every **filter** cell is self-excluded (`Job.self_
   other than the own item. `PER_K_QUALITY` arms run at `k + 1` the same way;
 - the **held-out** side keeps the un-excluded first `k_max` ids (its target *is* the own item),
   and so do the parity spill and the per-query sidecar's `heldout_recall@k`;
-  `recall_oracle@k` there is the self-excluded value;
+  `recall_oracle@k` there is the self-excluded value. Held-out recall on these datasets measures
+  **self-retrieval** (does the method return the query's own document), never end-task
+  recall: every cell of a `self_match` dataset, `none` cells included, records
+  `quality.heldout_label: "self_retrieval"`;
 - the timed path is untouched: `perf` sets `module.k = k` per entry as before.
 
 `sweep_assets` logs, per sweep, the share of kept rows with a reachable target whose oracle top-1
@@ -948,7 +951,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `interleave` | dict / null | `{group, arms, position}` when the cell ran in an [interleave group](#interleaved-groups); `null` otherwise |
 | `quality_source` | dict / null | `null` when this record computed its quality; `{seed, code_version}` of the record the [quality cache](#quality-cache) copied it from |
 | `per_query` | str / null | the [per-query sidecar](#per-query-sidecar) relative to the results root; `null` without quality |
-| `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); on a [self-excluded](#self-match) cell `self_excluded: true` and `self_top1_share`; `null` with `--skip-quality` |
+| `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); on a [self-excluded](#self-match) cell `self_excluded: true` and `self_top1_share`; on every cell of a `self_match` dataset `heldout_label: "self_retrieval"` (its held-out recall is self-retrieval, not end-task recall); `null` with `--skip-quality` |
 | `perf` | list / null | one entry per `(bs, k, mode)` (table below); `null` with `--skip-perf` and on a quality-only suite (`perf: false`) |
 | `unstable` | bool | any perf entry `unstable` (window spread > 5 %), or `clocks_drift` |
 | `memory_reserved_mib` | float / null | `torch.cuda.memory_reserved()` after the cell — the leak detector across a group's cells |

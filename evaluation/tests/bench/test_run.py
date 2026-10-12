@@ -980,6 +980,7 @@ def test_self_match_excludes_the_own_item_from_oracle_and_results(tiny_configs, 
     assert q["self_excluded"] is True and q["self_top1_share"] == 1.0
     assert q["oracle"]["recall@2"] == 1.0 and q["oracle"]["recall@4"] == 1.0
     assert q["heldout"]["recall@2"] == 1.0  # the own item, found at rank 1
+    assert q["heldout_label"] == "self_retrieval"
     assert "self_excluded" not in none[0].key()
 
 

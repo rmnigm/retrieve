@@ -265,7 +265,8 @@ time-split — it emits `item_id_map.json`, `papers.parquet`, and a
 sampled `heldout.parquet`. Held-out items stay in the index.
 Each query is therefore its own target's text, so `config/arxiv.yaml` (and arxiv-synth,
 arxiv-corr-synth, which share these queries) sets `self_match: true`: oracle metrics drop the
-query's own item ([evaluation § Self-match](evaluation.md#self-match)).
+query's own item, and held-out recall here is self-retrieval, not end-task recall
+([evaluation § Self-match](evaluation.md#self-match)).
 
 The two encode steps use the same model (`nomic-embed-text-v1.5`,
 Matryoshka-truncated) with **different prefixes** — `"search_document: "`
@@ -612,6 +613,7 @@ sources:
 - `heldout` — item-as-query: a held-out article's title (from the article
   parquets) is the query and the article itself is the single relevant item;
   the article stays in the catalogue, so `config/pubmed.yaml` sets `self_match: true`
+  and held-out recall is self-retrieval
   ([evaluation § Self-match](evaluation.md#self-match)). Always available. **Every held-out row keeps its query row** — an article
   without a title gets an empty string, it is not dropped — so
   `query_emb.pt` stays aligned 1:1 with `heldout.parquet` and
