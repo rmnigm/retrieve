@@ -98,7 +98,6 @@ def _oporp_project(x: Tensor, signs: Tensor, perm: Tensor, k_bits: int) -> Tenso
     """Shared Sign-OPORP chain (index- and query-side): sign-flip → permute → bin into ``k_bits``
     groups → L2-normalize → pack to 64-bit words."""
     b_or_n, d = x.shape
-    k_bits = _oporp_k_bits(d, k_bits)
     bin_w = d // k_bits
     proj = (x * signs.to(x.dtype)).index_select(1, perm)
     binned = proj.view(b_or_n, k_bits, bin_w).sum(dim=-1)
@@ -138,7 +137,7 @@ def project_oporp_1bit_query(
     Returns [B, k_bits//64] int64 packed sign bits."""
     if query.dim() != 2:
         raise ValueError(f"expected 2-D [B, D] query, got shape {tuple(query.shape)}")
-    return _oporp_project(query, signs, perm, k_bits)
+    return _oporp_project(query, signs, perm, _oporp_k_bits(query.shape[1], k_bits))
 
 
 def _build_simhash_R(d: int, k_bits: int, seed: int, device: torch.device) -> Tensor:

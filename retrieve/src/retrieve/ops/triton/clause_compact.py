@@ -14,9 +14,7 @@ import triton
 import triton.language as tl
 from torch import Tensor
 
-# By name, not `common.<fn>` — see the note in clause_mask.py: inductor's
-# re-compilation of a @triton_op kernel captures @triton.jit callees from
-# the kernel's globals by name, and a module object is not one.
+# `common` helpers by name, not `common.<fn>` (kernels.md, the conventions list)
 from retrieve.ops.triton._host import (
     CompactLaunch,
     check_contiguous,
@@ -35,7 +33,7 @@ class ClauseCompactConfig:
 
 
 # Tuned on A100/sm_80 for the one-pass atomic kernel (`tune-kernels clause-compact`); not
-# re-tuned for the two-phase shape (roadmap Phase G).
+# re-tuned for the two-phase shape.
 DEFAULT_CONFIG = ClauseCompactConfig(block_n=512, num_warps=2)
 
 
@@ -183,19 +181,9 @@ def clause_compact(
     ``[B, N]`` buffer is written on ``[:counts[b]]`` only; consumers row-bound by it. Within
     that prefix the ids are in **ascending item order** — bit-equal to
     ``ops.reference.clause_compact`` and to itself across launches and processes. Mirrors
-    ``_clause_compact_impl`` with ``DEFAULT_CONFIG``.
-
-    Registered as an *opaque* ``custom_op``, not a ``triton_op`` (kernels.md, graph-break
-    behavior): under
-    ``triton_op`` inductor analyses the kernel's TTIR for mutated pointers, and its provenance
-    walk follows a store address back through every argument of the ``tt.call`` that produced
-    it. ``compact_store``'s address is ``base + intra`` — data-dependent on the pass mask, which
-    is the result of the ``clause_pass`` call whose arguments include ``item_attrs_ptr`` — so
-    the index buffer (a graph input) is reported as mutated and cudagraph trees skip the whole
-    forward ("skipping cudagraphs due to mutated inputs"). ``clause_mask`` stores at a
-    data-independent address and is unaffected. As a custom op the kernel launch is opaque to
-    inductor, the op is functional as declared, and the forward captures. The cost is one
-    custom-op dispatch instead of an inlined launch; the eager path is unchanged."""
+    ``_clause_compact_impl`` with ``DEFAULT_CONFIG``. An opaque ``custom_op``, not a
+    ``triton_op``: its data-dependent store address would make inductor report the index as
+    mutated and skip cudagraphs (kernels.md, "Graph-break behavior")."""
     return _clause_compact_impl(item_clause_attrs, clause_is_reverse, query_clause_attrs)
 
 

@@ -27,7 +27,7 @@ adapter stays: it runs Meta's code as published, the parity reference.
 The Triton kernels live flat in
 [`ops/triton/`](../../retrieve/src/retrieve/ops/triton/), one file per
 kernel, registered as `torch.ops.retrieve.*` when the package is imported
-(`_load.py`); every op has a pure-torch twin with the same name and
+(its `__init__.py`); every op has a pure-torch twin with the same name and
 signature in [`ops/reference/`](../../retrieve/src/retrieve/ops/reference/)
 (the `"torch"` backend and the parity oracle). By domain:
 
@@ -81,6 +81,14 @@ All kernels follow the same conventions.
   width is accepted.
   The prep then passes `.stride(i)` for every axis, so a kernel body
   never hard-codes a layout. The strides are always the contiguous ones.
+- `@triton.jit` helpers are imported **by name**
+  (`from retrieve.ops.triton.common import clause_pass`), never called as
+  `common.clause_pass(...)`. `torch.compile` re-compiles a `@triton_op`'s
+  kernel through inductor, which rebuilds the kernel's global namespace
+  from the `JITFunction`'s globals and captures `@triton.jit` callees by
+  name; a module object is not captured, so `common.<fn>` raises
+  `NameError('common is not defined')` at `ast_to_ttir` time. Eager Triton
+  resolves the attribute and never sees it; `tests/compile` catches it.
 - Top-K selection is **not** in-kernel. Each kernel writes a `[B, ·]` score
   buffer and the host calls `torch.topk` on it. CUB's top-K (under torch)
   is faster than anything we can implement in pure Triton without a
@@ -1156,6 +1164,24 @@ chunks (`[65,536, k_bits]` fp32, 192 MiB at 768 bits). The bits are
 the D1 tables, [artifact](../../research/artifacts/pubmed-fixes/README.md#fix-2-chunked-1-bit-build)).
 The query side (`project_*_query`) stays one-shot: `B` rows.
 
+### KMeans centroid update
+
+[`KMeans._cluster_sums`](../../retrieve/src/retrieve/indexing/kmeans.py) computes the
+per-cluster sums with a reduction order fixed by the shapes, so two identical builds are bit
+for bit equal. The obvious `torch.zeros(n_lists, D).index_add_(0, assignments, embs)` is not
+reproducible on CUDA: `index_add_` reduces with float atomics, a cluster's summation order
+follows block scheduling, and one assignment flipped early cascades through the rest. Instead
+`bincount` gives the counts (integer atomics are exact in any order), and the sums are a
+one-hot GEMM `onehot[n_lists, W] @ embs[W, D]` in float64 over panels of `W` items,
+accumulated into `sums` in panel order (`addmm_`, issued sequentially). A GEMM's reduction
+order is a function of its shapes alone. float64 keeps the accumulation exact well past
+float32 and cannot be demoted to TF32 by a caller's
+`torch.set_float32_matmul_precision("high")` (which would cost 13 mantissa bits); it costs
+8 % more time on the A100, where DMMA runs at the float32 SIMT rate. The extra matmul per
+Lloyd iteration has the FLOPs of the `cdist` assignment step, so `fit` takes at most ~2x the
+`index_add_` version's time (measured 1.3x at N = 200k, D = 128, `n_lists` = 1024). The panel
+width is capped so the one-hot buffer stays at 64 MiB whatever `n_lists` is.
+
 ### Compile on the V3 torch reference
 
 The pure-torch hot bodies on V3's reference path —
@@ -1699,11 +1725,48 @@ is therefore our `[B, width]` (rounded up to 32), and the host
 positions and map back through `sort_perm`. Slots the op never writes
 (pads, filtered docs) carry `indices == -1` and become `-inf` / `-1`.
 
-**Ops called** (schemas in the module docstring, matched to the upstream
-`TORCH_LIBRARY_FRAGMENT` registrations): `fused_kmean_ann`,
-`fused_kmean_ann_with_partial_masks`, `bloom_index_build`,
-`parse_expression_query_batch` (CPU),
-`bloom_index_search_batch`, `bloom_index_search_batch_return_partial_response`.
+**Ops called**, with their schemas as registered upstream
+(`TORCH_LIBRARY_FRAGMENT(st, …)` at `21aa35e`):
+
+- `fused_kmean_ann(Tensor cluster_offsets, Tensor cluster_ids, Tensor cluster_length,
+  Tensor embeddings, Tensor queries, int max_tensor_size_per_row,
+  Tensor? filtering_bit_mask=None, int invalid_index_value=-1, int divisor_for_int8=-1,
+  Tensor? filtering_bit_index=None, Tensor? per_embedding_scale=None) -> (Tensor,
+  Tensor)` — `fused_kmean_ann.cpp:400-413`. `cluster_offsets` int64 `[n_lists+1]`,
+  `cluster_ids` / `cluster_length` int64 `[B, P]`, `embeddings` int8 `[N, D]`
+  **cluster-sorted**, `queries` int8 `[B, D]`; returns `scores` (int32 when
+  `divisor_for_int8 == -1`, fp16 otherwise) and `indices` int32, both `[B,
+  round_up(max_tensor_size_per_row, 32)]`, pads at the dtype minimum /
+  `invalid_index_value`.
+- `fused_kmean_ann_with_partial_masks(…same five tensors…, int max_tensor_size_per_row,
+  Tensor partial_mask_column_counts_cumsum, Tensor partial_mask_first_item_offset_in_column,
+  Tensor partial_mask_column_results, int invalid_index_value=-1, int divisor_for_int8=-1,
+  Tensor? filtering_bit_index=None, Tensor? per_embedding_scale=None, Tensor?
+  cluster_warp_size=None, Tensor? cluster_warp_rounded_length_cumsum=None, Tensor?
+  cluster_remaining_length_cumsum=None, Tensor? cluster_warp_size_cumsum=None, int
+  total_cluster_rounded_warps=0, int total_cluster_remaining_warps=0) -> (Tensor,
+  Tensor)` — `fused_kmean_ann.cpp:415-436`.
+- `bloom_index_build(Tensor feature_ids, Tensor feature_offsets, Tensor feature_values,
+  float b_multiplier, int k, bool fast_build=False) -> (Tensor, Tensor)` —
+  `bloom_indexer.cpp:115-125`; int32 `[F]`, int64 `[N·F+1]`, int64 `[nnz]`,
+  `b_multiplier > 1.0`; returns `bloom_index` int64 `[W]` and
+  `bundle_b_offsets` int64 `[n_bundles+1]`.
+- `parse_expression_query_batch(str[] expressions, Tensor silvertorch_ks, int
+  bloom_hash_k, bool return_query_plan=True, int max_sub_queries=5) -> (int, Tensor[])`
+  — `expression_query_parser.cpp:456-465`; CPU-only (the CUDA registration forwards
+  to it); `silvertorch_ks` is unused upstream; returns `(max_stack_size,
+  [plans_data int8, plans_offsets int64])`.
+- `bloom_index_search_batch(Tensor bloom_index, Tensor bloom_bundle_b_offsets, Tensor
+  bloom_query_plans_data, Tensor bloom_query_plans_offsets, int k, int hash_k, bool
+  return_bool_mask=True) -> Tensor` — `bloom_index_search.cpp:549-558`; bool `[B,
+  n_bundles·2048]` or packed int64 `[B, n_bundles·32]`.
+- `bloom_index_search_batch_return_partial_response(…same four…, Tensor
+  selected_cluster_offsets, Tensor selected_cluster_lengths, int k, int hash_k, Tensor?
+  query_plan_index=None) -> (Tensor, Tensor, Tensor)` — `bloom_index_search.cpp:560-571`;
+  int64 `[B, P]` doc-start / length per probe; returns `column_counts_cumsum` int32
+  `[B·P]`, `first_item_offset_in_column` int8 `[B·P]`, `column_mask_response`
+  int64 `[Σ columns]`.
+
 Nothing else upstream is used — no `BloomIndexSearchModule`, no
 `is_topk`, no `*_multiple` sharded variants.
 
@@ -1964,8 +2027,8 @@ way a kernel ships half-integrated.
    pair, the `_<k>_impl`, and the public op (`@torch.library.triton_op`
    unless the launch's store address is data-dependent, in which case
    `@torch.library.custom_op` — see "Graph-break behavior" above).
-2. `ops/triton/_load.py` — import the new module so `import
-   retrieve.ops.triton` registers the op.
+2. `ops/triton/__init__.py` — import the op from the new module (and add
+   it to `__all__`) so `import retrieve.ops.triton` registers it.
 3. `ops/reference/<k>.py` — the pure-torch twin, same op name and
    signature. This is the parity oracle by default
    ([testing.md](testing.md#oracle-policy)) and the `"torch"` backend.

@@ -245,39 +245,14 @@ def _fmkt_finish(launch: _FmktLaunch, k: int, *, pad_to_k: bool) -> tuple[Tensor
     p = launch.p
     actual_k = min(k, p) if pad_to_k else k
     topk_scores, topk_local = torch.topk(launch.all_scores, actual_k, dim=1)
-    # topk_local indexes [0, p_kernel); when counts[b] < actual_k, ties at -inf can pick [p,
-    # p_kernel) — OOB for positive_indices. Clamp before gather (the where() below masks these to
-    # -1, so the clamp value only matters for avoiding the OOB read). With the unbucketed public
-    # op p_kernel == p and the clamp is an identity.
-    safe_local = topk_local.clamp_max(p - 1)
-    topk_ids = launch.positive_indices.gather(1, safe_local)
-    # When counts[b] < actual_k, ties at -inf can pick positions past counts[b], whose ids are
-    # unwritten (Triton compaction) or arbitrary (torch compaction); force those to -1, the
-    # oracle's sentinel.
-    topk_ids = torch.where(
-        torch.isfinite(topk_scores),
-        topk_ids,
-        topk_ids.new_full((), -1),
-    )
-
+    # When counts[b] < actual_k, ties at -inf can pick slots past counts[b]: past p (bucketed
+    # width, an OOB gather, hence the clamp) or unwritten / arbitrary ids; all become -1.
+    topk_ids = launch.positive_indices.gather(1, topk_local.clamp_max(p - 1))
+    topk_ids = torch.where(torch.isfinite(topk_scores), topk_ids, topk_ids.new_full((), -1))
     if pad_to_k and actual_k < k:
-        pad = k - actual_k
-        device = launch.all_scores.device
-        topk_ids = torch.cat(
-            [
-                topk_ids,
-                torch.full((launch.b, pad), -1, dtype=torch.long, device=device),
-            ],
-            dim=1,
-        )
-        topk_scores = torch.cat(
-            [
-                topk_scores,
-                torch.full((launch.b, pad), float("-inf"), dtype=torch.float32, device=device),
-            ],
-            dim=1,
-        )
-
+        pad = (launch.b, k - actual_k)
+        topk_ids = torch.cat([topk_ids, topk_ids.new_full(pad, -1, dtype=torch.long)], dim=1)
+        topk_scores = torch.cat([topk_scores, topk_scores.new_full(pad, float("-inf"))], dim=1)
     return topk_ids, topk_scores
 
 

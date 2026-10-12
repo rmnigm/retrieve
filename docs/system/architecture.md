@@ -48,7 +48,7 @@ retrieve/src/retrieve/
 │   └── official.py        Meta's silvertorch.modules.* re-exported lazily (OfficialMissing without the extra)
 ├── ops/
 │   ├── __init__.py        triton / reference / official as lazy submodules; available_backends()
-│   ├── triton/            _load.py (imports every kernel file → registers retrieve::*), _host.py (shared
+│   ├── triton/            __init__.py (imports every kernel file → registers retrieve::*), _host.py (shared
 │   │                      launch scaffold), common.py (@triton.jit helpers), one file per kernel
 │   ├── reference/         the same op names and signatures in pure torch: the "torch" backend + parity oracle
 │   ├── official/          __init__.py (loader per backend, OfficialConfig, constants, `st` / `stfork`), adapter.py (the adapter)
@@ -533,7 +533,7 @@ launch scaffold the files share (`probe_prep` / `probe_topk` and
 compaction ops, `grid_batch_tiles` for the 3-D grids of the four filter
 kernels and the probe scorers); each kernel keeps its own loads and
 masking policy.
-[`_load.py`](../../retrieve/src/retrieve/ops/triton/_load.py) is the one
+The package [`__init__.py`](../../retrieve/src/retrieve/ops/triton/__init__.py) is the one
 place the kernel files are imported, so `import retrieve.ops.triton` is
 the registration. Every kernel of ours is Triton (see
 [kernels.md](kernels.md#deleted-backends)). Each op has a pure-torch
@@ -578,8 +578,9 @@ Every module resolves `backend` to an op namespace with
 `interfaces.ops_for` — `"triton"` → `retrieve.ops.triton`, `"torch"` →
 `retrieve.ops.reference` (identical op names and signatures, so a module's
 forward is one code path calling `ops.<op>(...)`) — and `SilverTorch` alone
-adds `"official"` → `retrieve.ops.official` through a table built once in
-`__init__` (`self._forward_impl`). The constructor rejects anything else.
+adds `"official"` / `"official-fork"` → `retrieve.ops.official`, its `forward`
+branching on `backend` to `_forward_official` / `_forward_fork` / `_forward_ops`.
+The constructor rejects anything else.
 The importable truth is
 [`interfaces.DISPATCH`](../../retrieve/src/retrieve/interfaces.py):
 `{class name: {backend: "triton" | "torch" | "cublas" | "official" | None}}`,

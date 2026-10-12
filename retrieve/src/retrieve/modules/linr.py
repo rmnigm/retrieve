@@ -4,7 +4,7 @@
 filter's query encoding, done outside the timed call) and ``forward(query, prepared=None) -> (ids
 [B, k], scores [B, k])``. ``k`` forwards to the primitive that owns the final top-k, so
 it is settable after ``register_index``; ``capturable`` is a class attribute (every LiNR backend
-captures). The bodies are the harness wrappers' bodies, moved verbatim."""
+captures)."""
 
 from __future__ import annotations
 
@@ -37,6 +37,15 @@ def _filter(filter_mod: FilterModule | None) -> FilterModule:
     return filter_mod
 
 
+def _register_filter(
+    filter_mod: FilterModule | None,
+    item_clause_attrs: Tensor | None,
+    clause_is_reverse: Tensor | None,
+) -> None:
+    if item_clause_attrs is not None:
+        _filter(filter_mod).register_index(item_clause_attrs, clause_is_reverse=clause_is_reverse)
+
+
 class LiNRV1(RetrievalModule):
     """LiNR V1 — dense fp16-input, fp32-score matmul (cuBLAS), the filter folded into the score
     write (``FilterModule.mask_scores``: one fused pass, no ``[B, N]`` bool), top-k."""
@@ -59,10 +68,7 @@ class LiNRV1(RetrievalModule):
         clause_is_reverse: Tensor | None = None,
     ) -> None:
         self.idx.register_index(item_embs)
-        if item_clause_attrs is not None:
-            _filter(self.filter).register_index(
-                item_clause_attrs, clause_is_reverse=clause_is_reverse
-            )
+        _register_filter(self.filter, item_clause_attrs, clause_is_reverse)
 
     prepare_queries = _prepare
 
@@ -94,10 +100,7 @@ class LiNRV2(RetrievalModule):
         clause_is_reverse: Tensor | None = None,
     ) -> None:
         self.idx.register_index(item_embs)
-        if item_clause_attrs is not None:
-            _filter(self.filter).register_index(
-                item_clause_attrs, clause_is_reverse=clause_is_reverse
-            )
+        _register_filter(self.filter, item_clause_attrs, clause_is_reverse)
 
     prepare_queries = _prepare
 
@@ -138,10 +141,7 @@ class LiNRV3(RetrievalModule):
     ) -> None:
         self.stage1.register_index(item_embs)
         self.stage2.register_index(item_embs)
-        if item_clause_attrs is not None:
-            _filter(self.filter).register_index(
-                item_clause_attrs, clause_is_reverse=clause_is_reverse
-            )
+        _register_filter(self.filter, item_clause_attrs, clause_is_reverse)
 
     def set_query_params(self, *, candidate_pool: int) -> None:
         if candidate_pool > self.stage1.item_bits.shape[0]:

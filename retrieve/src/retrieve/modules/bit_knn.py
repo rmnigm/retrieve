@@ -102,19 +102,13 @@ class OneBitKNN(_PackedBitsKNN):
     ) -> None:
         super().__init__(k, backend)
         self.seed = seed
-        # k_bits=0 sentinel ("use D from register_index"); a plain int (never None) so Dynamo sees
-        # no Optional attr.
+        # 0 = D, resolved to a plain int at register_index (or, prebuilt, at load) from the
+        # untouched constructor arg, so Dynamo never sees the sentinel.
         self.k_bits = k_bits
-        # Pristine constructor arg: the sentinel is re-resolved from it on every register_index,
-        # so re-registering with a different-dim corpus can't silently keep the first D.
         self._k_bits_arg = k_bits
-        # A state-dict load into a module that never registered (the builders' prebuilt path)
-        # must resolve the sentinel from the loaded projection instead.
         self.register_load_state_dict_post_hook(_rederive_k_bits)
 
     def _quantize_index(self, item_embs: Tensor) -> None:
-        # Resolve the 0 sentinel to a concrete int so _project_query sees a stable Python int under
-        # Dynamo.
         self.k_bits = self._k_bits_arg if self._k_bits_arg != 0 else item_embs.shape[1]
         bits, signs, perm = quantize_oporp_1bit(item_embs, seed=self.seed, k_bits=self.k_bits)
         self.register_buffer("item_bits", bits)
