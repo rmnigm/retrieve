@@ -237,6 +237,15 @@ Clause 1 (language) is the **reverse** clause — the one sweep that
 exercises negated predicates end-to-end. It is bloom-incompatible, so
 goodreads bloom sweeps exclude it.
 
+**The staged file is the published one, not this layout.** The Hub copy the
+harness reads (`@4714e9b5`) has **four** clauses in the legacy `[N + 1, 4, 4]`
+layout (pad row 0, dropped by the loader): C0 genre (top 4), C1 language
+(reverse), C2 format, C3 year bucket. It has no author clause, and its
+`clause_is_reverse_narrow.pt` is `[F, T, F, F]`.
+[`config/goodreads.yaml`](../../evaluation/config/goodreads.yaml) indexes
+those four (`all4` = all of them); re-running `attrs` writes the five-clause
+`[N, 5, 4]` file above, which the configs do not read.
+
 ### arxiv
 
 `download` → `convert` → `prep` → `encode_text` → `encode_queries` →
@@ -1132,8 +1141,9 @@ parent's configs on the new data dir). It exists for the fixed-d N-sweep: LAION 
 
 ### Synthetic selectivity attrs
 
-`eval-data synth-filter --dataset <goodreads|arxiv|yfcc10m> [--rates …]
-[--seed 20261008]` ([`synth_filter.py`](../../evaluation/eval_datasets/synth_filter.py))
+`eval-data synth-filter --dataset <name> [--rates …]
+[--seed 20261008]` (any dataset with a `config/<name>.yaml`; built for
+goodreads, arxiv, yfcc10m and laion30m) ([`synth_filter.py`](../../evaluation/eval_datasets/synth_filter.py))
 gives a dataset a controllable pass rate on its real embeddings. It draws
 one `u_i ~ U(0, 1)` (float64) per catalog item from
 `torch.Generator().manual_seed(seed)`, in item-row order: N is the row
@@ -1164,7 +1174,12 @@ oracle and record. With one value per clause a bloom filter has almost no
 false positives here, so synth bloom cells measure only what the bloom
 path costs as the pass rate changes. Measured pass counts per rate:
 [validation](../../research/validation.md#harness-gates). yfcc10m is built on its
-campaign pod (it is not staged everywhere). The files are not on the Hub.
+campaign pod (it is not staged everywhere). laion30m's files are built
+the same way (seed 20261008, 30 M items, 10,000 queries); `laion1m`,
+`laion3m` and `laion10m` do not rebuild them: `eval-data subset` copies the
+parent's `item_attrs_synth.pt` and `synth_u.pt` rows ([Subsets](#subsets)),
+so each item keeps its pass / fail at every rate, and writes their
+`config/laion{1,3,10}m-synth.yaml`. The files are not on the Hub.
 
 **Cluster-correlated variant.** `eval-data synth-filter --dataset arxiv
 --correlated [--rates 0.01,0.03,0.1] [--dim 128] [--seed 20261008]`

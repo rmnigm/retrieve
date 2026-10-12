@@ -12,6 +12,7 @@ and the ``official`` backend the old configs never had.
 
 from __future__ import annotations
 
+import copy
 import json
 from collections import Counter
 from pathlib import Path
@@ -19,7 +20,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from bench import cli, run
+from bench import cli, config, run
 from bench.algos import official_config
 from bench.config import NONE_SWEEP, ConfigError, interleave_units, load_dataset, load_matrix
 from bench.records import resume_key
@@ -28,6 +29,25 @@ from eval_datasets import synth_filter
 FIX = Path(__file__).parent / "data"
 CFG = Path(__file__).resolve().parents[2] / "config"
 MINI, TEXT, SUITES = FIX / "mini.yaml", FIX / "text.yaml", FIX / "suites.yaml"
+REAL_SUITES = yaml.safe_load((CFG / "suites.yaml").read_text())
+_SHIPPED: dict[Path, dict] = {}
+
+
+@pytest.fixture(autouse=True)
+def _parse_shipped_once(monkeypatch):
+    """The shipped ``suites.yaml`` is ~0.3 s of pure-Python YAML and ~600 cases below expand it:
+    each read-only ``config/*.yaml`` is parsed once per session, every reader gets a deep copy."""
+    real = config._read
+
+    def read(path):
+        path = Path(path).resolve()
+        if path.parent != CFG:
+            return real(path)
+        if path not in _SHIPPED:
+            _SHIPPED[path] = real(path)
+        return copy.deepcopy(_SHIPPED[path])
+
+    monkeypatch.setattr(config, "_read", read)
 
 
 # ----- dataset files ----------------------------------------------------------------
@@ -437,8 +457,7 @@ def _real(suite: str, dataset: str, **kw):
 
 
 def test_grid_covers_every_suite_and_dataset():
-    suites = yaml.safe_load((CFG / "suites.yaml").read_text())
-    listed = {(s, d) for s, v in suites.items() if isinstance(v, dict) and "datasets" in v
+    listed = {(s, d) for s, v in REAL_SUITES.items() if isinstance(v, dict) and "datasets" in v
               for d in v["datasets"]}  # fmt: skip
     assert listed == set(GRID)
 
@@ -601,7 +620,7 @@ def test_cells_kept_by_the_redesign_keep_their_keys(suite, dataset, key):
 
 
 DATASET_YAMLS = sorted(p for p in CFG.glob("*.yaml") if p.name != "suites.yaml")
-SUITE_NAMES = sorted(k for k, v in yaml.safe_load((CFG / "suites.yaml").read_text()).items()
+SUITE_NAMES = sorted(k for k, v in REAL_SUITES.items()
                      if isinstance(v, dict) and "datasets" in v)  # fmt: skip
 
 
@@ -615,10 +634,12 @@ def test_every_shipped_config_parses(dataset_yaml, suite):
     """Every ``config/*.yaml`` against every suite through the real loader: a listed dataset
     expands to jobs at each of its dims the suite runs; an unlisted one is refused by name
     and still resolves at every dim it declares."""
-    listed = yaml.safe_load((CFG / "suites.yaml").read_text())[suite]["datasets"]
-    if dataset_yaml.stem in listed:
+    spec = REAL_SUITES[suite]
+    if dataset_yaml.stem in spec["datasets"]:
         jobs = load_matrix(dataset_yaml, CFG / "suites.yaml", suite)
         assert jobs and all(j.dataset == dataset_yaml.stem for j in jobs)
+        dims = yaml.safe_load(dataset_yaml.read_text())["dims"]
+        assert {j.dim for j in jobs} == set(dims) & set(spec.get("dims", dims))
         return
     with pytest.raises(ConfigError, match=f"dataset {dataset_yaml.stem!r} not in"):
         load_matrix(dataset_yaml, CFG / "suites.yaml", suite)

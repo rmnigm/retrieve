@@ -690,7 +690,7 @@ def test_c13_fork_recheck_equals_exact(data, record_property):
     """META-FORK C13: the fork's bloom with its survivors rechecked (``OfficialConfig.recheck``,
     the fork's default) returns the exact filter's result on the same index: ids and scores
     ``torch.equal`` up to ties to the fork's own exact path and to Triton's exact path at int32,
-    with no false positive; without the recheck, the bloom's false positives are recorded."""
+    with no false positive; without the recheck the same index lets at least one through."""
     if OB != "official-fork":
         pytest.skip("fork-only gate (META-FORK C13)")
     cfg = {"score_path": "int32", "n_stored_hashes": HASH_K}
@@ -708,6 +708,7 @@ def test_c13_fork_recheck_equals_exact(data, record_property):
     passing = clause_subset_match(data["attrs"][ids.clamp_min(0)], qa, tri.clause_is_reverse)
     fp = int(((ids >= 0) & ~passing).sum())
     record_property("bloom_m64_false_positives_without_recheck", fp)
+    assert fp > 0, "no false positive at m_bits 64: the gate cannot see the recheck"
     print(f"C13: {fp} false positives at m_bits 64 without the recheck, 0 with it")
 
 
@@ -1083,8 +1084,8 @@ def test_t7_sync_count_per_op(record_property):
     attrs, offsets, sizes, index, boff = _bloom_corpus()
     n, c, _ = attrs.shape
     codes, _ = quantize_int8_global(make_index(n, 64))
-    q_codes = torch.randint(-128, 128, (4, 64), dtype=torch.int8, device="cuda")
     g = torch.Generator(device="cuda").manual_seed(47)
+    q_codes = torch.randint(-128, 128, (4, 64), generator=g, dtype=torch.int8, device="cuda")
     probe_ids = torch.randint(0, sizes.numel(), (4, 4), generator=g, device="cuda")
     qa = make_query_attrs(4, c=c, n_vocab=50, seed=48)
     expressions = of.queries_to_expressions(qa)

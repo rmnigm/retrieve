@@ -1317,6 +1317,48 @@ n-curve-q-yfcc-cap:
     query:
       n_probe:
       - 4096
+n-bloomwidth:
+  perf: false
+  datasets:
+  - goodreads
+  - arxiv
+  - pubmed
+  dims:
+  - 128
+  - 768
+  filter_kinds:
+  - bloom
+  ks:
+  - 100
+  - 1000
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    goodreads:
+    - c0_genre
+    arxiv:
+    - all4
+    - c0_maincat
+    - c3_nversions
+    pubmed:
+    - c0_mesh
+  arms:
+  - algo: silvertorch
+    backends:
+    - official-fork
+    build:
+      m_bits:
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+      k_hash:
+      - 3
+      - 5
 n-curve-q-all:
   perf: false
   datasets:

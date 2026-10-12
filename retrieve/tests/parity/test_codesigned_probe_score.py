@@ -218,10 +218,16 @@ def test_across_tile_cutoff(r, d):
         assert sizes[0] % bp == r
         offsets = torch.cat([torch.zeros(1, dtype=torch.long, device="cuda"), sizes.cumsum(0)])
         n = int(offsets[-1])
+        perm = torch.randperm(
+            n, generator=torch.Generator(device="cuda").manual_seed(0), device="cuda"
+        )
         lay = ProbeLayout(
-            torch.tensor([[0, 1], [1, 0]], device="cuda"), offsets,
-            torch.randperm(n, device="cuda"), int(sizes[0] + sizes[2]), n,
-        )  # fmt: skip
+            torch.tensor([[0, 1], [1, 0]], device="cuda"),
+            offsets,
+            perm,
+            int(sizes[0] + sizes[2]),
+            n,
+        )
         codes, gs = quantize_int8_global(make_index(n, d))
         query = make_query(2, d)
         args = (query, *_args(lay, codes), gs, 32, lay.width)
@@ -236,7 +242,9 @@ def test_degenerate_rows_give_exact_sentinels():
     sizes = torch.tensor([0, 0, 1, 9], device="cuda")
     offsets = torch.cat([torch.zeros(1, dtype=torch.long, device="cuda"), sizes.cumsum(0)])
     n = int(offsets[-1])
-    sort_perm = torch.randperm(n, device="cuda")
+    sort_perm = torch.randperm(
+        n, generator=torch.Generator(device="cuda").manual_seed(0), device="cuda"
+    )
     lay = ProbeLayout(torch.tensor([[0, 1], [1, 2]], device="cuda"), offsets, sort_perm, 10, n)
     codes, gs = quantize_int8_global(make_index(n, 64))
     k = 8

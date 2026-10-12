@@ -206,6 +206,13 @@ legs:
     cmds: ["RUN --suite n-st-k2048-d128 --interleave --dataset {ds}   # goodreads, arxiv", "RUN --suite n-st-k2048-d768 --interleave --dataset pubmed"]
     upload: numbers/A3-st-k2048
     est_gpu_h: 1.0
+  - id: A4-bloomwidth
+    item: C4 (controller c3 ruling 1, 2026-10-12)
+    tree: fork
+    depends_on: []
+    cmds: ["RUN --suite n-bloomwidth --dataset {ds}   # goodreads, arxiv, pubmed; quality only, no interleave"]
+    upload: numbers/A4-bloomwidth
+    est_gpu_h: 0.3
 
 totals:
   linr_only_gpu_h: 9.3

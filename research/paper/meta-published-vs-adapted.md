@@ -88,7 +88,8 @@ State (citable; raw outputs on the Hub, [hub-index](../artifacts/hub-index.md)):
 |---|---|---|
 | the unmodified adapted tree against the published code (C0) | 126 / 126 arXiv d128 cells `torch.equal` | `artifacts/meta-fork/c0` |
 | S and capture after C3 / C4 | no device-to-host copy and no pageable upload per forward at C4; capture equal to eager | `artifacts/meta-fork/c3-c4` |
-| X at ≤ 10 M, head 82fafb6 | 1,536 / 1,536 cells `torch.equal` to the published `-O3` code (goodreads, arXiv d128 / d256, PubMed d768, YFCC d192) | `artifacts/meta-fork/head-82fafb6` |
+| X at the head (`32c0d61` → `46ff49e`) | 300 / 300 cells `torch.equal` to the published `-O3` code with Meta's bloom semantics (goodreads, arXiv d128 / d256, PubMed d768, YFCC d192; none / exact / bloom; bs 1 / 16 / 64; k 100 / 1000) | `artifacts/meta-fork/pod-b-32c0d61` |
+| X at ≤ 10 M, the earlier grid (`82fafb6`) | 1,536 / 1,536 cells `torch.equal` (the same datasets) | `artifacts/meta-fork/head-82fafb6` |
 | compile gate | pass: `fullgraph`, 0 graph breaks, exports | — |
 | R (C12, C13) | 0 false positives on every cell; recall against an exact oracle 1.0 up to ties at the k-th score | `artifacts/meta-fork/pod-b-32c0d61` |
 | X at 30 M (LAION d256) | bloom partial + full 64 / 64 `torch.equal` at `32c0d61`; none / exact 72 / 72 at an earlier head | `artifacts/meta-fork/laion30m-b1-32c0d61` |

@@ -138,7 +138,9 @@ def test_across_tile_cutoff(r, d):
         off = torch.cat([torch.zeros(1, dtype=torch.long, device="cuda"), sizes.cumsum(0)])
         n = int(off[-1])
         probe = torch.tensor([[0, 1], [1, 0]], device="cuda")
-        perm = torch.randperm(n, device="cuda")
+        perm = torch.randperm(
+            n, generator=torch.Generator(device="cuda").manual_seed(0), device="cuda"
+        )
         lay = ProbeLayout(probe, off, perm, int(sizes[0] + sizes[2]), n)
         codes, gs = quantize_int8_global(make_index(n, d))
         attrs, rev, q_attrs = make_exact(n, 2, reverse="mixed")
@@ -156,7 +158,7 @@ def test_degenerate_rows_give_exact_sentinels():
     sizes = torch.tensor([0, 0, 1, 9], device="cuda")
     off = torch.cat([torch.zeros(1, dtype=torch.long, device="cuda"), sizes.cumsum(0)])
     n = int(off[-1])
-    perm = torch.randperm(n, device="cuda")
+    perm = torch.randperm(n, generator=torch.Generator(device="cuda").manual_seed(0), device="cuda")
     codes, gs = quantize_int8_global(make_index(n, 64))
     attrs, rev, q_attrs = make_exact(n, 2)
     q_attrs = torch.full_like(q_attrs, -1)

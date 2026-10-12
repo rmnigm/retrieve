@@ -59,7 +59,7 @@ def test_register_index_past_2_24_items():
     scores are cuBLAS's."""
     n, d = 2**24 + 5, 16
     knn = PostfilterKNN(k=10)
-    knn.register_index(torch.randn(n, d, device="cuda"))
+    knn.register_index(make_index(n, d, normalized=False))
     q = make_query(1, d)
     want = torch.mm(q.half(), knn.item_embs_t, out_dtype=torch.float32)
     assert torch.equal(knn.score(q), want)
