@@ -18,10 +18,9 @@ gate green in [validation](../../validation.md); "NOT CITABLE" says why.
 (N, queries kept, pass rates) is read from Hub
 `campaign-final/merged-4016/results.parquet` (library `e16512f5`, all on
 A100-SXM4-80GB) and its per-query sidecars. Its gate, D1-G, is **green
-(user, 2026-10-11)** ([validation](../../validation.md#campaign-v2-phase-v-not-yet-validated),
-row D1-G), so these data facts are marked citable below. The same section's
-header and its EXHIBITS row still say "NOT CITABLE until D1-G"; that wording
-is stale against the D1-G row (open item 1 at the end).
+(user, 2026-10-11)** ([validation](../../validation.md#campaign-v2-phase-v),
+row D1-G), and validation's Campaign v2 section says the final pass and
+the data facts it rests on are citable.
 
 **How the pass-rate spread was computed.** `pass_rate` per record is the mean
 over kept queries of `pass_count / N`. The spread columns come from one
@@ -127,7 +126,7 @@ Notes on the table:
 
 | variant | how it is built | rates in the final pass | datasets (N, d) | achieved mean pass rate | citable |
 |---|---|---|---|---|---|
-| **uniform** | one `u_i ~ U(0, 1)` (float64) per item from `torch.Generator().manual_seed(20261008)`, in item-row order; item passes rate `p` iff `u_i < p`, so pass sets nest across rates; `p = 1` is the unfiltered point; every query carries all-ones attrs, so the pass set is the same for every query | `layout.SYNTH_RATES` = 0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0; the `synth` suite runs nine (no 0.3 on arXiv / YFCC / LAION; goodreads-synth also has 0.3) | `goodreads-synth` (0.8 M, d128; C3 also d256), `arxiv-synth` (3 M, d128 and d256), `yfcc10m-synth` (10 M, d192), `laion{1,3,10,30}m-synth` (d256) | e.g. arXiv 0.000992 / 0.003002 / 0.010002 / … / 0.499745 at p 0.001 / 0.003 / 0.01 / … / 0.5; goodreads 0.000990 at p 0.001 (789 of 797,084 items; the V-PILOT check misses its 1 % bound there, [validation](../../validation.md#campaign-v2-phase-v-not-yet-validated) row V-PILOT); LAION 1 M 0.001058 at p 0.001 | citable (D1-G) |
+| **uniform** | one `u_i ~ U(0, 1)` (float64) per item from `torch.Generator().manual_seed(20261008)`, in item-row order; item passes rate `p` iff `u_i < p`, so pass sets nest across rates; `p = 1` is the unfiltered point; every query carries all-ones attrs, so the pass set is the same for every query | `layout.SYNTH_RATES` = 0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0; the `synth` suite runs nine (no 0.3 on arXiv / YFCC / LAION; goodreads-synth also has 0.3) | `goodreads-synth` (0.8 M, d128; C3 also d256), `arxiv-synth` (3 M, d128 and d256), `yfcc10m-synth` (10 M, d192), `laion{1,3,10,30}m-synth` (d256) | e.g. arXiv 0.000992 / 0.003002 / 0.010002 / … / 0.499745 at p 0.001 / 0.003 / 0.01 / … / 0.5; goodreads 0.000990 at p 0.001 (789 of 797,084 items; the V-PILOT check misses its 1 % bound there, [validation](../../validation.md#campaign-v2-phase-v) row V-PILOT); LAION 1 M 0.001058 at p 0.001 | citable (D1-G) |
 | **cluster-correlated** (IVF's best case: the pass set sits around the query) | for each rate `p`, spherical k-means (seed 20261008, random init, ≤ 25 Lloyd iterations, CPU) with `round(1/p)` centroids over the d128 item embeddings; an item's value is its cluster id, a query's value its nearest centroid by inner product; pass rate per query = its cluster's share of N; not nested across rates | 0.01, 0.03, 0.1 (sweeps `c001`, `c003`, `c01`) | `arxiv-corr-synth` only (3 M, d128) | mean 0.0105 / 0.0325 / 0.1074; per query 0.0050-0.0149 / 0.018-0.054 / 0.055-0.147 (std 0.0021 at p 0.01, from `synth_corr.json`) | citable (D1-G) |
 
 Sources: [datasets](../../../docs/system/datasets.md#synthetic-selectivity-attrs);
@@ -188,16 +187,17 @@ Open user decisions ([release §5](../release-and-licenses.md#5-decisions-for-th
 
 ### 1.6 Disagreements between the dataset sources
 
+Rows 1-4 and 7 of C1's list are fixed on `staging` (results-draft `85c4ec8`,
+`e7119b3`): provenance §7 has one row per study dataset as staged (goodreads
+E1c, arXiv `[N+1, 4, 4]`, YFCC, PubMed, LAION 1-30 M); datasets.md names
+the staged 4-clause goodreads file and lists laion in the synth section.
+What remains:
+
 | # | what disagrees | where | which is right now |
 |---|---|---|---|
-| 1 | Goodreads encoder: "d128 item embeddings (gSASRec)" | [provenance §7](../provenance-and-disclosure.md#7-data-provenance) table | **stale**. The final pass reads `sasrec-ssm-logq-d128` (E1c), `inputs: sasrec-ssm-logq-d128` on every goodreads record ([checkpoints](../../../docs/system/checkpoints.md#what-the-harness-reads)). Also flagged by [ECIR criteria](../ecir-criteria.md) |
-| 2 | arXiv attrs "`item_attrs_narrow` `[N, 5, 4]`" | provenance §7 table | **wrong for what ran**: the staged and Hub file is `[2988997, 4, 4]` (legacy, pad row 0), as [datasets](../../../docs/system/datasets.md#arxiv) and provenance's own layout note say |
-| 3 | Goodreads attrs "`[N, 5, 4]` (genre, lang, format, year, author)" | [datasets](../../../docs/system/datasets.md#goodreads) `attrs` block | describes what `attrs` writes today; the staged / Hub file the final pass read is `[797085, 4, 4]` (no author clause). Provenance §7 has it right (`[N, 4, 4]`). The goodreads section, unlike arxiv's, does not say so |
-| 4 | YFCC row "cells: campaign v2 ([roadmap](../../roadmap.md))"; PubMed and LAION rows absent | provenance §7 table | stale: YFCC, PubMed and LAION 1-30 M all have final-pass records (§1.1) |
-| 5 | arXiv Hub card: links `github.com/anthropics/retrieve`, lists files the repo lacks, no licence | `pinkmeme/eval-arxiv-papers` README (also staged at `/data/arxiv-papers/README.md`) | stale; rewrite before it goes public ([release §3](../release-and-licenses.md#3-what-is-on-the-hub-and-github-now)). Its snapshot date (2026-03-24) and counts (2,989,022 → 2,988,996) agree with the final-pass `n_items` |
+| 5 | arXiv Hub card: links `github.com/anthropics/retrieve`, lists files the repo lacks, no licence | `pinkmeme/eval-arxiv-papers` README | stale; rewritten before it goes public ([release §3](../release-and-licenses.md#3-what-is-on-the-hub-and-github-now)), part of the release decisions ([outline](../outline.md) open item 2). Its snapshot date and counts agree with the final pass |
 | 6 | Hub mirror layout `[N + 1, …]` vs the ETL's `[N, …]` | provenance §7 note, datasets "Shared conventions" | both pages agree; a disclosure, not a conflict |
-| 7 | `synth-filter --dataset <goodreads\|arxiv\|yfcc10m>` | [datasets](../../../docs/system/datasets.md#synthetic-selectivity-attrs) | incomplete: `laion30m` also carries uniform synth attrs (seed 20261008, [validation](../../validation.md#datasets) laion30m row) and the 1 / 3 / 10 M subsets copy them |
-| 8 | `eval-laion30m`: "registered on `dev/v-laion30`, not created yet" vs "(private) is to hold … not yet published" | release §3 vs datasets § HuggingFace I/O | consistent in substance (nothing published); wording differs |
+| 8 | `eval-laion30m`: "registered … not created yet" vs "(private) is to hold … not yet published" | release §3 vs datasets § HuggingFace I/O | consistent in substance (nothing published); wording differs |
 
 ## Part 2. Introduction (§1)
 
@@ -348,18 +348,16 @@ All checked against arXiv and Crossref (2026-10-12) unless marked.
   arXiv:2402.01613 (**not re-checked**). Re-LAION: LAION blog post
   `laion.ai/blog/relaion-5b/` (`@misc{relaion}`).
 
-## Open items (for the controller / the user)
+## Open items
 
-1. **Validation wording.** The Campaign v2 section header and its EXHIBITS row
-   still say "NOT CITABLE until D1-G" while the D1-G row is green (user,
-   2026-10-11). Whoever owns `research/validation.md` should restate the final
-   pass's citability (LiNR and data facts citable; SilverTorch records Triton, out
-   of the study). This page assumes citable.
-2. **Provenance §7 is stale** (§1.6 rows 1, 2, 4) and datasets.md's goodreads
-   attrs paragraph should say the staged file is the 4-clause legacy one (row 3);
-   datasets.md's synth section should list laion (row 7). Not edited here (C1
-   collects; those pages have owners).
-3. **Abstract wording "pre- or post-filtering"** vs LiNR's own terms (§2.4): a
-   paper-body choice for the drafter; the abstract is already submitted.
-4. **Citation counts**: Semantic Scholar rate-limited; recheck with a key or
-   Google Scholar if §1 is to mention them.
+All C1 open items are closed or moved: the validation wording and the
+provenance / datasets fixes are on `staging` (§1.6); the abstract's "pre- or
+post-filtering" has a wording note under the abstract, and the
+[outline](../outline.md) §1-§2 use LiNR's terms (masking vs gathering);
+whether to cite stars or citation counts is the outline's open item 5.
+Two facts stay weak and are used as such: the Goodreads encoder quality
+(E1c rows not validated; the paper reports N, queries and filters, not
+encoder quality) and the YFCC cosine-vs-L2 0.951 (a 100-query diagnostic,
+described, not cited as a result). Four data citations (Wan RecSys '18 /
+ACL '19, Thomee CACM '16, MedCPT, Nomic Embed) are to be re-checked
+against the publishers' pages when the bibliography is built.
