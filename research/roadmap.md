@@ -117,7 +117,7 @@ a `_parity/<dataset, dim, algo>` spill and the second backend's
 `jaccard_vs_first` compares against the first's. `bench campaign` has no
 `--algo`, so a split stream is a `bench run`. M1's result (one timed job
 per GPU of a two-GPU pod) is in
-[validation](validation.md#campaign-v2-phase-v-not-yet-validated).
+[validation](validation.md#campaign-v2-phase-v).
 
 **Timings compare only within one box**
 ([decisions](decisions.md#harness)): every ratio is read inside one leg on

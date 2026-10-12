@@ -1,7 +1,7 @@
 # D3 goodreads: `bloomwidth` (408b1188) and `bloomwidth-timed` (campaign-v2.1)
 
 Roadmap Phase V, D3, the goodreads piece. arXiv is [d3-arxiv](../d3-arxiv/README.md). The state
-is in [validation](../../../validation.md#campaign-v2-phase-v-not-yet-validated). NOT CITABLE until
+is in [validation](../../../validation.md#campaign-v2-phase-v). NOT CITABLE until
 D1-G.
 
 | file | what |

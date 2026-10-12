@@ -2,7 +2,7 @@
 
 Roadmap Phase V, V-CODESIGN. This is the arXiv half; pod 1 runs the goodreads half.
 Records on the Hub as `campaign-v2.1/arxiv-codesign`. They replace the stale 408b1188 arXiv records in `artifacts/v-codesign-408b`.
-The state is in [validation](../../../validation.md#campaign-v2-phase-v-not-yet-validated). NOT CITABLE until D1-G.
+The state is in [validation](../../../validation.md#campaign-v2-phase-v). NOT CITABLE until D1-G.
 
 | file | what |
 |---|---|

@@ -218,12 +218,14 @@ the item is not paper material (CLAUDE.md rule 2).
 
 ## 7. Data provenance
 
-| dataset | as used | source |
+| dataset | as used in the study | source |
 |---|---|---|
-| Goodreads (work-id) | d128 item embeddings (gSASRec), `item_attrs_narrow` `[N, 4, 4]` int64, 313,178 test users of which the first **10,000** are used and **9,859** kept (141 have zero survivors under the `c0_genre` condition and are dropped), oracle top-K from the published `gt_d128/` blobs | `pinkmeme/eval-goodreads-work-id` on the Hugging Face Hub, the project's own mirror; 2.6 GB staged |
-| arXiv (papers) | `content_d128` item embeddings (Nomic-Embed), `item_attrs_narrow` `[N, 5, 4]`, 10,000 queries, `c0_maincat` condition | `pinkmeme/eval-arxiv-papers`, 1.3 GB staged |
-| Yambda-500M / Yambda-5B | unfiltered cells only, in the thesis; not re-run | `pinkmeme/eval-yambda-500m`, `pinkmeme/eval-yambda-5b` |
-| YFCC-10M | ingested, ground-truth gate passed; cells: campaign v2 ([roadmap](../roadmap.md)) | Big-ANN filter-track release |
+| Goodreads (work-id, 0.8 M items) | d128 item embeddings from our E1c sequential encoder (gSASRec body, sampled softmax with logQ, [checkpoints](../../docs/system/checkpoints.md)); staged `item_attrs_narrow` `[N + 1, 4, 4]` (the mirror's legacy layout, pad row dropped by the loader); the first **10,000** test users; real filters `c0_genre`, `c1_lang_reverse`, `all4`, and the synthetic `goodreads-synth` | `pinkmeme/eval-goodreads-work-id@4714e9b5` on the Hugging Face Hub (the project's mirror of UCSD Goodreads) |
+| arXiv (papers, 3 M) | `nomic-embed-text-v1.5` embeddings, Matryoshka-truncated to d128; staged `item_attrs_narrow` `[N + 1, 4, 4]` (legacy layout: main category, license, update year, version count); 10,000 queries; real filters `c0_maincat`, `c3_nversions`, `all4`, and the synthetic `arxiv-synth` and `arxiv-corr-synth` | `pinkmeme/eval-arxiv-papers@354e6937` |
+| PubMed (10 M slice of ~36 M, d768) | NCBI's precomputed MedCPT article embeddings, queries through the MedCPT query encoder; `item_attrs_narrow` `[N, 5, 4]`; real filters `c0_mesh`, `c3_journal_reverse`, `all5` | NCBI FTP MedCPT release (public domain); the staged copy is pinned by sha256 (`item_attrs_narrow.pt` `8a3bce0f…`) and not yet published on the Hub |
+| YFCC-10M (d192) | the Big-ANN filter track's uint8 CLIP descriptors (stored fp16, lossless); tag attributes `[10M, 2, 32]`; real filter `tags_and`, and the synthetic `yfcc10m-synth` | Big-ANN filter-track release; `pinkmeme/eval-yfcc10m@88e4d89a` |
+| LAION 1 / 3 / 10 / 30 M (d256) | Re-LAION-2B-en-research-safe captions (parts 0-1, one row per distinct caption) encoded with `nomic-embed-text-v1.5`, Matryoshka d256; 1 / 3 / 10 M are seeded subsets of the 30 M set (seed 20261013); attributes `[N, 6, 1]`; real filters `c0_domain`, `tags4`, and the synthetic sets | Hugging Face `laion/relaion2B-en-research-safe` (gated, automatic approval); `pinkmeme/eval-laion30m` is not yet published |
+| Yambda-500M / Yambda-5B | not in the study: unfiltered cells in the thesis only | `pinkmeme/eval-yambda-500m`, `pinkmeme/eval-yambda-5b` |
 
 **Disclosure on the mirror's layout.** The Hub mirror still publishes the
 **pre-`3b1b5b3` 1-indexed `[N + 1, …]`** artifact layout: goodreads

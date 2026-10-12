@@ -6,7 +6,7 @@ SilverTorch `graph` `ids_sha256` and `ids_sha256_canon` different from `eager` i
 seed, bs 1, and all of goodreads are equal. In all 4, official int32's canonical hash equals
 Triton **eager** (graph is the odd one out). The records store only hashes, so one GPU repro was
 needed. Not citable until D1-G; the state is in
-[validation](../../../validation.md#campaign-v2-phase-v-not-yet-validated).
+[validation](../../../validation.md#campaign-v2-phase-v).
 
 ## Mechanism: a real score divergence from the compiled query quantization
 
