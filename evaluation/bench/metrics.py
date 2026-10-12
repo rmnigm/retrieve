@@ -1,4 +1,4 @@
-"""Retrieval quality metrics as device-side running sums (harness v2, H §2.4).
+"""Retrieval quality metrics as device-side running sums (§2.4).
 
 The quality pass streams chunks of ``(ids [B, K_max], targets [B, T])`` through
 ``accumulate``; every ``k`` in ``ks`` is scored from the one top-``K_max`` list
@@ -12,14 +12,11 @@ counts as a hit. Two target modes:
 * fixed (held-out items): the target set is the same at every ``k``; pass
   ``num_targets`` (or let it be derived as the count of non-``-1`` entries);
 * ``ranked=True`` (oracle top-``K_max`` list): the target set at ``k`` is the
-  oracle's own top-``k`` prefix and ``num_targets`` is its non-``-1`` count —
-  the old harness's per-``k`` ``nt_k`` semantics, so oracle recall stays
-  golden-comparable.
+  oracle's own top-``k`` prefix and ``num_targets`` is its non-``-1`` count, so
+  oracle recall stays golden-comparable.
 
-The per-row arithmetic in ``per_row`` is the pre-v2 ``metrics.py`` verbatim
-(float32, same op order); ``tests/test_metrics.py`` asserts the running-sum
-means equal the old per-row means to 1e-9. ``training/evaluate.py`` keeps its own frozen
-recall / ndcg (plan V D5); ``tests/training/test_encode.py`` pins the two to agree.
+``per_row``'s arithmetic (float32) and op order are frozen: the golden cells were scored with
+it. ``training/evaluate.py`` keeps its own recall / ndcg.
 """
 
 from __future__ import annotations
@@ -109,7 +106,7 @@ def null_if_empty(side: dict) -> dict:
 
 def jaccard_at_k(ids_a: Tensor, ids_b: Tensor, k: int) -> float:
     """Mean per-row Jaccard of the top-``k`` id sets (``-1`` ignored; two empty sets → 1.0).
-    The harness's cross-backend wiring check (H §2.4 ``jaccard_vs_first@k``)."""
+    The harness's cross-backend wiring check (``jaccard_vs_first@k``)."""
     a, b = ids_a[:, :k], ids_b[:, :k]
     inter = _hits(a, b).sum(dim=1).double()
     union = (a != -1).sum(dim=1) + (b != -1).sum(dim=1) - inter

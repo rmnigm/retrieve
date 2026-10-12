@@ -1,36 +1,7 @@
-"""Exact filtered oracle (H §2.2, §8.2 I).
-
-Brute-force ``q @ E^T``, item chunk by item chunk (``ITEM_CHUNK`` rows, a running top-k
-merged with equal scores to the lowest id; no ``[B, N]`` score or mask), under the *exact*
-mask (``ExactAttributeFilter`` even on bloom cells — bloom's false positives must never leak
-into ground truth), top-``k_max`` with
-``-inf`` ties written as ``-1`` so short-filled rows never score against the algos' ``-1``
-sentinel. Skipped rows (no live clause) stay all ``-1``. Indices are 0-indexed positions in
-the pad-row-dropped ``item_embs``.
-
-**Blob v4** — one dict at ``<gt_dir>/oracle_v4_<sweep>_<fingerprint[:16]>.pt``:
-
-| key | value |
-|---|---|
-| ``version`` | ``4`` |
-| ``topk`` | ``[U, k_gt]`` int64, ``-1`` padded |
-| ``pass_counts`` | ``[U]`` int64: items passing the exact mask; ``-1`` on skipped rows |
-| ``pass_rate`` | mean over kept rows of ``pass_counts / n_items`` (H §2.2, LiNR's axis) |
-| ``targets_in_filter`` | ``[U, T]`` bool: held-out target ``t`` of user ``u`` passes the mask |
-| ``target_in_filter`` | ``[U]`` bool: any held-out target passes (``n_queries_heldout = sum``) |
-| ``n_items``, ``n_queries``, ``n_kept``, ``k_gt``, ``sweep``, ``clauses`` | the build's shape |
-| ``fingerprint`` | the content hash below |
-| ``code_version``, ``harness_commit``, ``torch``, ``created`` | provenance of the build |
-
-The **fingerprint** hashes shapes, dtypes and a fixed 64-row linspace sample of
-``item_embs``, ``queries``, ``targets`` and the sweep's ``qa``, the *full bytes* of the item
-side of the predicate — ``item_attrs`` and ``clause_is_reverse``, via ``attrs_digest``
-(``inputs.load_inputs`` computes it once per ``(dataset, dim)``; the ETL edits that tensor
-piecemeal, so a row sample is not enough) — plus ``clauses`` and ``k_gt``. Same-shape content
-changes — another dim off the same ``data_dir``, regenerated attrs, a retrained checkpoint, a
-changed ``users_limit`` — change the file name, so a stale blob is never *read*; the hash in
-the name is what makes the blob a portable artifact (§8.2 I). Bloom pass rates are not
-cached: they depend on ``m_bits`` / ``k_hash`` and cost one mask pass (``pass_counts``).
+"""Exact filtered oracle (docs/system/evaluation.md § Oracle blob v4): brute-force
+``q @ E^T`` item chunk by item chunk under the *exact* mask (bloom's false positives never
+reach ground truth), top-``k_max`` with ``-inf`` ties written as ``-1``, cached as one blob
+whose file name carries a content fingerprint, so a stale blob is never read.
 """
 
 from __future__ import annotations
@@ -121,7 +92,7 @@ def pass_counts(
 ) -> torch.Tensor:
     """``[U]`` int64 items passing ``filter_mod`` per query (``-1`` on skipped rows), summed
     over item chunks of ``evaluate_mask(qa, start, end)``. With a ``BloomFilter`` this is the
-    bloom pass count (H §2.2 ``bloom_fp_rate``)."""
+    bloom pass count (``bloom_fp_rate``)."""
     out = torch.full((qa_sweep.shape[0],), -1, dtype=torch.long)
     for idx in _batches(qa_sweep.shape[0], skip_mask, batch_size, "pass_counts"):
         qa = filter_mod.prepare_queries(qa_sweep[idx].to(device, non_blocking=True))

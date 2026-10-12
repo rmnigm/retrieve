@@ -828,7 +828,7 @@ def _qps_cell(bs: int, hit: dict[str, Any]) -> str:
 
 
 def tab_matched_bands(c) -> list[Path]:
-    """QPS at recall_oracle@k = 0.95 per selectivity band (Big-ANN style; EXHIBITS idea #6):
+    """QPS at recall_oracle@k = 0.95 per selectivity band (Big-ANN style):
     per curve, per band, the band's recall at each point from the per-query sidecars against
     the cell's own latency, interpolated at 0.95; the exact arms at their own latency."""
     edges = _band_edges(c.bands)
@@ -1971,8 +1971,7 @@ def coverage(c) -> list[Path]:
         "Latency artifacts use the per-variant under-load `perf[].sm_mhz`. "
         "Idle samples (`env.sm_mhz_idle`, and the schema-1 `env.sm_mhz`, which is a "
         "whole-run median dominated by idle) are provenance only and are never "
-        "compared with an under-load sample — the error that made 92 of 99 of C4's "
-        "latency rows appear to fail.",
+        "compared with an under-load sample.",
         "",
     ]
     return [_write(c.out / "report.md", "\n".join(lines) + "\n")]

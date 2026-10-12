@@ -1,4 +1,4 @@
-"""Measurement primitives (H §2.1, §2.3, §2.5, §8.2 E/F): environment, provenance, clocks,
+"""Measurement primitives (§2.1, §2.3, §2.5): environment, provenance, clocks,
 build timing, index size, the latency windows, graph capture and the profiler split.
 
 Imports torch, the stdlib, ``triton`` (version) and ``retrieve`` (files). ``run.py`` composes
@@ -42,7 +42,7 @@ from torch.profiler import ProfilerActivity, profile
 import retrieve
 
 ROOT = Path(__file__).resolve().parents[2]
-# code_version names the library this process imports, wherever its checkout is (H §8.2 B)
+# code_version names the library this process imports, wherever its checkout is
 LIB = Path(retrieve.__file__).resolve().parent
 MiB = 1024 * 1024
 
@@ -99,8 +99,8 @@ def repo_dirty() -> bool | None:
 
 
 def code_version() -> str:
-    """The resume key's code component (H §8.2 B): the tree hash at HEAD of the imported
-    package's directory, in its own checkout, when that subtree is clean; else
+    """The resume key's code component (docs/system/evaluation.md § Resume): the tree hash at
+    HEAD of the imported package's directory, in its own checkout, when that subtree is clean; else
     ``files:<sha256>`` over the sources actually on disk (also the value outside a git
     checkout). Read from ``LIB``, not from the checkout that launched ``bench``, so an editable
     install pointing at another tree is stamped as what it runs. The two namespaces are
@@ -122,7 +122,7 @@ def files_hash() -> str:
 
 
 def inductor_cache_dir(code_version: str, given: str | None) -> str:
-    """Roadmap H4 / H-INDCACHE: the inductor cache ``bench run`` uses, always one directory per
+    """The inductor cache ``bench run`` uses, always one directory per
     ``code_version``: under the caller's ``TORCHINDUCTOR_CACHE_DIR`` when set, else under the
     temp dir. The FX-graph and AOT-autograd caches key a graph on the custom op, not on its
     ``@triton_op`` body, so a cache shared across library edits replays a stale kernel in graph
@@ -167,7 +167,7 @@ def official_commit() -> str | None:
     return direct.get("vcs_info", {}).get("commit_id")
 
 
-# Written next to silvertorch/_C*.so by a build recipe that changes Meta's defaults (OF-11).
+# Written next to silvertorch/_C*.so by a build recipe that changes Meta's defaults.
 OFFICIAL_BUILD_FLAGS = "_build_flags.json"
 
 
@@ -176,7 +176,7 @@ def official_build(package: str = "silvertorch") -> dict[str, Any] | None:
     ``silvertorch_fork``), found without importing it: ``so_path``, ``so_sha256`` and ``so_bytes``
     (the build's identity), and ``nvcc_append_flags`` from a ``_build_flags.json`` beside the
     ``.so`` (written by the build recipe; ``None`` = the package's ``setup.py`` flags: host code at
-    gcc ``-O0`` upstream, OF-11; ``-O3`` in the fork). ``None`` when the package is absent."""
+    gcc ``-O0`` upstream; ``-O3`` in the fork). ``None`` when the package is absent."""
     spec = importlib.util.find_spec(package)
     if spec is None or not spec.submodule_search_locations:
         return None
@@ -194,8 +194,8 @@ def official_build(package: str = "silvertorch") -> dict[str, Any] | None:
 
 
 def provenance() -> dict[str, Any]:
-    """The record's ``env`` block minus clocks (§3.2, §8.2 B/F). ``commit`` is the repo HEAD;
-    ``dirty`` is ``subtree_dirty()`` — the flag ``report.py`` enforces (§8.2 F) — and
+    """The record's ``env`` block minus clocks. ``commit`` is the repo HEAD;
+    ``dirty`` is ``subtree_dirty()`` — the flag ``report.py`` enforces — and
     ``repo_dirty`` the informational whole-tree one; ``code_version`` follows ``dirty`` (a
     kernel edit, committed or not, invalidates a campaign; doc churn never does).
     ``official_commit`` is the installed ``silvertorch`` build's git commit, ``official_build``
@@ -307,7 +307,7 @@ def _time_calls(fn: Callable[[], Any], n: int) -> tuple[list[float], float]:
 
 
 def stats(ms: list[float], wall_s: float, bs: int) -> dict[str, Any]:
-    """Robust summary of one window (§2.5 + §8.2 E). Quantiles are linear-interpolated;
+    """Robust summary of one window (§2.5). Quantiles are linear-interpolated;
     ``trimmed_mean_ms`` drops ``n // 10`` calls from each end."""
     t = torch.tensor(ms, dtype=torch.float64)
     n = t.numel()
@@ -371,7 +371,7 @@ def latency_group(
     under ``set_sync_debug_mode("warn")`` and ``peak_fwd_mib`` is taken over the arm's first
     window. ``window_sm_mhz`` is the SM clock sampled right after each window's sync, while
     the GPU is still at its load clock; ``sm_mhz`` is its last element — the per-variant value
-    H §7's unlocked-clock fallback needs and the only clock sample ``clocks_drift`` compares.
+    the unlocked-clock fallback needs and the only clock sample ``clocks_drift`` compares.
     Samples are ``None`` without CUDA."""
     if mode not in ("eager", "graph"):
         raise ValueError(f"mode must be 'eager' or 'graph', got {mode!r}")
@@ -436,7 +436,7 @@ def graph_callable(module: nn.Module, *example_args: Any, warmup: int = 5) -> Ca
     before the first capture of a variant. Raises
     ``NotCapturable`` unless the warm-up recorded ``cudagraph_skips == 0`` and one call is
     exactly one ``cudaGraphLaunch``; modules flagged ``capturable = False`` (the ``official``
-    backend, O D7) raise before compiling. Call with the same-shaped pool batches."""
+    backend) raise before compiling. Call with the same-shaped pool batches."""
     if not getattr(module, "capturable", True):
         raise NotCapturable("not_capturable")
     if not torch.cuda.is_available():
@@ -465,7 +465,7 @@ SENTINEL = "spin_kernel"  # torch.cuda._sleep's kernel; nothing in a forward lau
 RANGE_PREFIX = "## "  # profiler range annotations booked as device events (compiled graph calls)
 
 
-# H-SCOPE: like-for-like kernel groups for T3; a kernel's group is the first whose substrings its
+# Like-for-like kernel groups for T3; a kernel's group is the first whose substrings its
 # name contains (evaluation.md § Measurement protocol). Our scorer fuses the bloom test; Meta's
 # scoring is process_cluster + payload kernels, its bloom test bloom_search kernels: all "scorer".
 KERNEL_SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -488,10 +488,10 @@ def kernel_summary(events: Sequence[Any], top: int = 8) -> dict[str, Any]:
     """The entry fields of one profiled call from its device events (``key``,
     ``self_device_time_total``, ``count``), sentinels dropped: ``kernels``, the ``top`` by self
     time (``{"kernel", "us", "calls"}``), and ``kernels_us`` / ``kernels_calls``, the device time
-    and launches summed over every kernel (H-KSUM: the top-8 sum is only a lower bound). The sums
+    and launches summed over every kernel (the top-8 sum is only a lower bound). The sums
     skip ``## …`` events: the profiler books a compiled graph's ``## Call CompiledFxGraph …`` range
     as a device event spanning that graph's kernels, which would count them twice.
-    ``kernel_scopes`` splits the same sums by ``kernel_scope`` (H-SCOPE): ``{scope: {"us",
+    ``kernel_scopes`` splits the same sums by ``kernel_scope``: ``{scope: {"us",
     "calls"}}`` for scorer, topk, epilogue and other, adding up to ``kernels_us`` /
     ``kernels_calls``."""
     kernels = sorted(
@@ -517,11 +517,10 @@ def kernel_summary(events: Sequence[Any], top: int = 8) -> dict[str, Any]:
 
 
 def profile_once(fn: Callable[[], Any], top: int = 8) -> dict[str, Any]:
-    """One eager call under ``torch.profiler``: ``kernel_summary`` of its device kernels — the
-    wp4 ``kernel_only.py`` split plus the full sum. Empty kernels and zero sums without CUDA.
-    The call is bracketed by two sentinel kernels and the profile is retried with a longer
-    idle pad on both sides of the window until both sentinels are recorded; raises if they
-    never are (evaluation.md § Measurement protocol)."""
+    """One eager call under ``torch.profiler``: ``kernel_summary`` of its device kernels. Empty
+    kernels and zero sums without CUDA. The call is bracketed by two sentinel kernels and the
+    profile is retried with a longer idle pad on both sides of the window until both sentinels
+    are recorded; raises if they never are (docs/system/evaluation.md § Measurement protocol)."""
     if not torch.cuda.is_available():
         return kernel_summary([], top)
     fn()

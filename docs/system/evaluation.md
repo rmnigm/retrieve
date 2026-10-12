@@ -743,7 +743,7 @@ written through `eval_datasets.layout.atomic_write` (`<path>.tmp` + fsync +
 a torn one, and an unreadable file at the oracle's fingerprint path is
 rebuilt with a warning. Each JSONL line is one `write` + `fsync`; the
 samples line is appended *before* its record, so a crash between the two
-cannot leave a resumable record without its vector; `read_keys` ignores
+cannot leave a resumable record without its vector; `records.read_records` ignores
 (and logs) one torn trailing line — the cell in flight when the process
 died — and raises on a malformed line anywhere else.
 
@@ -993,7 +993,7 @@ A kernel edit — committed or not — therefore invalidates
 every cell; a doc or plan edit invalidates none. (D1 reruns only the arms
 a fix changes, by narrow `bench run`s: its [code_version
 policy](../validation.md#code_version-policy).)
-`records.read_keys(path)` rebuilds the key from a record as
+`run` reads the file once (`records.read_records`) and rebuilds the key from each record as
 `resume_key(records.key_block(rec), rec["env"]["code_version"])` and keeps the last status per
 key; a cell is skipped when that status is `ok`. `--force` runs everything
 and appends. Resume reads the local JSONL only, never the network: a

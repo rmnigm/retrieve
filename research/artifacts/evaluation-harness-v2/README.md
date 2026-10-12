@@ -1,6 +1,7 @@
 # Artifacts — evaluation harness v2
 
-Raw material behind ../evaluation-harness-v2.md.
+Raw material behind the harness-v2 plan (retired; the harness as built is
+[docs/system/evaluation.md](../../../docs/system/evaluation.md)).
 
 | file | what it is |
 |---|---|
@@ -15,6 +16,5 @@ Raw material behind ../evaluation-harness-v2.md.
 
 Both were produced by literature/repo search, not by running anything;
 claims carry URLs and each report ends with an explicit "could not
-verify" section. The findings that were **accepted into the plan** are in
-../evaluation-harness-v2.md §8 — read that
-first; these files are the evidence, not the instruction.
+verify" section. The findings that were accepted are in the harness as
+built; these files are the evidence, not the instruction.

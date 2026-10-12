@@ -3,7 +3,7 @@
 Plain torch path: scores the model's last-position query against the full item
 catalog, masks history (and padding), takes top-K, and computes
 NDCG/Recall/Coverage at the requested cutoffs. No ``retrieve`` layers, and its
-own recall / ndcg (plan V D5): a checkpoint's reported quality must not move
+own recall / ndcg: a checkpoint's reported quality must not move
 when the harness's metric code does. ``tests/training/test_encode.py`` pins the
 two to agree to 1e-9.
 """

@@ -1,5 +1,4 @@
-"""``bench upload`` / ``bench fetch`` — a results tree to and from a HuggingFace dataset repo
-(H §3.1, §8.2 G/I).
+"""``bench upload`` / ``bench fetch`` — a results tree to and from a HuggingFace dataset repo.
 
 The storage policy this implements is the "Results storage" section of
 ``docs/system/evaluation.md``: a results tree is local, gitignored working state while a

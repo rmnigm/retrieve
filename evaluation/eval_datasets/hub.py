@@ -44,13 +44,6 @@ RAW_REPOS: dict[str, tuple[str, str]] = {
     # source -> (repo_id, repo_type)
     "arxiv": ("open-index/open-arxiv", "dataset"),
     "yambda": ("yandex/yambda", "dataset"),
-    # yfcc10m is fetched over plain HTTPS from dl.fbaipublicfiles.com by
-    # `yfcc download`, not from the Hub — it is listed here only so that
-    # `raw_dir("yfcc10m")` has a documented home next to the others.
-    # openalex is streamed from the public snapshot bucket (s3://openalex,
-    # anonymous, CC0) by `openalex convert`, not from the Hub — listed here
-    # only so that `raw_dir("openalex")` has a documented home next to the
-    # others.
 }
 
 # What we *don't* want in the per-dataset eval repo. Excludes training inputs,
@@ -88,8 +81,7 @@ EPOCH_SNAPSHOT_PATTERN = "*-ep*.pt"
 
 # Always-skip files in checkpoint dirs (run output or resume-only state, not
 # the trained checkpoint itself). _resume.pt carries optimizer state and can
-# be tens of GB, larger than the checkpoint it resumes (found staging E4's
-# kuairand checkpoint, 2026-09-26); encoded_queries_v2.pt is training.encode's
+# be tens of GB, larger than the checkpoint it resumes; encoded_queries_v2.pt is training.encode's
 # cache, keyed on checkpoint mtime, not portable to a fresh copy.
 CKPT_ALWAYS_IGNORE: list[str] = [
     "evaluate.json",
