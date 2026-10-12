@@ -1,0 +1,29 @@
+bloom: {m_bits: 1024, k_hash: 5}
+sm-smoke:
+  perf: false
+  datasets: [arxiv]
+  dims: [128]
+  filter_kinds: [clause, bloom]
+  ks: [100, 1000]
+  batch_sizes: [16]
+  seeds: [0]
+  sweeps: {arxiv: [c0_maincat]}
+  arms:
+  - {algo: linr_v1_filter_mask, backends: [triton], filter_kinds: [clause]}
+  - {algo: linr_v2, backends: [triton], filter_kinds: [clause]}
+  - {algo: linr_v3, backends: [triton], filter_kinds: [clause], query: {candidate_pool_frac: [0.02]}}
+  - {algo: postfilter, backends: [torch], filter_kinds: [clause], query: {alpha: [8]}}
+  - {algo: silvertorch, backends: [official-fork], filter_kinds: [clause], build: {n_lists: [2048]}, query: {n_probe: [64]}}
+  - {algo: silvertorch, backends: [official-fork], filter_kinds: [bloom], build: {n_lists: [2048], recheck: [false]}, query: {n_probe: [64]}}
+sm-smoke-k2048:
+  perf: false
+  datasets: [arxiv]
+  dims: [128]
+  filter_kinds: [clause]
+  ks: [2048]
+  batch_sizes: [16]
+  seeds: [0]
+  sweeps: {arxiv: [c0_maincat]}
+  arms:
+  - {algo: linr_v2, backends: [triton]}
+  - {algo: silvertorch, backends: [official-fork], build: {n_lists: [2048]}, query: {n_probe: [64]}}
