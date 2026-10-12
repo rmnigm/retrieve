@@ -78,8 +78,7 @@ regenerated from the last full rerun (roadmap FULL-RERUN), which also
 brings seeds and confidence intervals: every number in this pass is seed 0
 except the C1 seed cells, and no table carries a CI (controller ruling,
 2026-10-12). The exclusions, each listed and never quoted as measured:
-LiNR V2 at bs 256 on PubMed `c3_journal_reverse` / `all5`
-(TIMEOUT); cells unstable in every run (flagged; 30 of 1,641 `h2h` rows).
+LiNR V2 at bs 256 on PubMed `all5` (TIMEOUT); cells unstable in every run (flagged; 30 of 1,641 `h2h` rows).
 
 Recall is recall@k against the exact filtered top-k throughout; the
 originals report end-task recall (label@2000, E-Task / C-Task), so no claim
@@ -241,7 +240,7 @@ SilverTorch.
 
 | sub | claim | what the section must state | exhibit · source |
 |---|---|---|---|
-| 4.1 | **C1** V1 beats V2 at high pass rate, V2 wins at low (L-3…L-5) | a crossover exists at bs 1 at every N and d, at p 0.85-0.97 (LiNR: below 0.11); V2 1.6-5.1× faster at p 0.001. At bs 16 V2 wins only below p ≈ 0.02-0.065, by at most 25 %, never on laion1m-synth. At bs 64 V2 is slower on every real filter (1.3-35×); at bs 256 it times out on two. Correlated filters change nothing. Seeds 0-2 at the crossover cells move V2 / V1 by ≤ 0.006. Mechanism: fused V2 (LN-1, L-12); batching favours V1's one shared matrix | **F1** (V2 / V1 latency vs pass rate, bs 1 and bs 16, one line per N): `c1_curves.csv`, `c1_crossover.csv`, `c1_real.csv`, `linr_numbers.csv`, figure `fig_c1_v2_over_v1` |
+| 4.1 | **C1** V1 beats V2 at high pass rate, V2 wins at low (L-3…L-5) | a crossover exists at bs 1 at every N and d, at p 0.85-0.97 (LiNR: below 0.11); V2 1.6-5.1× faster at p 0.001. At bs 16 V2 wins only below p ≈ 0.02-0.065, by at most 25 %, never on laion1m-synth. At bs 64 V2 is slower on every real filter (1.3-35×); at bs 256 it is 2.2-55× slower where it finished (2.55 s a batch on PubMed `c3_journal_reverse`) and times out on PubMed `all5`. Correlated filters change nothing. Seeds 0-2 at the crossover cells move V2 / V1 by ≤ 0.006. Mechanism: fused V2 (LN-1, L-12); batching favours V1's one shared matrix | **F1** (V2 / V1 latency vs pass rate, bs 1 and bs 16, one line per N): `c1_curves.csv`, `c1_crossover.csv`, `c1_real.csv`, `linr_numbers.csv`, figure `fig_c1_v2_over_v1` |
 | 4.2 | **C2** V3 keeping ~1 % gives ~10 % at near-parity recall (L-6) | not comparable as stated (end-task recall, unpublished protocol). Under our metric a 1 % pool reaches median 0.89 at 0.83 of V2 at bs 16 and 1.08 at bs 1; parity (0.99) needs 20 %, where V3 is no faster. LAION 1-30 M: 1 % reaches 0.89, 1.11× V2 at bs 1, 0.97× at bs 16. Our code length is capped at d (LN-8; LiNR 512 bits); near parity at 1 % needs 768 bits (PubMed). On Goodreads' end task a 1 % pool keeps 0.89-0.95 of the exact scan's recall at k 100 | text + one line in F3: `c2_v3.csv` (NUMBERS L2, L2b), `product_recall.csv` |
 | 4.3 | **C3** custom filter kernel ~100× over native masking (L-2) | direction holds, size far below 100×: eager torch 1.4-2.0× slower at bs 1, 5.8-6.8× at bs 16; `torch.compile` max-autotune 0.5-1.05× of ours at bs 1 (mostly faster: another reduction order and fp16 top-k keys), 1.5-2.7× slower at bs 16 | text with ranges: `c3_torch.csv`; mechanism: [validation](../validation.md#library-gates) V1-FUSE row |
 | 4.4 | **C4** Bloom FPR ≈ 0.067 at 1024 bits, memory (S-8…S-10, S-14) | SilverTorch's own bloom, measured on the adapted index with no recheck: its false-positive rate falls with width (PubMed `c0_mesh`, k_hash 3: 2.3 % at 64 bits, 7.7e-6 at 1024) and at the study's 1024 bits / k_hash 5 is 0 on arXiv and Goodreads and 4.3e-8 on PubMed, far below the paper's 0.067 (%) under either reading; no false negatives. Width costs memory: PubMed index 9.1 → 11.4 GiB from 64 to 2048 bits, 1,221 MiB per 1024 bits at 10 M items, which is N · m_bits / 8 bytes, the arithmetic behind the paper's own memory figures (5 GB at 1024 bits for 40 M). Meta's code as published admits false positives that cost recall: PubMed `c0_mesh` recall@100 0.649 against the adapted code's 0.664 (k_hash 3), and at 30 M (OF-12). The paper's two FPR figures disagree (S-9 vs S-10); the transposed layout is not in Meta's released code (OF-1). **Pending A1-bloom:** what the false positives cost in recall per real bloom sweep (recall without the recheck against the exact filter's, same index and probes). **F4a** (memory and FPR vs bits): `c4_bloom.csv` (`fp_adapted.py`, NUMBERS A4) |
@@ -279,8 +278,7 @@ novelty the call asks for. Kept apart from §4 (survey pattern 2).
 - Synthetic filters: at p ≥ 0.01 SilverTorch wins wherever it reaches the
   target (0.03-0.94); LiNR V1 wins the 17 reached cells at p ≥ 0.1 with
   bs ≥ 16 where many probes are needed (worst 2.7×). k 1000 shrinks the
-  reached cells (24 of 44 clause cells per batch size at 0.90 against 35 of 44 at k 100). Bloom
-  filtering: SilverTorch wins every bloom cell it reaches (0.09-0.85).
+  reached cells (24 of 44 clause cells per batch size at 0.90 against 35 of 44 at k 100). Bloom filtering: pending the bloom legs (SilverTorch's own bloom, no recheck).
 - Index memory and build time: the adapted int8 clause index is 0.56-0.72
   of LiNR's fp16 index (PubMed 8.8 vs 15.8 GiB), but its bloom index is
   larger than LiNR's at ≤ 3 M; k-means build 2-4 s at ≤ 3 M, 10-29 min
@@ -354,7 +352,7 @@ Material: **C2** Q5-Q9, **C3** §6.
   1-indexed mirror, D-9 tie order), all fixed: one line, as findings.
 - Difficulties: the LiNR filter sets and production data are not public;
   the published SilverTorch path was host-bound and not capturable;
-  clocks cannot be locked on rented GPUs; the LiNR V2 bs 256 timeouts.
+  clocks cannot be locked on rented GPUs; the LiNR V2 bs 256 timeout on PubMed `all5`.
 - **Communication** (the call asks): open item 1.
 - Unexplained residuals: none on the study's arms (R-1 and R-2 concern
   arms outside it).
@@ -404,7 +402,7 @@ are not yet carried by the sections above or by the results draft.
    axis.** At bs 1, V2 wins below p 0.85-0.97 at every N and d; at
    LiNR's own high-pass point (p ≈ 0.11) V2 is 0.29-0.68 of V1, where LiNR
    has V1 3.0× faster. Batching reverses it: V2 is slower on every real
-   filter at bs 64 (1.3-35×) and times out at bs 256 on two. Seeds 0-2
+   filter at bs 64 (1.3-35×) and at bs 256 it is up to 55× slower (PubMed `c3_journal_reverse`) and times out on PubMed `all5`. Seeds 0-2
    move the ratio by ≤ 0.006. (`c1_crossover.csv`, `c1_curves.csv`,
    `linr_numbers.csv`; §4.1)
 4. **Meta's code, adapted, is bit-exact with the published code and

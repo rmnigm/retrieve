@@ -6,7 +6,11 @@ Writes, per dim, `n-bloom-timed-d<dim>` (k 100, priority 2), `n-bloom-timed-k100
 `n-bloom-timed-synth-d<dim>` (k 100, priority 3b). Every suite runs SilverTorch bloom (recheck off) beside LiNR V1 / V2 with the exact clause filter on the same sweeps
 (LiNR with a bloom filter is not in the study, user 2026-10-13), bs 1 / 16 / 64, interleaved by (algo, n_lists).
 
-usage: pick_bloom.py CURVE_PARQUET [...] > suites-bloom-timed.yaml
+The k 100 real-filter suites also carry LiNR V3 at matched recall (user, 2026-10-13, RED 2): per sweep, the smallest candidate pool
+reaching recall@100 0.90 and 0.95 on the V3 pool legs (NUMBERS L2 / L2b), in the same interleave group; a target no pool reaches
+(within 20 %) gets no V3 point.
+
+usage: pick_bloom.py CURVE_PARQUET [...] --v3 V3_POOL_PARQUET [...] > suites-bloom-timed.yaml
 """
 
 import json
@@ -36,7 +40,31 @@ V12 = [
     {"algo": "linr_v2", "backends": ["triton"], "filter_kinds": ["clause"]},
 ]
 
-df = pd.concat([pd.read_parquet(p) for p in sys.argv[1:]], ignore_index=True)
+args = sys.argv[1:]
+cut = args.index("--v3") if "--v3" in args else len(args)
+df = pd.concat([pd.read_parquet(p) for p in args[:cut]], ignore_index=True)
+v3 = (
+    pd.concat([pd.read_parquet(p) for p in args[cut + 1 :]], ignore_index=True)
+    if cut < len(args)
+    else None
+)
+v3_pools = {}
+if v3 is not None:
+    v3 = v3[(v3.algo == "linr_v3") & (v3.status == "ok") & (v3.filter_kind == "clause")]
+    v3 = v3.assign(
+        pool=v3.params.map(lambda s: json.loads(s)["candidate_pool_frac"])
+    ).drop_duplicates(["dataset", "sweep", "pool"])
+    for (ds, sw), g in v3.groupby(["dataset", "sweep"]):
+        g = g.sort_values("pool")
+        pick = sorted(
+            {
+                float(g[g["oracle_recall@100"] >= t].pool.iloc[0])
+                for t in TARGETS
+                if (g["oracle_recall@100"] >= t).any()
+            }
+        )
+        if pick:
+            v3_pools[ds, sw] = pick
 df = df[
     (df.backend == "official-fork")
     & (df.status == "ok")
@@ -70,9 +98,25 @@ for (ds, dim, sw, nl), g in df.groupby(["dataset", "dim", "sweep", "n_lists"]):
             points[k][ds, int(dim), sw, int(nl)] = sorted(pick)
 
 
-def suite(dim, keys, k, pts):
+def suite(dim, keys, k, pts, with_v3=False):
     dss = sorted({key[0] for key in keys})
     arms = list(V12)
+    if with_v3:
+        for ds, sw in sorted({(key[0], key[2]) for key in keys}):
+            if (ds, sw) in v3_pools:
+                arms.append(
+                    {
+                        "algo": "linr_v3",
+                        "backends": ["triton"],
+                        "filter_kinds": ["clause"],
+                        "datasets": {
+                            ds: {
+                                "sweeps": [sw],
+                                "query": {"candidate_pool_frac": v3_pools[ds, sw]},
+                            }
+                        },
+                    }
+                )
     for ds, _, sw, nl in keys:
         arms.append(
             {
@@ -106,7 +150,7 @@ for k, name in [(100, "n-bloom-timed"), (1000, "n-bloom-timed-k1000")]:
             key for key in pts if key[1] == dim and not key[0].endswith("synth")
         )
         if real:
-            out[f"{name}-d{dim}"] = suite(dim, real, k, pts)
+            out[f"{name}-d{dim}"] = suite(dim, real, k, pts, with_v3=k == 100)
         synth = sorted(key for key in pts if key[1] == dim and key[0].endswith("synth"))
         if synth and k == 100:
             out[f"n-bloom-timed-synth-d{dim}"] = suite(dim, synth, k, pts)

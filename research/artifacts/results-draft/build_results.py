@@ -10,8 +10,10 @@ The head-to-head is the NUMBERS A2 / A3 legs only: SilverTorch (backend "officia
 with LiNR V1 / V2 in one process per cell group. A cell measured twice (A2-small and its rerun, A2b and its rerun, A2-small
 and A2b at LAION 1 / 3 M) keeps its stable record, the later leg's when both are stable; a cell unstable in every run keeps
 its record and the flag. YFCC is out of the study (user, 2026-10-13: uint8 L2 descriptors, not trained for inner product), so
-every yfcc* record, final pass, NUMBERS or gate grid, is dropped on load. LiNR V2 at bs 256 on PubMed c3_journal_reverse / all5
-is a TIMEOUT (no usable result after hours at 80 GB), shown as such in linr_numbers. LiNR's
+every yfcc* record, final pass, NUMBERS or gate grid, is dropped on load. SilverTorch bloom cells of the A legs ran with the
+recheck on (the library default), which the study does not report (user, 2026-10-12), so they are dropped until the bloom legs
+(recheck off) land. LiNR V2 at bs 256 on PubMed all5 is a TIMEOUT (no result at 80 GB), shown as such in linr_numbers;
+c3_journal_reverse ran (2.55 s a batch). LiNR's
 claims (C1-C3) read campaign-final plus the LiNR-only NUMBERS legs (L1-L4); C4 reads NUMBERS A4 (adapted widths) and Meta's
 code as published (final pass), C5 Meta's code as published, C6 the adapted code's curves, ceiling split and local pass rate
 (ADAPTED), C7 the gates. No Triton SilverTorch record feeds a table.
@@ -124,7 +126,10 @@ def load_records():
 def load_timed():
     """Every timed record of the A2 / A3 legs, and one record per cell (module docstring)."""
     raw = params(pd.concat([leg(n).assign(leg_rank=i) for i, n in enumerate(TIMED)]))
-    df = raw[raw.perf_mode.notna()]
+    df = raw[
+        raw.perf_mode.notna()
+        & ~((raw.algo == "silvertorch") & (raw.filter_kind == "bloom"))
+    ]
     df["unstable"] = df.unstable.fillna(False).astype(bool)
     key = CELL + ["algo", "backend", "n_lists", "n_probe", "perf_mode"]
     df = df.sort_values(["unstable", "leg_rank"], ascending=[True, False])
@@ -133,6 +138,7 @@ def load_timed():
 
 def load_curves():
     df = params(pd.concat([leg(n) for n in CURVES], ignore_index=True))
+    df = df[df.filter_kind != "bloom"]  # recheck on: not reported (module docstring)
     return df.drop_duplicates(
         ["dataset", "dim", "filter_kind", "sweep", "n_lists", "n_probe"]
     )
@@ -347,7 +353,7 @@ def linr_numbers(df):
     ).reset_index()
     pv["V2_status"] = "ok"
     timeout = (pv.dataset == "pubmed") & (pv.perf_bs == 256)
-    timeout &= pv.sweep.isin(["c3_journal_reverse", "all5"])
+    timeout &= pv.sweep == "all5"
     pv.loc[timeout, ["V2", "V2_status"]] = [np.nan, "TIMEOUT"]
     pv["v2_over_v1"] = pv.V2 / pv.V1
     return pv
@@ -530,7 +536,7 @@ def c4():
     return st.sort_values(["dataset", "sweep", "k_hash", "m_bits"])
 
 
-def c5(df, gc):
+def c5(df):
     x = df[
         (df.algo == "silvertorch")
         & (df.backend == "official")
@@ -546,21 +552,7 @@ def c5(df, gc):
     )
     pv["full_over_partial"] = pv.full / pv.partial
     meta = pv.assign(arm="Meta as published (eager)")
-    b = gc[gc.kind == "bloom"]
-    fp = b.pivot_table(
-        index=["dataset", "dim", "sweep", "n_probe", "bs", "k"],
-        columns="bloom_path",
-        values=["fork_graph", "fork_eager"],
-    ).dropna()
-    adapted = pd.DataFrame(
-        {
-            "graph_full_over_partial": fp[("fork_graph", "full")]
-            / fp[("fork_graph", "partial")],
-            "eager_full_over_partial": fp[("fork_eager", "full")]
-            / fp[("fork_eager", "partial")],
-        }
-    ).reset_index()
-    return meta, adapted
+    return meta
 
 
 def c6(curves):
@@ -754,7 +746,7 @@ def main():
     h = head_to_head(timed)
     tn = tuned(h)
     c1t, c1c = c1(df)
-    meta5, adapted5 = c5(df, gc)
+    meta5 = c5(df)
     c6q, c6c = c6(load_curves())
     c4b = c4()
     nsw, nmem = linr_vs_n(df)
@@ -774,7 +766,6 @@ def main():
         "c3_torch": c3(df),
         "c4_bloom": c4b,
         "c5_meta": meta5,
-        "c5_adapted": adapted5,
         "c6_recall": c6q,
         "c6_ceiling": c6c,
         "c6_local_pass": pd.read_csv(HUB / ADAPTED / "gls_adapted.csv"),
