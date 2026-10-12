@@ -132,6 +132,49 @@ def small_lists_arms(wide, backend="official-fork"):
     return arms
 
 
+BLOOM = {  # the user's bloom directive (2026-10-12): SilverTorch bloom, recheck off; dataset: (n_lists, bloom sweeps)
+    "goodreads": ([4096], ["c0_genre"]),
+    "arxiv": ([2048], ["c0_maincat", "c3_nversions", "all4"]),
+    "laion1m": ([512, 4096, 8192], ["c0_domain", "tags4"]),
+    "laion3m": ([2048, 8192, 16384], ["c0_domain", "tags4"]),
+    "pubmed": (BIG_LISTS, ["c0_mesh"]),
+    "laion10m": (BIG_LISTS, ["c0_domain", "tags4"]),
+    "laion30m": (BIG_LISTS, ["c0_domain", "tags4"]),
+}
+BLOOM_SYNTH = {
+    d: ([BENCH[d][1][0]], ["p0001", "p001", "p01", "p1"])
+    for d in ["goodreads-synth", "arxiv-synth", "laion1m-synth", "laion3m-synth"]
+}
+
+
+def bloom_curve_arms(spec):
+    """One arm per (dataset, n_lists): SilverTorch bloom on the adapted backend with the recheck off, n_probe doubling to n_lists / 4."""
+    return [
+        {
+            "algo": "silvertorch",
+            "backends": ["official-fork"],
+            "filter_kinds": ["bloom"],
+            "build": {"n_lists": [n], "recheck": [False]},
+            "query": {"n_probe": [p for p in P if p <= n // 4]},
+            "datasets": {d: {"sweeps": sweeps}},
+        }
+        for d, (lists, sweeps) in spec.items()
+        for n in lists
+    ]
+
+
+def bloom_curve_suite(spec):
+    return suite(
+        list(spec),
+        bloom_curve_arms(spec),
+        [100, 1000],
+        [16],
+        kinds=("bloom",),
+        perf=False,
+        sw={d: s for d, (_, s) in spec.items()},
+    )
+
+
 ALL = list(BENCH)
 BIG = [d for d in ALL if BENCH[d][1] == BIG_LISTS]
 YFCC = ["yfcc10m", "yfcc10m-synth"]
@@ -307,8 +350,15 @@ blocks = {
         [16],
         kinds=("bloom",),
         perf=False,
-        sw={"goodreads": ["c0_genre"], "arxiv": ["all4", "c0_maincat", "c3_nversions"], "pubmed": ["c0_mesh"]},
+        sw={
+            "goodreads": ["c0_genre"],
+            "arxiv": ["all4", "c0_maincat", "c3_nversions"],
+            "pubmed": ["c0_mesh"],
+        },
     ),
+    # B1 (controller bloom plan): bloom curves, recheck off. Priority 1 = real filters, every size; 1b = the small synth sets
+    "n-bloom-curve": bloom_curve_suite(BLOOM),
+    "n-bloom-curve-synth": bloom_curve_suite(BLOOM_SYNTH),
     "n-curve-q-all": suite(
         WIDE,
         curve_arms(WIDE, wide=None),

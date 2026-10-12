@@ -206,6 +206,22 @@ legs:
     cmds: ["RUN --suite n-st-k2048-d128 --interleave --dataset {ds}   # goodreads, arxiv", "RUN --suite n-st-k2048-d768 --interleave --dataset pubmed"]
     upload: numbers/A3-st-k2048
     est_gpu_h: 1.0
+  - id: A1-bloom
+    item: bloom directive (user 2026-10-12, controller plan 2026-10-12-211500000), priority 1
+    tree: fork + harness `recheck` param (dev/numbers-bloom)
+    depends_on: []
+    cmds:
+      - "RUN --suite n-bloom-curve --dataset {ds}   # in this order: goodreads, arxiv, laion1m, laion3m, pubmed, laion10m, laion30m"
+      - "RUN --suite n-bloom-curve-synth --dataset {ds}   # goodreads-synth, arxiv-synth, laion1m-synth, laion3m-synth"
+    upload: numbers/A1-bloom
+    est_gpu_h: 4.5
+  - id: A2-bloom
+    item: bloom directive, priority 2 (k 100) then 3 (k 1000, small synth)
+    tree: fork + harness `recheck` param
+    depends_on: A1-bloom   # and pick_points over numbers/A1-bloom (results-draft)
+    cmds: ["RUN --suite n-bloom-timed --interleave --dataset {ds}   # suite written after the picks"]
+    upload: numbers/A2-bloom
+    est_gpu_h: 7.0
   - id: A4-bloomwidth
     item: C4 (controller c3 ruling 1, 2026-10-12)
     tree: fork
