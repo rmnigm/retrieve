@@ -226,7 +226,6 @@ the item is not paper material (CLAUDE.md rule 2).
 | Goodreads (work-id, 0.8 M items) | d128 item embeddings from our E1c sequential encoder (gSASRec body, sampled softmax with logQ, [checkpoints](../../docs/system/checkpoints.md)); staged `item_attrs_narrow` `[N + 1, 4, 4]` (the mirror's legacy layout, pad row dropped by the loader); the first **10,000** test users; real filters `c0_genre`, `c1_lang_reverse`, `all4`, and the synthetic `goodreads-synth` | `pinkmeme/eval-goodreads-work-id@4714e9b5` on the Hugging Face Hub (the project's mirror of UCSD Goodreads) |
 | arXiv (papers, 3 M) | `nomic-embed-text-v1.5` embeddings, Matryoshka-truncated to d128; staged `item_attrs_narrow` `[N + 1, 4, 4]` (legacy layout: main category, license, update year, version count); 10,000 queries; real filters `c0_maincat`, `c3_nversions`, `all4`, and the synthetic `arxiv-synth` and `arxiv-corr-synth` | `pinkmeme/eval-arxiv-papers@354e6937` |
 | PubMed (10 M slice of ~36 M, d768) | NCBI's precomputed MedCPT article embeddings, queries through the MedCPT query encoder; `item_attrs_narrow` `[N, 5, 4]`; real filters `c0_mesh`, `c3_journal_reverse`, `all5` | NCBI FTP MedCPT release (public domain); the staged copy is pinned by sha256 (`item_attrs_narrow.pt` `8a3bce0f…`) and not yet published on the Hub |
-| YFCC-10M (d192) | the Big-ANN filter track's uint8 CLIP descriptors (stored fp16, lossless); tag attributes `[10M, 2, 32]`; real filter `tags_and`, and the synthetic `yfcc10m-synth` | Big-ANN filter-track release; `pinkmeme/eval-yfcc10m@88e4d89a` |
 | LAION 1 / 3 / 10 / 30 M (d256) | Re-LAION-2B-en-research-safe captions (parts 0-1, one row per distinct caption) encoded with `nomic-embed-text-v1.5`, Matryoshka d256; 1 / 3 / 10 M are seeded subsets of the 30 M set (seed 20261013); attributes `[N, 6, 1]`; real filters `c0_domain`, `tags4`, and the synthetic sets | Hugging Face `laion/relaion2B-en-research-safe` (gated, automatic approval); `pinkmeme/eval-laion30m` is not yet published |
 | Yambda-500M / Yambda-5B | not in the study: unfiltered cells in the thesis only | `pinkmeme/eval-yambda-500m`, `pinkmeme/eval-yambda-5b` |
 
@@ -245,10 +244,10 @@ baseline had used: `torch.equal` on both `[10000, 1000]` int64 top-K tensors,
 **exactly equal** ([H §12.1](../validation.md#harness-gates)).
 
 Ground truth is our own exact filtered fp32 full-scan oracle, keyed by a content
-fingerprint of the inputs. Where a dataset ships its own filtered ground truth
-we checked ours against it: on YFCC-10M our oracle reproduced the shipped
-`GT.public.ibin` on **100,000 / 100,000** queries, id-exact, with
-`max_abs_distance_error = 0.0` ([roadmap E1](../validation.md#datasets)).
+fingerprint of the inputs. No study dataset ships a filtered ground truth, so
+it is checked by independent code: the exact LiNR arms must reach
+`recall_oracle@k_max` ≥ 0.99 against it in every cell, and do on every study
+dataset ([deviations HB-2](reproduction-deviations.md#6-deviations-of-our-harness-against-the-papers-protocols--and-against-itself)).
 
 ## 8. Reproducing the environment
 

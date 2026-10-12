@@ -91,9 +91,9 @@ claims:
     original: "80M items, 24 probes, 1210 QPS on 2 A100; 10M items, 3802 QPS on 1 A100; latency budget at most 200 ms"
     source: "SilverTorch, arXiv 2511.14881, sec. 6.2"
     ours:
-      - label: "SilverTorch triton recall, YFCC-10M tags_and, n_probe 24"
+      - label: "SilverTorch triton recall, PubMed c0_mesh, n_probe 24"
         metric: recall
-        where: {dataset: yfcc10m, suite: filter, sweep: tags_and, filter_kind: clause, algo: silvertorch, backend: triton, params: {n_probe: 24}}
+        where: {dataset: pubmed, suite: filter, sweep: c0_mesh, filter_kind: clause, algo: silvertorch, backend: triton, params: {n_probe: 24}}
       - label: "SilverTorch triton latency at recall 0.95, arXiv deep c0_maincat, n_lists 1664, B=1"
         metric: "matched:0.95"
         bs: 1

@@ -367,23 +367,18 @@ def test_arm_errors_are_named(tmp_path, arms, match):
 GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; change it deliberately
     ("filter", "goodreads"): (63, 90),
     ("filter", "arxiv"): (99, 144),
-    ("filter", "yfcc10m"): (15, 21),
     ("filter", "pubmed"): (69, 111),
     ("deep", "goodreads"): (5, 40),
     ("deep", "arxiv"): (9, 63),
-    ("deep", "yfcc10m"): (1, 8),
     ("deep", "pubmed"): (11, 21),
     ("synth", "goodreads-synth"): (70, 128),
     ("synth", "arxiv-synth"): (31, 58),
     ("synth", "arxiv-corr-synth"): (15, 36),
-    ("synth", "yfcc10m-synth"): (27, 45),  # 9 rates x (V1, V2, SilverTorch at 3 n_probe)
     ("c3", "goodreads-synth"): (18, 18),
     ("c3", "arxiv-synth"): (12, 12),
-    ("c3", "yfcc10m-synth"): (6, 6),
     ("c3", "laion30m-synth"): (6, 6),
     ("c3-real", "goodreads"): (6, 6),
     ("c3-real", "arxiv"): (6, 6),
-    ("c3-real", "yfcc10m"): (2, 2),
     ("c3-real", "pubmed"): (6, 6),
     ("codesign", "arxiv"): (12, 36),  # official + triton (C5-OURS)
     ("codesign", "goodreads"): (4, 12),
@@ -419,7 +414,6 @@ GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; chan
     ("nsweep-codesign", "laion10m"): (8, 16),
     ("nsweep-codesign", "laion30m"): (8, 16),
     ("seeds-c1", "arxiv-synth"): (12, 12),
-    ("seeds-c1", "yfcc10m-synth"): (12, 12),
     ("seeds-c1-laion30m", "laion30m-synth"): (12, 12),
     ("seeds-c7", "laion30m"): (18, 36),
     ("tune-q", "goodreads"): (28, 196),
@@ -427,26 +421,21 @@ GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; chan
     ("tune-q", "arxiv"): (42, 294),
     ("tune-q", "arxiv-synth"): (42, 294),
     ("tune-q", "arxiv-corr-synth"): (42, 294),
-    ("tune-q", "yfcc10m"): (4, 34),
-    ("tune-q", "yfcc10m-synth"): (24, 204),
     ("tune-q", "pubmed"): (16, 136),
     ("tune-timed", "goodreads"): (28, 100),
     ("tune-timed", "goodreads-synth"): (42, 146),
     ("tune-timed", "arxiv"): (42, 142),
     ("tune-timed", "arxiv-synth"): (42, 144),
     ("tune-timed", "arxiv-corr-synth"): (42, 150),
-    ("tune-timed", "yfcc10m"): (4, 8),
-    ("tune-timed", "yfcc10m-synth"): (24, 43),
     ("tune-timed", "pubmed"): (16, 35),
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
     "arxiv": {"c3_nversions", "c0_maincat", "all4"},
     "pubmed": {"c0_mesh", "c3_journal_reverse", "all5"},
-    "yfcc10m": {"tags_and"},
 }
 SYNTH_N = {"goodreads-synth": 797_084, "arxiv-synth": 2_988_996, "arxiv-corr-synth": 2_988_996,
-           "yfcc10m-synth": 10_000_000, "laion30m-synth": 30_000_000}  # fmt: skip
+           "laion30m-synth": 30_000_000}  # fmt: skip
 RATE = {"p0001": 0.001, "p0003": 0.003, "p001": 0.01, "p003": 0.03, "p005": 0.05, "p01": 0.1,
         "p02": 0.2, "p03": 0.3, "p05": 0.5, "p1": 1.0,
         "c001": 0.01, "c003": 0.03, "c01": 0.1}  # fmt: skip
@@ -498,10 +487,10 @@ def test_grid_counts_and_invariants(suite, dataset):
     if suite in (
         "synth",
         "laion30m-synth",
-    ):  # k 1000 where N * p >= 4 * 1000; YFCC / LAION synth at k 100
+    ):  # k 1000 where N * p >= 4 * 1000; LAION synth at k 100
         for j in jobs:
             big_enough = SYNTH_N[dataset] * RATE[j.sweep] >= 4 * 1000
-            k100_only = dataset in ("yfcc10m-synth", "laion30m-synth")
+            k100_only = dataset == "laion30m-synth"
             assert (1000 in j.ks) == (big_enough and not k100_only), j.sweep
     if suite == "synth":
         torch_arms = {(j.algo, json.dumps(j.build)) for j in jobs if j.backend == "torch"}
@@ -531,9 +520,8 @@ def test_grid_counts_and_invariants(suite, dataset):
             "arxiv-synth": {("triton", "clause"): (24, 64, 256, 512), ("triton", "bloom"): (24,),
                             ("official", "bloom"): (24,)},
             "arxiv-corr-synth": {("triton", "clause"): (24, 64, 256, 512)},
-            "yfcc10m-synth": {("triton", "clause"): (24, 256, 1024)},
         }[dataset]  # fmt: skip
-        if dataset in ("arxiv-synth", "yfcc10m-synth"):  # C1's nine rates
+        if dataset == "arxiv-synth":  # C1's nine rates
             assert {j.sweep for j in jobs if j.algo == "linr_v2"} == {
                 "p0001", "p0003", "p001", "p003", "p005", "p01", "p02", "p05", "p1"
             }  # fmt: skip
@@ -562,12 +550,13 @@ def test_filter_suite_arms():
 
 def test_deep_suite_is_silvertorch_at_the_tuned_n_lists():
     """F3: SilverTorch triton along n_probe at the tune's n_lists, up to the n_lists / 4 cap."""
-    want = {"goodreads": (4096, 1024), "arxiv": (2048, 512), "yfcc10m": (4096, 1024)}
+    want = {"goodreads": (4096, 1024), "arxiv": (2048, 512)}
     for dataset, (n_lists, top) in want.items():
         jobs = _real("deep", dataset)
-        # F3's official curve (YFCC has no bloom block)
-        official = {("silvertorch", "official")} if dataset != "yfcc10m" else set()
-        assert {(j.algo, j.backend) for j in jobs} == {("silvertorch", "triton")} | official
+        assert {(j.algo, j.backend) for j in jobs} == {
+            ("silvertorch", "triton"),
+            ("silvertorch", "official"),
+        }
         assert all(j.filter_kind == "bloom" for j in jobs if j.backend == "official")
         assert {j.build["n_lists"] for j in jobs} == {n_lists}
         probes = tuple(n for n in (8, 16, 32, 64, 128, 256, 512, 1024) if n <= top)
@@ -733,7 +722,6 @@ def test_score_path_is_an_official_build_param():
 IVF = {
     "goodreads": (4096, 64),
     "arxiv": (2048, 256),
-    "yfcc10m": (4096, 1024),
     "pubmed": (4096, 1024),
 }
 
@@ -757,7 +745,7 @@ def test_filter_silvertorch_runs_at_the_tuned_ivf(dataset):
     assert extra == (tuned if dataset == "pubmed" else set())
 
 
-@pytest.mark.parametrize("dataset", ["goodreads", "arxiv", "yfcc10m"])
+@pytest.mark.parametrize("dataset", ["goodreads", "arxiv"])
 def test_synth_silvertorch_runs_on_the_real_datasets_ivf(dataset):
     st = [j for j in _real("synth", f"{dataset}-synth", seeds=[0]) if j.algo == "silvertorch"]
     assert st and {j.build["n_lists"] for j in st} == {IVF[dataset][0]}
