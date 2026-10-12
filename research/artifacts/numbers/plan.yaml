@@ -2,7 +2,7 @@
 # D-a recall 0.90 / 0.95; D-b n_lists {4096, 16384, 65536} at PubMed / YFCC / LAION 10 M / LAION 30 M). README.md explains.
 #
 # Conventions for every leg (runners):
-#   CFG     = $OUT/config, made by: docs/artifacts/numbers/prep_config.sh $TREE $OUT/config   (from a dev/numbers checkout)
+#   CFG     = $OUT/config, made by: research/artifacts/numbers/prep_config.sh $TREE $OUT/config   (from a dev/numbers checkout)
 #   RUN     = CUDA_VISIBLE_DEVICES=$GPU TORCHINDUCTOR_CACHE_DIR=/scratch/numbers/inductor-$BOX-$GPU
 #             uv run --directory $TREE/evaluation bench run --config-dir $OUT/config --out $OUT
 #   OUT     = /scratch/numbers/<leg>   (one per leg; never shared between GPUs)
@@ -129,7 +129,7 @@ legs:
     est_gpu_h: 3.0
   # The timed legs need the picked points: after each A1 leg uploads, run (CPU, any box, dev/numbers checkout)
   #   bench fetch --path-in-repo numbers/<A1 leg> --results /scratch/numbers/fetch/<A1 leg>
-  #   pick_points.py /scratch/numbers/fetch/*/**/results.parquet > docs/artifacts/numbers/suites-timed.yaml   (all A1 legs so far)
+  #   pick_points.py /scratch/numbers/fetch/*/**/results.parquet > research/artifacts/numbers/suites-timed.yaml   (all A1 legs so far)
   # commit suites-timed.yaml on dev/numbers, then prep_config.sh again for the A2 leg. results-draft does this on request.
   - id: A2-small
     item: [1, 3, 4, 5, 6]
