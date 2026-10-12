@@ -608,6 +608,8 @@ n-timed-d256:
   - arxiv-synth
   - goodreads
   - goodreads-synth
+  - laion10m
+  - laion10m-synth
   - laion1m
   - laion1m-synth
   - laion30m
@@ -643,6 +645,14 @@ n-timed-d256:
     - c0_genre
     - c1_lang_reverse
     goodreads-synth:
+    - p0001
+    - p001
+    - p01
+    - p1
+    laion10m:
+    - c0_domain
+    - tags4
+    laion10m-synth:
     - p0001
     - p001
     - p01
@@ -989,6 +999,391 @@ n-timed-d256:
           - 64
           - 128
           - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 4096
+    datasets:
+      laion10m:
+        sweeps:
+        - c0_domain
+        query:
+          n_probe:
+          - 24
+          - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      laion10m:
+        sweeps:
+        - c0_domain
+        query:
+          n_probe:
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      laion10m:
+        sweeps:
+        - c0_domain
+        query:
+          n_probe:
+          - 16384
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 4096
+    datasets:
+      laion10m:
+        sweeps:
+        - tags4
+        query:
+          n_probe:
+          - 24
+          - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      laion10m:
+        sweeps:
+        - tags4
+        query:
+          n_probe:
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      laion10m:
+        sweeps:
+        - tags4
+        query:
+          n_probe:
+          - 16384
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 4096
+    datasets:
+      laion10m:
+        sweeps:
+        - c0_domain
+        query:
+          n_probe:
+          - 24
+          - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      laion10m:
+        sweeps:
+        - c0_domain
+        query:
+          n_probe:
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      laion10m:
+        sweeps:
+        - c0_domain
+        query:
+          n_probe:
+          - 16384
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 4096
+    datasets:
+      laion10m:
+        sweeps:
+        - tags4
+        query:
+          n_probe:
+          - 24
+          - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      laion10m:
+        sweeps:
+        - tags4
+        query:
+          n_probe:
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      laion10m:
+        sweeps:
+        - tags4
+        query:
+          n_probe:
+          - 16384
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 4096
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p0001
+        query:
+          n_probe:
+          - 24
+          - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p0001
+        query:
+          n_probe:
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p0001
+        query:
+          n_probe:
+          - 16384
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 4096
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p001
+        query:
+          n_probe:
+          - 24
+          - 512
+          - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p001
+        query:
+          n_probe:
+          - 2048
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p001
+        query:
+          n_probe:
+          - 8192
+          - 16384
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 4096
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p01
+        query:
+          n_probe:
+          - 24
+          - 256
+          - 512
+          - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p01
+        query:
+          n_probe:
+          - 1024
+          - 2048
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p01
+        query:
+          n_probe:
+          - 2048
+          - 8192
+          - 16384
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 4096
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p1
+        query:
+          n_probe:
+          - 24
+          - 256
+          - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p1
+        query:
+          n_probe:
+          - 512
+          - 1024
+          - 2048
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p1
+        query:
+          n_probe:
+          - 1024
+          - 2048
+          - 4096
+          - 8192
+          - 16384
   - algo: silvertorch
     backends:
     - official-fork
