@@ -93,7 +93,7 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
     bloom_fp = None
     oracle_rows = None
     if fk != "none":
-        blob = sweep_oracle(job, inp, k_max, device, filters, warn_missing=True)
+        blob = sweep_oracle(job, inp, k_max, device, filters, qa_s, skip, warn_missing=True)
         heldout &= blob["target_in_filter"]
         oracle_rows = keep & (blob["topk"][:, 0] != -1)
         if fk == "bloom":
@@ -116,11 +116,19 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
 
 
 def sweep_oracle(
-    job: Job, inp: dict, k_max: int, device: torch.device, filters: dict, *, warn_missing: bool
+    job: Job,
+    inp: dict,
+    k_max: int,
+    device: torch.device,
+    filters: dict,
+    qa_s: torch.Tensor | None,
+    skip: torch.Tensor | None,
+    *,
+    warn_missing: bool,
 ) -> dict[str, Any]:
     """The blob v4 of a filter job's sweep at ``k_max`` (``oracle.load_or_build``) under the
-    exact mask (``inputs.exact_filter`` over the cell's standalone ``filters``)."""
-    qa_s, skip = inputs.sweep_qa(inp["qa"], job.clauses)
+    exact mask (``inputs.exact_filter`` over the cell's standalone ``filters``); ``qa_s, skip``
+    are the sweep's ``inputs.sweep_qa``."""
     return oracle.load_or_build(
         job.data.gt_dir,
         job.sweep,
@@ -144,20 +152,17 @@ def prebuild_oracles(jobs: Sequence[Job], device: torch.device | None = None) ->
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     measure.setup(0)
     counts: Counter = Counter()
-    need = {
-        (j.dataset, j.dim, j.filter_kind, j.sweep, max(j.ks)): j
-        for j in jobs
-        if j.filter_kind != "none"
-    }
-    by_inputs: dict[tuple, list[Job]] = {}
-    for (ds, dim, *_), j in need.items():
-        by_inputs.setdefault((ds, dim), []).append(j)
+    by_inputs: dict[tuple, dict[tuple, Job]] = {}
+    for j in jobs:
+        if j.filter_kind != "none":
+            by_inputs.setdefault((j.dataset, j.dim), {})[j.filter_kind, j.sweep, max(j.ks)] = j
     for group in by_inputs.values():
-        inp = inputs.load_inputs(group[0].data, device, with_filters=True)
-        for j in group:
+        inp = inputs.load_inputs(next(iter(group.values())).data, device, with_filters=True)
+        for j in group.values():
             fk = "clause" if j.filter_kind == "clause" else "none"  # bloom builds its exact one
             filters = inputs.build_filters(fk, inp, [j.backend], bloom=j.bloom)
-            sweep_oracle(j, inp, max(j.ks), device, filters, warn_missing=False)
+            qa_s, skip = inputs.sweep_qa(inp["qa"], j.clauses)
+            sweep_oracle(j, inp, max(j.ks), device, filters, qa_s, skip, warn_missing=False)
             counts["sweeps"] += 1
         del inp
         _release()
@@ -541,9 +546,6 @@ def _log_failure(msg: str, exc: BaseException) -> None:
     logger.error("{}\n{}", msg, "".join(traceback.format_exception(exc)))
 
 
-_FAILED = object()  # a build that raised: released once its traceback is gone
-
-
 def _release() -> None:
     gc.collect()
     torch._dynamo.reset()
@@ -633,9 +635,7 @@ def run(
     latency_kw = dict(latency_kw or {})
     reasons0 = ["skip_quality"] if skip_quality else []
     skipped_modes = set(MODES) - set(modes)
-    with_filters = {(j.dataset, j.dim): False for j in jobs}
-    for j in jobs:
-        with_filters[j.dataset, j.dim] |= j.filter_kind != "none"
+    with_filters = {(j.dataset, j.dim) for j in jobs if j.filter_kind != "none"}
     units = interleave_units(jobs) if interleave else [(None, [j]) for j in jobs]
 
     existing: dict[Path, dict[str, str]] = {}
@@ -671,7 +671,7 @@ def run(
             assets_by = {}
             _release()
             inp = inputs.load_inputs(
-                unit[0].data, device, with_filters=with_filters[unit[0].dataset, unit[0].dim]
+                unit[0].data, device, with_filters=(unit[0].dataset, unit[0].dim) in with_filters
             )
             inputs_key = (unit[0].dataset, unit[0].dim)
         assert inp is not None
@@ -717,8 +717,8 @@ def run(
                 if is_sticky(exc):
                     logger.error("sticky CUDA error: the context is dead, ending this process")
                     raise
-                module = _FAILED
-            if module is _FAILED:
+                module = None
+            if module is None:
                 _release()  # after the except: its traceback holds the failed build's tensors
                 continue
             # A module that cannot capture loses nothing to a skipped graph mode; a quality-only
