@@ -65,13 +65,20 @@ decisions.
   allowed** and **no recheck in timed code** (`OfficialConfig.recheck`
   off); the question is how much the bloom's false positives cost recall,
   and recall is graded against the exact filtered oracle, so a false
-  positive in the top-k counts as a miss. LiNR is evaluated with both
-  filters, exact clause and bloom, to show how much the probabilistic
-  filter costs. SilverTorch's exact clause mode is our adaptation (not in
+  positive in the top-k counts as a miss. LiNR is evaluated with its exact
+  clause filter only. SilverTorch's exact clause mode is our adaptation (not in
   Meta's CUDA path) and leaves the head-to-head. The C13 recheck stays in
   the code as an option, off in the study; the library default changes at
   RENAME. Reverse (NOT) clauses have no bloom form, so those filters are
   LiNR-exact only.
+- **LiNR with a bloom filter is not in the study** (user, 2026-10-13): LiNR
+  has no bloom in its paper, and our bloom for it (the library's
+  `BloomFilter`) is not reported, compared or mentioned in the paper.
+  The bloom legs time SilverTorch's bloom against LiNR V1 / V2 with the
+  exact filter only. The library keeps the code; nothing here measures it.
+- **False-positive claims only on SilverTorch's own bloom** (user,
+  2026-10-13): measured on the adapted code's bloom index with no recheck,
+  untimed; a recheck exists only in grading.
 - **D1-G is green for the final pass** (user, 2026-10-11): the user
   accepted the 25 listed, explained failures of the batching check
   (`median_ms(bs=16) < 16 × median_ms(bs=1)`) without loosening it; the

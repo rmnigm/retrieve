@@ -219,19 +219,19 @@ def linr_arm(df):
 
 
 def head_to_head(timed, mode="graph"):
-    """Every SilverTorch point against the faster exact LiNR (V1 / V2) of its cell, same process, same mode."""
+    """Every SilverTorch point (clause or bloom) against the faster exact LiNR (V1 / V2, clause filter) of its cell, same leg,
+    same mode. LiNR with a bloom filter is not in the study (user, 2026-10-13)."""
     x = timed[timed.perf_mode == mode]
     st = x[x.algo == "silvertorch"]
-    li = x[x.algo.isin(["linr_v1_filter_mask", "linr_v2"])].assign(
-        v=lambda d: d.algo.map(LINR)
-    )
-    ms = li.pivot_table(index=CELL, columns="v", values="perf_median_ms")
-    ms["linr_unstable"] = (
-        li.groupby(CELL).unstable.any() | li.groupby(CELL).fp16_flag.any()
-    )
+    li = x[
+        x.algo.isin(["linr_v1_filter_mask", "linr_v2"]) & (x.filter_kind == "clause")
+    ].assign(v=lambda d: d.algo.map(LINR))
+    on = [c for c in CELL if c != "filter_kind"]
+    ms = li.pivot_table(index=on, columns="v", values="perf_median_ms")
+    ms["linr_unstable"] = li.groupby(on).unstable.any() | li.groupby(on).fp16_flag.any()
     ms["linr_ms"] = ms[["V1", "V2"]].min(axis=1)
     ms["linr_best"] = ms[["V1", "V2"]].idxmin(axis=1)
-    h = st.merge(ms.reset_index(), on=CELL)
+    h = st.merge(ms.reset_index(), on=on)
     h = h.assign(
         n_items=h.n_items,
         st_ms=h.perf_median_ms,
@@ -325,7 +325,9 @@ def linr_numbers(df):
             ["L1-linr-bs64", "L1b-linr-bs64-laion", "L3-linr-corr", "L4-linr-k2048"]
         )
     ]
-    x = x[x.perf_mode == "graph"].assign(v=lambda d: d.algo.map(LINR))
+    x = x[(x.perf_mode == "graph") & (x.filter_kind == "clause")].assign(
+        v=lambda d: d.algo.map(LINR)
+    )
     pv = x.pivot_table(
         index=[
             "leg",
@@ -443,6 +445,7 @@ def c1_real(linr):
 def c2(df):
     x = df[
         (df.algo.isin(["linr_v2", "linr_v3"]))
+        & (df.filter_kind == "clause")
         & (df.perf_mode == "graph")
         & (df.seed == 0)
         & (df.perf_k == 100)
@@ -520,23 +523,16 @@ def c3(df):
 
 def c4():
     """C4 on SilverTorch's own bloom (user's bloom-reporting ruling): its false-positive rate per width over the whole index
-    (BLOOM_FP, fp_adapted.py, recheck off) beside the adapted code's recall and index size at that width (NUMBERS A4). The A4 records'
-    `bloom_fp_rate` is our standalone LiNR bloom's, so it goes to linr_bloom_fp, never beside SilverTorch's."""
+    (BLOOM_FP, fp_adapted.py, recheck off) beside the adapted code's recall and index size at that width (NUMBERS A4). The A4
+    records' `bloom_fp_rate` comes from the harness's standalone filter module, not SilverTorch's index, and is not reported."""
     fp = pd.read_csv(HUB / BLOOM_FP / "fp_adapted.csv")
-    a4 = params(leg("A4-bloomwidth"))
-    a4 = a4.drop_duplicates(["dataset", "sweep", "m_bits", "k_hash"])
-    a4 = a4[["dataset", "sweep", "m_bits", "k_hash", "oracle_recall@100", "index_mib"]]
-    st = fp.merge(
-        a4, on=["dataset", "sweep", "m_bits", "k_hash"], suffixes=("_bloom", "_index")
-    )
-    linr = params(leg("A4-bloomwidth")).drop_duplicates(
+    a4 = params(leg("A4-bloomwidth")).drop_duplicates(
         ["dataset", "sweep", "m_bits", "k_hash"]
     )
-    linr = linr[["dataset", "sweep", "m_bits", "k_hash", "bloom_fp_rate"]].rename(
-        columns={"bloom_fp_rate": "linr_bloom_fp_rate"}
-    )
-    keys = ["dataset", "sweep", "k_hash", "m_bits"]
-    return st.sort_values(keys), linr.sort_values(keys)
+    a4 = a4[["dataset", "sweep", "m_bits", "k_hash", "oracle_recall@100", "index_mib"]]
+    keys = ["dataset", "sweep", "m_bits", "k_hash"]
+    st = fp.merge(a4, on=keys, suffixes=("_bloom", "_index"))
+    return st.sort_values(["dataset", "sweep", "k_hash", "m_bits"])
 
 
 def c5(df, gc):
@@ -620,7 +616,10 @@ def linr_vs_n(df):
 def memory(df, timed):
     """Index size and build time: LiNR and Meta's code from the final pass, the adapted code from the NUMBERS legs."""
     x = df[(df.suite == "filter") & (df.seed == 0)]
-    x = x[x.algo.isin(LINR) | ((x.algo == "silvertorch") & (x.backend == "official"))]
+    x = x[
+        (x.algo.isin(LINR) & (x.filter_kind == "clause"))
+        | ((x.algo == "silvertorch") & (x.backend == "official"))
+    ]
     x = x.assign(arm=x.algo.map(LINR).fillna("SilverTorch, Meta as published"))
     st = timed[(timed.algo == "silvertorch") & timed.index_mib.notna()]
     st = st.assign(arm="SilverTorch, adapted")
@@ -778,8 +777,7 @@ def main():
         "linr_numbers": linr_numbers(df),
         "c2_v3": c2(df),
         "c3_torch": c3(df),
-        "c4_bloom": c4b[0],
-        "linr_bloom_fp": c4b[1],
+        "c4_bloom": c4b,
         "c5_meta": meta5,
         "c5_adapted": adapted5,
         "c6_recall": c6q,

@@ -49,7 +49,7 @@ condition given with it.
 | C1 (L-3…L-5) | **reproduced in shape at bs 1, not in location; weak at bs 16; reversed at bs ≥ 64** (final wording: outline open item 3) | a V1 / V2 crossover in pass rate exists at bs 1 at every N and d, at p 0.79-0.97. LiNR's own high-pass setting (p ≈ 0.11) has V1 faster by 3.0×; ours has V2 faster there (fused V2, LN-1 / L-12) | "partially confirmed: the crossover exists, at a far higher pass rate than in the original" |
 | C2 (L-6) | **not comparable as stated** (end-task recall, unpublished protocol); under our metric **holds in direction, not in size, at bs 16 only** | 1 % pool: V3 at 0.83 of V2 at bs 16, recall 0.89 (median); slower at bs 1 (1.08). Goodreads end-task bridge below | "cannot be fully assessed due to the recall definition; on our metric, the gain appears only at bs 16" |
 | C3 (L-2) | **holds in direction, not in size** | eager torch 1.4-2.0× (bs 1), 5.8-6.8× (bs 16), never near 100×; `torch.compile` is mostly faster at bs 1 | "the gap is significantly narrower than in the original" |
-| C4 (S-8…S-10, S-14) | **FPR: below the paper's at 1024 bits, for the library bloom at the same width** (the index's own rate is not recorded, outline open item 4); **memory: reproduced as arithmetic** (N · m_bits / 8); the adapted code returns 0 false positives at every width; the transposed layout is **not in the released code** (OF-1) | NUMBERS A4 on the adapted code; final-pass `bloomwidth` on Meta's code as published | "confirmed within the original evaluation scope (memory); the layout claim cannot be assessed on the released code" |
+| C4 (S-8…S-10, S-14) | **FPR: far below the paper's at 1024 bits, on SilverTorch's own bloom** (no recheck: 0 on arXiv / Goodreads, 4.3e-8 on PubMed at 1024 bits / k_hash 5); **memory: reproduced as arithmetic** (N · m_bits / 8); no false negatives; the transposed layout is **not in the released code** (OF-1) | `fp_adapted.py` on the adapted index; NUMBERS A4; final-pass `bloomwidth` on Meta's code as published | "confirmed within the original evaluation scope (FPR, memory); the layout claim cannot be assessed on the released code" |
 | C5 (S-3, S-11) | **Meta as published: reproduced at 30 M (and 10 M bs 64), mixed at 3 M bs 64 and 10 M bs 16, reversed at 0.8-3 M.** The adapted column reads "refused by design (K17)" | N and batch size decide it; the reversal is host work in the published partial path (OF-9) | "holds at the original's scale, reverses at smaller N" |
 | C6 (S-6, S-7, S-16) | **reproduced in shape** (recall falls with selectivity and N at fixed probes); the **0.95 ceiling is dataset-dependent**: reached on Goodreads, arXiv, LAION `tags4` at 10 / 30 M and 18 of 31 synthetic sweeps, not on LAION `c0_domain`, PubMed or YFCC; **int8 is the limit on YFCC and PubMed `c3_journal_reverse`, the IVF partition on LAION 1 / 3 M** | adapted code, probe curves up to `n_lists` / 4; ceiling split on adapted indexes | "partially confirmed: holds on PubMed, YFCC and LAION `c0_domain`, not on Goodreads and arXiv" |
 | C7 (ours) | **holds**: bit-exact to Meta's code as published, faster end to end | gate grid ≤ 10 M, the head's 300 cells, the 30 M bloom cells | — |
@@ -172,38 +172,30 @@ is launch overhead, not masking.
 §6.2.4 says 0.00173 % → 3.89 % from 1024 to 768 bits (S-10), which is
 inconsistent with S-9: the paper's own inconsistency.
 
-**Ours** (`c4_bloom.csv`: 60 adapted rows from NUMBERS `A4-bloomwidth`,
+**Ours.** SilverTorch's own bloom, measured on the adapted code's bloom
+index with no recheck (`fp_adapted.py`, Hub
+`artifacts/results-draft/20261013-bloom-fp`): per query (bloom survivors −
+exact passes) / (N − exact passes) over the whole index, 10,000 queries,
 m_bits 64-2048 × k_hash 3 / 5 on Goodreads `c0_genre`, arXiv `all4` /
-`c0_maincat` / `c3_nversions`, PubMed `c0_mesh`; 10 rows of Meta's code as
-published from the final pass's `bloomwidth` at its own width):
-
-**What `bloom_fp_rate` measures.** On `official` and `official-fork` cells
-the harness's standalone filter is the library's `BloomFilter` with the
-Triton backend (`evaluation/bench/algos.py` `filter_backend` maps both to
-`triton`; `inputs.build_filters`), built at the job's `m_bits` / `k_hash`,
-and `bloom_fp_rate` is that filter's mean per-query `(bloom − exact) / (N −
-exact)` ([evaluation](../../../docs/system/evaluation.md#measurement-protocol):
-"An official cell's `bloom_fp_rate` is the standalone Triton filter's").
-The adapted and published rows carry identical rates (PubMed `c0_mesh`
-9.345737e-6 at k_hash 3 and 5.596587e-8 at k_hash 5, the adapted value at
-1024 bits). So the FPR column is the **library bloom's** (the LiNR arm's
-filter) at that width, not the SilverTorch index's. Recall and
-`index_mib` are the SilverTorch module's own.
+`c0_maincat` / `c3_nversions`, PubMed `c0_mesh`; recall and `index_mib` from
+NUMBERS `A4-bloomwidth` (`c4_bloom.csv`). The records' `bloom_fp_rate` column
+is the harness's standalone filter module's, not SilverTorch's, and is not
+used.
 
 | what | value | source / status |
 |---|---|---|
-| library bloom FPR vs width (k_hash 3) | PubMed `c0_mesh` 2.4e-2 / 3.9e-3 / 5.4e-4 / 7.7e-5 / 9.3e-6 / 1.2e-6 at 64 / 128 / 256 / 512 / 1024 / 2048 bits; arXiv 1.3e-4-1.7e-3 at 64, 0 from 256; Goodreads 6.6e-3 at 64, 0 from 128 | `c4_bloom`; citable as the library bloom's (outline open item 4) |
+| SilverTorch bloom FPR vs width (k_hash 3) | PubMed `c0_mesh` 2.3e-2 / 3.5e-3 / 5.1e-4 / 5.8e-5 / 7.7e-6 / 8.5e-7 at 64 / 128 / 256 / 512 / 1024 / 2048 bits; arXiv `c0_maincat` 2.3e-3 at 64, 0 from 512; Goodreads 4.0e-3 at 64, 0 from 512. At the study's 1024 bits / k_hash 5: 0 (arXiv, Goodreads), 4.3e-8 (PubMed). No false negatives | `c4_bloom` (`fp_rate_mean`); measured |
 | adapted false positives in the results | 0 at every width (C13 exact recheck); recall@100 identical at every width per sweep (PubMed `c0_mesh` 0.6640, arXiv `all4` 0.7627, Goodreads `c0_genre` 0.9456) | `c4_bloom`; validation META-FORK gate R; citable |
 | adapted index memory vs width | PubMed 9,082 → 10,226 → 11,447 MiB at 64 / 1024 / 2048 bits: +1,221 MiB per 1024 bits = 10 M × 128 B, i.e. N · m_bits / 8; arXiv 799 → 1,141 → 1,506; Goodreads 213 → 305 → 402 | `c4_bloom` `index_mib`; the per-bit slope is C3-derived |
 | the paper's memory as arithmetic | 40 M × 1024 / 8 = 5.12 GB; × 512 → 2.56; × 768 → 3.84; × 2048 → 10.24: the S-9 figures exactly | C3-derived |
-| Meta as published, index memory | PubMed 7,766 MiB (k_hash 3) / 7,956 (k_hash 5); arXiv 454 / 482; Goodreads 130 / 143 | `c4_bloom` (Meta's bundle bloom, width from the bundle's term count, OF-1 / OF-10) |
-| Meta as published, recall@100 | PubMed `c0_mesh` **0.6493** (k_hash 3) and 0.66397 (k_hash 5) against the adapted 0.66399; arXiv and Goodreads within 4e-5 of the adapted | `c4_bloom`; C3-derived comparison. Meta's bloom lets non-matching items into the top-100 at 10 M on the rarest filter (about 1,900 passing items), not only at 30 M (OF-12) |
+| Meta as published, index memory | PubMed 7,766 MiB (k_hash 3) / 7,956 (k_hash 5); arXiv 454 / 482; Goodreads 130 / 143 | final pass `bloomwidth` records (Meta's bundle bloom, width from the bundle's term count, OF-1 / OF-10) |
+| Meta as published, recall@100 | PubMed `c0_mesh` **0.6493** (k_hash 3) and 0.66397 (k_hash 5) against the adapted 0.66399; arXiv and Goodreads within 4e-5 of the adapted | final pass `bloomwidth` records; C3-derived comparison. Meta's bloom lets non-matching items into the top-100 at 10 M on the rarest filter (about 1,900 passing items), not only at 30 M (OF-12) |
 
 - **S-14 / OF-1:** the transposed layout is not in Meta's released code (a
   per-2048-doc bundle bloom instead). A paper-vs-code finding.
-- **Units:** our FPR is a fraction. At 1024 bits the library bloom gives
-  ≤ 9.3e-6 (0.00093 %) against the paper's 0.067 (%) or 0.00173 %: lower
-  under either reading, at different N and attribute sets.
+- **Units:** our FPR is a fraction. At 1024 bits SilverTorch's bloom gives
+  ≤ 7.7e-6 (0.00077 %, k_hash 3) against the paper's 0.067 (%) or
+  0.00173 %: lower under either reading, at different N and attribute sets.
 
 ### C5: co-design 1.79-2.15× over full mask then probe (S-3, S-11)
 
@@ -413,46 +405,6 @@ LAION 3 M / 10 M `c0_domain`, PubMed `all5`, YFCC `tags_and`.
   0.95: 2.74 (k 100) and 2.70 (k 1000).
 - **At 24 probes** (`at24.csv`): SilverTorch is faster in every one of
   363 cells. bs 1: 0.016-0.986. bs 16: 0.017-0.395.
-
-### LiNR exact vs bloom (§5.2, pending)
-
-User addition (2026-10-12): an exhibit of what LiNR's probabilistic filter
-costs in recall and gains in speed, V1 and V2, per dataset and batch size
-(outline §5.2, T4 / F5). **The numbers come from `numbers/A2-bloom`**
-(LiNR V1 / V2 under the exact clause filter and the bloom filter on the
-same sweep, interleave groups split by filter kind in one process; due
-2026-10-13 16:00Z). Pending until that leg lands and its gate is green.
-
-**First look from existing records** (final pass `campaign-final/merged-4016`,
-`filter` suite, Triton, graph, k 100, seed 0, at the suite's default bloom
-width; clause and bloom ran in separate interleave groups, so the ratio
-is **not paired**; C3-derived, to be replaced by A2-bloom):
-
-| dataset / sweep (pass rate) | variant | recall@100 exact / bloom | ms exact / bloom, bs 1 | ms exact / bloom, bs 16 | exact / bloom (above 1: bloom faster) |
-|---|---|---|---|---|---|
-| arXiv `all4` (0.0094) | V1 | 0.999 / 0.999 | 1.03 / 0.94 | 2.08 / 2.00 | 1.10 / 1.04 |
-| | V2 | 0.999 / 0.999 | 0.63 / 0.44 | 6.69 / 3.15 | 1.44 / 2.12 |
-| arXiv `c0_maincat` (0.14) | V1 | 0.9986 / 0.9986 | 0.83 / 0.94 | 1.78 / 2.00 | 0.88 / 0.89 |
-| | V2 | 0.9986 / 0.9986 | 0.39 / 0.51 | 3.59 / 3.94 | 0.78 / 0.91 |
-| arXiv `c3_nversions` (0.44) | V1 | 0.9986 / 0.9986 | 0.83 / 0.94 | 1.80 / 2.00 | 0.88 / 0.90 |
-| | V2 | 0.9986 / 0.9986 | 0.65 / 0.77 | 4.90 / 5.19 | 0.84 / 0.94 |
-| Goodreads `c0_genre` (0.33) | V1 | 0.9997 / 0.9997 | 0.32 / 0.34 | 0.57 / 0.63 | 0.93 / 0.90 |
-| | V2 | 0.9997 / 0.9997 | 0.25 / 0.27 | 1.29 / 1.39 | 0.92 / 0.93 |
-| PubMed `c0_mesh` (0.00019) | V1 | 0.9985 / 0.9984 | 9.56 / 9.87 | 11.95 / 13.33 | 0.97 / 0.90 |
-| | V2 | 0.9985 / 0.9984 | 0.80 / 1.15 | 6.37 / 9.54 | 0.69 / 0.67 |
-
-- At the default width the bloom's false-positive rate is 0 on arXiv and
-  Goodreads and 5.6e-8 on PubMed `c0_mesh` (`bloom_fp_rate`), so it costs
-  at most 1e-4 recall@100.
-- It is **slower** than exact clause filtering on single-clause sweeps
-  (exact / bloom 0.67-0.97) and faster only on the four-clause arXiv
-  `all4` (1.04-2.12): the bloom tests one signature where the clause filter
-  tests every clause. If A2-bloom confirms it paired, "the faster
-  probabilistic filter" is faster only for multi-clause filters in LiNR's
-  kernels.
-- Reverse clauses (Goodreads `c1_lang_reverse`, PubMed
-  `c3_journal_reverse`), Goodreads `all4` / PubMed `all5` (they contain a
-  reverse clause) and YFCC `tags_and` have no bloom form.
 
 ### Index memory and build time
 

@@ -40,14 +40,14 @@ the outline did not yet use are marked **add**.
 | `numbers/A2-laion30m-real` | timed, LAION 30 M real | §5 |
 | `numbers/A2-laion30m-synth` | timed, laion30m-synth | §5 |
 | `numbers/A3-st-k2048` | timed SilverTorch vs LiNR at k 2048 | §5 (k 2048 rows) |
-| `numbers/A4-bloomwidth` | adapted bloom width grid, quality only | §4.4 F4a: recall per width, index memory per width; its `bloom_fp_rate` column is the library bloom's ([outline](../outline.md) open item 4) |
+| `numbers/A4-bloomwidth` | adapted bloom width grid, quality only | §4.4 F4a: recall per width, index memory per width; its `bloom_fp_rate` column is the harness's standalone filter's, not used (SilverTorch's own rate: `artifacts/results-draft/20261013-bloom-fp`) |
 | `numbers/L1-linr-bs64` | LiNR bs 64 / 256 | §4.1 (V2 slower at bs 64, TIMEOUTs at 256) |
 | `numbers/L1b-linr-bs64-laion` | LiNR bs 64, LAION | §4.1 (LAION 2.0-2.2) |
 | `numbers/L2-v3pool` | LiNR V3 pool 0.5-20 % | §4.2, F3 V3 curve |
 | `numbers/L2b-v3pool-laion` | LiNR V3 pool, LAION | §4.2 (LAION rows, now in `c2_v3`) |
 | `numbers/L3-linr-corr` | LiNR on correlated filters | §4.1 (no change), §4.6 (correlated vs uniform) |
 | `numbers/L4-linr-k2048` | LiNR at k 2048 | §4.1, §5 |
-| `numbers/A1-bloom`, `numbers/A2-bloom` | **pending** (due 2026-10-13 16:00Z): SilverTorch bloom without recheck; LiNR V1 / V2 exact vs bloom, interleaved | §4.4 (what the index's false positives cost), §5 bloom side, §5.2 T4 / F5 |
+| `numbers/A1-bloom`, `numbers/A2-bloom` | **pending** (due 2026-10-13 16:00Z): SilverTorch bloom without recheck, curves and timed against LiNR V1 / V2 exact, interleaved | §4.4 (what the index's false positives cost), §5 bloom side |
 
 ## 2. Hub: the final pass (`campaign-final*`, citable, D1-G green)
 

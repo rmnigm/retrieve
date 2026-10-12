@@ -144,9 +144,10 @@ Table: `tuned.csv`. Figure: `fig_h2h_synth`. At 0.90, k 100:
   at 0.90 and 0.95 on arXiv `c0_maincat` (0.23-0.72) and Goodreads `c0_genre`
   (0.30-0.81). On PubMed `c0_mesh` it stays below 0.90 at the timed points,
   so LiNR wins.
-- **Bloom filtering** (the shipped default: configured width plus an exact
-  recheck of survivors): SilverTorch wins every bloom cell it reaches,
-  0.09-0.85 of LiNR.
+- **Bloom filtering:** the head-to-head with SilverTorch's own bloom (no
+  recheck, false positives allowed) against LiNR's exact filter comes from
+  the bloom legs, still running. The bloom cells timed so far ran with a
+  recheck, so they are not reported.
 
 ### Index memory and build time
 
@@ -169,7 +170,6 @@ apart from the head-to-head above. Claims C1-C7 are listed in
 | C1: V1 beats V2 at high pass rate, V2 wins at low | **reproduced at bs 1, weak at bs 16, gone at bs 64 / 256.** At bs 1, V2 wins below a pass rate of 0.79-0.97 at every N and d, and by 1.6-5.1× at 0.001. At bs 16, V2 wins only below about 0.02, by at most 25 %. At bs 64 and 256, V1 is faster on every real filter (V2 1.3-35× slower at bs 64, LAION 2.0-2.2×; at bs 256 V2 times out on PubMed `c3_journal_reverse` / `all5` and YFCC). Correlated filters (arxiv-corr-synth) change nothing: V2 at 0.35-0.41 of V1 at bs 1, 0.92-1.26 at bs 16. At k 2048, V2 wins at bs 1 (0.08-0.77) and at bs 16 only on PubMed | `c1_crossover.csv`, `c1_curves.csv`, `c1_real.csv`, `linr_numbers.csv` |
 | C2: V3 keeping 1 % gives about 10 % at near-parity recall | **not comparable as stated.** LiNR's recall is end-task recall (recall@2000 against its product's relevance labels), and the evaluation protocol is not published in enough detail to rebuild. Under our metric (share of the exact filtered top-k returned), on the real filters a 1 % candidate pool reaches a median recall of 0.89, at 0.83 of V2's latency at bs 16 and 1.08 at bs 1. Parity with the exact scan (0.99) needs a 20 % pool, where V3 is no faster than V2 (1.01 at bs 16, 1.14 at bs 1). Median recall rises with the pool from 0.84 (0.5 %) to 0.99 (20 %). On LAION 1-30 M a 1 % pool reaches 0.89 and V3 runs at 1.11× V2 at bs 1 and 0.97× at bs 16; 20 % reaches 0.98 (V2 there from the final pass, not interleaved) | `c2_v3.csv` |
 | C3: the custom filter kernel is about 100× faster than native masking | **direction reproduced, size not.** Eager PyTorch is 1.4-2.0× slower at bs 1 and 5.8-6.8× at bs 16. `torch.compile` max-autotune runs at 0.5-1.06× of Triton at bs 1 (median 0.85-0.96, so mostly faster) and 1.5-4.8× slower at bs 16 | `c3_torch.csv` |
-| LiNR with a bloom filter (our adaptation: LiNR has no bloom; hash and salt ours), against LiNR's exact filter | **it costs no recall and is slower.** Recall with our bloom is at least 0.998, as with the exact filter, but the bloom path is slower: median 1.11 / 1.15 / 1.28× the exact filter's latency for V1 at bs 1 / 16 / 64 and 1.20 / 1.59 / 1.83× for V2 (NUMBERS A2 legs, same process). Compared only with LiNR's exact filter, never with SilverTorch's bloom | `linr_bloom_fp.csv`, `h2h` records |
 
 ### SilverTorch: the adapted code and Meta's code as published
 
