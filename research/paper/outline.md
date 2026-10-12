@@ -73,7 +73,7 @@ Every number in the paper comes from one of four sources, all citable
 
 The tables and figures are built by
 [`build_results.py`](../artifacts/results-draft/build_results.py) into Hub
-`artifacts/results-draft/20261012` (manifest `73d3c2ed…`); the file names
+`artifacts/results-draft/20261013` (manifest `6e39fd90…`); the file names
 below (`c1_crossover.csv` …) are its outputs, and the
 [results draft](results.md) states them in prose. The final tables are
 regenerated from the last full rerun (roadmap FULL-RERUN), which also

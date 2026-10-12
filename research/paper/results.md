@@ -47,7 +47,7 @@ LiNR V1 to V3, which we implemented from the paper.
   adapted code refuses the full-mask path), and C7 from the adaptation's gate
   grid. No Triton SilverTorch record is a source.
 - **The script:** [`build_results.py`](../artifacts/results-draft/build_results.py)
-  writes every table and figure to Hub `artifacts/results-draft/20261012`
+  writes every table and figure to Hub `artifacts/results-draft/20261013`
   ([hub-index](../artifacts/hub-index.md)).
 
 All latencies are per batch, CUDA-graph mode, median. "Recall" is **Our recall@k** is fidelity to exact search: per query, the share of the exact filtered top-k (the k items with the highest inner product over the whole catalogue, computed in fp32 under the same filter) that the method returns, averaged over queries.
@@ -110,8 +110,9 @@ quarter of the lists.
 
 ### At the paper's production setting (24 probes)
 
-Table: `at24.csv`. At 24 probes SilverTorch is always faster: 0.02-0.99 of
-LiNR at bs 1 and 0.02-0.395 at bs 16. But its recall there is far from exact:
+Table: `at24.csv`. At 24 probes SilverTorch is faster in 344 of 345 cells:
+0.016-1.06 of LiNR at bs 1 (the exception is LAION 1 M bloom `c0_domain`,
+against exact LiNR) and 0.02-0.395 at bs 16. But its recall there is far from exact:
 0.42-0.89 on Goodreads, 0.68-0.85 on arXiv, 0.39-0.81 on PubMed,
 0.33-0.57 on LAION, and 0.05 on the most selective synthetic filter.
 24 probes is a reference row, not a comparison at equal quality.
