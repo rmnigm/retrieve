@@ -1,0 +1,39 @@
+# k-means test (user 2026-10-13): laion30m, k-means++ init at 10 and 25 iterations against ours (random init, 10 iterations:
+# A1-laion30m's clause and B1's bloom recheck-off curves, rechecked in km-sanity). The adapted SilverTorch along A1's probe grid to the 25 % cap,
+# exact clause and bloom with the recheck off. Run through bench_cached.py (centroids from fit_centroids.py).
+km-sanity:                     # random-10 reuse check: must equal A1-laion30m (clause) and B1 / A1-bloom (bloom, recheck off) exactly
+  perf: false
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [clause, bloom]
+  ks: [100, 1000]
+  batch_sizes: [16]
+  seeds: [0]
+  sweeps: {laion30m: [c0_domain]}
+  arms:
+    - {algo: silvertorch, backends: [official-fork], filter_kinds: [clause], build: {n_lists: [4096], kmeans_init: [random], n_iter: [10]}, query: {n_probe: [64, 1024]}}
+    - {algo: silvertorch, backends: [official-fork], filter_kinds: [bloom], build: {n_lists: [4096], kmeans_init: [random], n_iter: [10], recheck: [false]}, query: {n_probe: [64, 1024]}}
+km-4096:
+  perf: false
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [clause, bloom]
+  ks: [100, 1000]
+  batch_sizes: [16]
+  seeds: [0]
+  sweeps: {laion30m: [c0_domain, tags4]}
+  arms:
+    - {algo: silvertorch, backends: [official-fork], filter_kinds: [clause], build: {n_lists: [4096], kmeans_init: [kmeans++], n_iter: [10, 25]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
+    - {algo: silvertorch, backends: [official-fork], filter_kinds: [bloom], build: {n_lists: [4096], kmeans_init: [kmeans++], n_iter: [10, 25], recheck: [false]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
+km-16384:
+  perf: false
+  datasets: [laion30m]
+  dims: [256]
+  filter_kinds: [clause, bloom]
+  ks: [100, 1000]
+  batch_sizes: [16]
+  seeds: [0]
+  sweeps: {laion30m: [c0_domain, tags4]}
+  arms:
+    - {algo: silvertorch, backends: [official-fork], filter_kinds: [clause], build: {n_lists: [16384], kmeans_init: [kmeans++], n_iter: [10, 25]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]}}
+    - {algo: silvertorch, backends: [official-fork], filter_kinds: [bloom], build: {n_lists: [16384], kmeans_init: [kmeans++], n_iter: [10, 25], recheck: [false]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]}}
