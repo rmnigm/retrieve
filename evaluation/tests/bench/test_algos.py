@@ -70,6 +70,22 @@ def test_bloom_path_on_triton_is_the_layers_own():
     assert A.official_config("silvertorch", "bloom", "triton", {"bloom_path": "full"}) is None
 
 
+def test_official_config_recheck():
+    """META-FORK C13 as a build param: the study runs the bloom with ``recheck`` false."""
+    cfg = A.official_config("silvertorch", "bloom", "official-fork", {"recheck": False})
+    assert cfg.recheck_for("official-fork") is False
+    off = A.official_config("silvertorch", "bloom", "official", {"recheck": False})
+    assert off.recheck is False
+    for algo, fk, backend, value in [
+        ("silvertorch", "bloom", "official", True),
+        ("silvertorch", "clause", "official-fork", False),
+        ("silvertorch", "bloom", "triton", False),
+        ("linr_v1_filter_mask", "bloom", "triton", False),
+    ]:
+        with pytest.raises(ValueError, match="recheck applies to"):
+            A.official_config(algo, fk, backend, {"recheck": value})
+
+
 ST_PARAMS = {"n_lists": 8, "n_probe": 4, "n_iter": 2}
 BLOOM = {"m_bits": 64, "k_hash": 2}
 
