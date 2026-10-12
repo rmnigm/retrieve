@@ -82,8 +82,8 @@ GPU work runs on RunPod pods launched with
    `query_attrs_narrow` min = 0), `goodreads-work-id` with its checkpoints
    ([checkpoints](../docs/system/checkpoints.md#what-the-harness-reads)). PubMed is not on the Hub: rebuild the 10 M slice with
    `eval-data pubmed` ([datasets](../docs/system/datasets.md#pubmed); ~1 h
-   download-bound `convert`, 17 GB), or copy it pod to pod. YFCC-10M is public: `eval-data yfcc
-   all` ([datasets](../docs/system/datasets.md#yfcc10m), ~12.5 GB with the raw).
+   download-bound `convert`, 17 GB), or copy it pod to pod; for the final run use the un-normalised (dot-product) build.
+   Yambda-500M: `eval-data fetch` of its checkpoints plus the trainer `test.parquet`.
    LAION 30 M is not on the Hub either (pod-to-pod copies). The synth attrs
    are built on the pod (*eval-data synth-filter*, CPU, deterministic from
    its seed).
@@ -231,6 +231,10 @@ as published vs adapted (its scorer column from `kernel_scopes`: H-SCOPE's
 one GPU test on a real call is left). The paper's tables are regenerated
 from this parquet; a number that moves against RESULTS' is reported, not
 smoothed.
+
+User rulings it carries (2026-10-12/13, [decisions](decisions.md)): YFCC is out of the study; PubMed is rerun on the
+dot-product build (MedCPT as trained) with the query's own document excluded (self-match), and gains a synthetic-filter leg;
+SilverTorch runs its bloom filter with no recheck in timed code, fp16 score path (Meta's default); LiNR runs the exact filter only.
 
 Before it starts: the scripts under `research/artifacts/` still name
 old pre-split artifact paths (about 127, from the wiki split): fix them; seeds and
