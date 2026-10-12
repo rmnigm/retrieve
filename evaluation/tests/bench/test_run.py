@@ -807,6 +807,87 @@ def test_frac_windows_below_the_devices_max_clock(tiny_configs, tmp_path, monkey
     assert bench.clock_histogram([]) == "sm_mhz under load (n=0): no samples"
 
 
+def test_clocks_drift_is_load_against_the_first_load_and_each_flag_makes_unstable(
+    tiny_configs, tmp_path, monkeypatch
+):
+    """``env.clocks_drift`` compares every under-load ``sm_mhz`` with the process's first
+    under-load sample, never with the idle one (210 MHz here, far below any load sample), and a
+    record is ``unstable`` when its clocks drift or when a perf entry's spread is unstable:
+    either alone suffices."""
+    real = bench.clocks
+    monkeypatch.setattr(bench, "clocks", lambda: {**real(), "sm_mhz": 210.0})
+    cells = iter([([1410.0], False), ([1410.0, 1395.0], True), ([1305.0], False)])
+
+    def fake_perf(modules, *a, **k):
+        loads, spread = next(cells)
+        e = [{"k": 2, "bs": 1, "mode": "eager", "sm_mhz": s, "unstable": spread} for s in loads]
+        return [(e, []) for _ in modules]
+
+    monkeypatch.setattr(run, "perf", fake_perf)
+    jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"])
+    run.run(jobs, out_dir=tmp_path, skip_quality=True, **KW)
+    recs = _records(tmp_path / "e2e" / "tiny-d64.jsonl")
+    assert [r["env"]["sm_mhz_idle"] for r in recs] == [210.0] * 3
+    assert [r["env"]["sm_mhz_load"] for r in recs] == [1410.0, 1402.5, 1305.0]
+    assert [r["env"]["clocks_drift"] for r in recs] == [False, False, True]  # 1395 is 1.1 % off
+    assert [r["unstable"] for r in recs] == [False, True, True]
+
+
+def test_a_perf_oom_fails_its_interleaved_group_and_resume_reruns_only_that_group(
+    tiny_configs, tmp_path, monkeypatch
+):
+    """An OOM in an interleaved group's perf phase (V1 + V2 at bs 64 on 30 M, bs 256 on PubMed)
+    records every arm of that group ``failed`` at stage ``perf`` and is not sticky, so the next
+    group still runs; ``--resume`` then re-runs just the failed group, both arms together."""
+    ds, suites = tiny_configs
+    jobs = load_matrix(ds, suites, "pair")
+    real, calls = run.perf, []
+
+    def oom_second_group(*a, **k):
+        calls.append(None)
+        if len(calls) == 2:
+            raise torch.OutOfMemoryError("CUDA out of memory. Tried to allocate 14.31 GiB")
+        return real(*a, **k)
+
+    monkeypatch.setattr(run, "perf", oom_second_group)
+    out = tmp_path / "results"
+    assert dict(run.run(jobs, out_dir=out, interleave=True, **KW)) == {"ok": 6, "failed": 2}
+    assert len(calls) == 4
+    path = out / "pair" / "tiny-d64.jsonl"
+    failed = [r for r in _records(path) if r["status"] == "failed"]
+    assert [r["algo"] for r in failed] == ["linr_v1_filter_mask", "linr_v2"]
+    assert all(r["stage"] == "perf" and "out of memory" in r["error"] for r in failed)
+    assert len({(r["seed"], r["sweep"]) for r in failed}) == 1
+    monkeypatch.setattr(run, "perf", real)
+    assert dict(run.run(jobs, out_dir=out, interleave=True, **KW)) == {"ok": 2, "skipped": 6}
+    rerun = _records(path)[-2:]
+    assert [(r["algo"], r["seed"], r["sweep"], r["status"]) for r in rerun] == [
+        (r["algo"], r["seed"], r["sweep"], "ok") for r in failed
+    ]
+
+
+def test_parity_spill_holds_int32_ids_past_2_24_and_flags_a_shape_mismatch(tiny_configs, tmp_path):
+    """The spill stores ids as int32 and scores as float32 (half the bytes of int64 / float64),
+    which keeps 30 M-row ids exact where a float32 id would round, ``-1`` pads and ``-inf``
+    scores included; a later backend with another top-k width records ``shape_mismatch`` and
+    is never compared."""
+    job = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0"])[0]
+    ids = torch.tensor([[29_999_999, 16_777_217, -1], [2**24 + 1, 0, -1]])
+    sc = torch.tensor([[0.9, 0.5, -math.inf], [0.8, 0.1, -math.inf]])
+    assert run.parity(tmp_path, job, {}, ids, sc, [2, 3])["parity"] == "reference"
+    (spill,) = (tmp_path / "_parity").rglob("*.npz")
+    z = np.load(spill)
+    assert z["ids"].dtype == np.int32 and z["scores"].dtype == np.float32
+    assert torch.equal(torch.from_numpy(z["ids"]).long(), ids)
+    other = dataclasses.replace(job, backend="official")
+    out = run.parity(tmp_path, other, {}, ids, sc, [2, 3])
+    assert out["parity"] == "vs_torch" and out["jaccard_vs_first@3"] == 1.0
+    assert out["score_max_abs_diff"] == 0.0
+    out = run.parity(tmp_path, other, {}, ids[:, :2], sc[:, :2], [2])
+    assert out["parity"] == "shape_mismatch:(2, 3)!=(2, 2)"
+    assert out["jaccard_vs_first@2"] is None and out["score_max_abs_diff"] is None
+
+
 def test_score_path_arms_share_the_triton_parity_spill(tiny_configs, tmp_path):
     """h2h's official arms carry ``score_path`` in ``params``; the spill hash drops it with
     ``backend``, so they compare against the triton reference instead of each writing one."""

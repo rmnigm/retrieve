@@ -368,7 +368,7 @@ def test_global_quantization_chunked_is_bit_exact_and_bounded():
     half the fp32 table, where the one-shot formula held two fp32 copies of it."""
 
     n = 12 * quantize._CODE_CHUNK_ROWS + 123  # the chunk temporaries are fixed; the table grows
-    embs = torch.randn(n, 128, device="cuda") * 3
+    embs = make_index(n, 128, normalized=False) * 3
     abs_max = embs.abs().amax().clamp(min=1e-8)
     expected = (embs / abs_max * 127.0).round().clamp(-128, 127).to(torch.int8)
 
@@ -389,8 +389,9 @@ def test_global_quantization_in_row_order_equals_permuted_codes():
     """``rows=perm`` writes the codes of ``embs[perm]`` directly (SilverTorch's cluster-sorted
     table without a second int8 copy): equal to quantize-then-permute, same scale."""
 
-    embs = torch.randn(2 * quantize._CODE_CHUNK_ROWS + 5, 64, device="cuda")
-    perm = torch.randperm(embs.shape[0], device="cuda")
+    embs = make_index(2 * quantize._CODE_CHUNK_ROWS + 5, 64, normalized=False)
+    g = torch.Generator(device="cuda").manual_seed(0)
+    perm = torch.randperm(embs.shape[0], generator=g, device="cuda")
     codes, scale = quantize.quantize_int8_global(embs)
     sorted_codes, sorted_scale = quantize.quantize_int8_global(embs, rows=perm)
     assert torch.equal(sorted_codes, codes[perm]) and sorted_scale == scale
@@ -404,7 +405,7 @@ def test_one_bit_build_chunked_is_bit_exact_and_bounded(method):
     held about seven full-corpus copies."""
 
     n = 12 * quantize._CODE_CHUNK_ROWS + 123
-    embs = torch.randn(n, 128, device="cuda")
+    embs = make_index(n, 128, normalized=False)
     torch.cuda.synchronize()
     base = torch.cuda.memory_allocated()
     torch.cuda.reset_peak_memory_stats()

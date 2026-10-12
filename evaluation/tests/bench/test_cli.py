@@ -160,6 +160,41 @@ def test_campaign_restart_keeps_the_groups_parity_spill(tiny_configs, tmp_path, 
     assert not (out / "_parity").exists()
 
 
+def test_a_failed_cell_exits_1_and_campaign_exits_with_its_worst_child(
+    tiny_configs, tmp_path, monkeypatch
+):
+    """A driver chains legs on the exit code (and ``uv run`` masks it, roadmap NUMBERS), so
+    ``bench run`` exits 1 when any cell failed, after the loop wrote every record, and
+    ``bench campaign`` exits with its worst child's code while still running every child."""
+    ds, _ = tiny_configs
+    out = tmp_path / "results"
+    common = ["--config-dir", str(ds.parent), "--out", str(out)]
+    real = run.algos.build
+
+    def flaky(algo, *a, **kw):
+        if algo == "linr_v3":
+            raise RuntimeError("CUDA out of memory. Tried to allocate 14.31 GiB")
+        return real(algo, *a, **kw)
+
+    monkeypatch.setattr(run.algos, "build", flaky)
+    r = CliRunner().invoke(
+        cli.main,
+        ["run", "--dataset", "tiny", "--suite", "e2e", "--sweep", "c0", "--skip-perf", *common],
+    )
+    assert r.exit_code == 1, r.output
+    recs = _records(out / "e2e" / "tiny-d64.jsonl")
+    assert [(r["algo"], r["status"]) for r in recs] == [
+        ("linr_v1_filter_mask", "partial"), ("linr_v3", "failed")
+    ]  # fmt: skip
+    rcs = iter([1, 0])
+    monkeypatch.setattr(cli.subprocess, "call", lambda cmd, **kw: next(rcs))
+    r = CliRunner().invoke(cli.main, ["campaign", "--suite", "e2e", *common])
+    assert r.exit_code == 1, r.output
+    summary = (out / "_logs" / "campaign.log").read_text()
+    assert summary.count(" rc=1 ") == 1 and summary.count(" rc=0 ") == 1
+    assert "finished children=2 rc=1" in summary
+
+
 def test_zero_cells_is_an_error(tiny_configs, tmp_path):
     """A ``--sweep`` typo (or a ``--dataset`` that matches nothing) must not exit 0 with an
     empty summary; nothing is run or written."""
