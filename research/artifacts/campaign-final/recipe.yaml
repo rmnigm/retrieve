@@ -4,6 +4,8 @@
 # inductor dir, VENV = the leg venv; commands call $VENV/bin/python directly, since `uv run` masks bench's exit code),
 # cores pinned NUMA-local; then its upload_command (records the manifest sha; MANIFEST n_records must equal
 # expect.records: the suite file also holds the GPU's earlier legs of that suite and dataset) and a hub-index row.
+# A record of the pass as run, not FULL-RERUN's input: its yfcc10m / yfcc10m-synth legs, SilverTorch triton / torch arms and
+# LiNR bloom cells are out of the study (user, 2026-10-13) and are not in evaluation/config/suites.yaml any more.
 recipe: 1
 tag: campaign-v2.12                     # commit b70907ef15daceaa12c7202a7f74e01f4cfcd53d; `git rev-parse campaign-v2.12:retrieve/src/retrieve` = library_tree
 library_tree: e16512f5b379fc7e2d370cc8a57c68b9854a06d7   # every final record's env.code_version

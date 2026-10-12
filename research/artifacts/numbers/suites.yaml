@@ -6,10 +6,8 @@ n-linr-bs64:
   - goodreads
   - arxiv
   - pubmed
-  - yfcc10m
   dims:
   - 128
-  - 192
   - 768
   filter_kinds:
   - clause
@@ -34,8 +32,6 @@ n-linr-bs64:
     - all5
     - c0_mesh
     - c3_journal_reverse
-    yfcc10m:
-    - tags_and
   arms:
   - algo: linr_v1_filter_mask
     backends:
@@ -94,10 +90,8 @@ n-v3pool:
   - goodreads
   - arxiv
   - pubmed
-  - yfcc10m
   dims:
   - 128
-  - 192
   - 768
   filter_kinds:
   - clause
@@ -122,8 +116,6 @@ n-v3pool:
     - all5
     - c0_mesh
     - c3_journal_reverse
-    yfcc10m:
-    - tags_and
   arms:
   - algo: linr_v3
     backends:
@@ -243,10 +235,8 @@ n-linr-k2048:
     - triton
 n-k1000-check:
   datasets:
-  - yfcc10m
   - laion30m
   dims:
-  - 192
   - 256
   filter_kinds:
   - clause
@@ -257,22 +247,9 @@ n-k1000-check:
   seeds:
   - 0
   sweeps:
-    yfcc10m:
-    - tags_and
     laion30m:
     - tags4
   arms:
-  - algo: silvertorch
-    backends:
-    - official-fork
-    build:
-      n_lists:
-      - 4096
-    query:
-      n_probe:
-      - 1024
-    datasets:
-      yfcc10m: {}
   - algo: silvertorch
     backends:
     - official-fork
@@ -283,18 +260,6 @@ n-k1000-check:
       n_probe:
       - 2048
       - 4096
-  - algo: silvertorch
-    backends:
-    - official-fork
-    build:
-      n_lists:
-      - 65536
-    query:
-      n_probe:
-      - 8192
-      - 16384
-    datasets:
-      yfcc10m: {}
 n-curve-q:
   perf: false
   datasets:
@@ -308,15 +273,12 @@ n-curve-q:
   - laion3m
   - laion3m-synth
   - pubmed
-  - yfcc10m
-  - yfcc10m-synth
   - laion10m
   - laion10m-synth
   - laion30m
   - laion30m-synth
   dims:
   - 128
-  - 192
   - 256
   - 768
   filter_kinds:
@@ -372,13 +334,6 @@ n-curve-q:
     - all5
     - c0_mesh
     - c3_journal_reverse
-    yfcc10m:
-    - tags_and
-    yfcc10m-synth:
-    - p0001
-    - p001
-    - p01
-    - p1
     laion10m:
     - c0_domain
     - tags4
@@ -501,15 +456,6 @@ n-curve-q:
         - c0_mesh
         - c3_journal_reverse
         - all5
-      yfcc10m:
-        sweeps:
-        - tags_and
-      yfcc10m-synth:
-        sweeps:
-        - p0001
-        - p001
-        - p01
-        - p1
       laion10m:
         sweeps:
         - c0_domain
@@ -554,15 +500,6 @@ n-curve-q:
         - c0_mesh
         - c3_journal_reverse
         - all5
-      yfcc10m:
-        sweeps:
-        - tags_and
-      yfcc10m-synth:
-        sweeps:
-        - p0001
-        - p001
-        - p01
-        - p1
       laion10m:
         sweeps:
         - c0_domain
@@ -607,15 +544,6 @@ n-curve-q:
         - c0_mesh
         - c3_journal_reverse
         - all5
-      yfcc10m:
-        sweeps:
-        - tags_and
-      yfcc10m-synth:
-        sweeps:
-        - p0001
-        - p001
-        - p01
-        - p1
       laion10m:
         sweeps:
         - c0_domain
@@ -1236,87 +1164,6 @@ n-curve-q-laion-small-wide:
       - 4096
     datasets:
       laion3m: {}
-n-ceil-laion-small:
-  perf: false
-  datasets:
-  - laion1m
-  - laion3m
-  dims:
-  - 256
-  filter_kinds:
-  - clause
-  ks:
-  - 100
-  batch_sizes:
-  - 16
-  seeds:
-  - 0
-  sweeps:
-    laion1m:
-    - c0_domain
-    - tags4
-    laion3m:
-    - c0_domain
-    - tags4
-  arms:
-  - algo: silvertorch
-    backends:
-    - triton
-    build:
-      n_lists:
-      - 8192
-    query:
-      n_probe:
-      - 2048
-    datasets:
-      laion1m: {}
-  - algo: silvertorch
-    backends:
-    - triton
-    build:
-      n_lists:
-      - 16384
-    query:
-      n_probe:
-      - 4096
-    datasets:
-      laion3m: {}
-n-curve-q-yfcc-cap:
-  perf: false
-  datasets:
-  - yfcc10m
-  - yfcc10m-synth
-  dims:
-  - 192
-  filter_kinds:
-  - clause
-  ks:
-  - 100
-  - 1000
-  batch_sizes:
-  - 16
-  seeds:
-  - 0
-  sweeps:
-    yfcc10m:
-    - tags_and
-    yfcc10m-synth:
-    - p0001
-    - p001
-    - p01
-    - p1
-  arms:
-  - algo: silvertorch
-    backends:
-    - official-fork
-    filter_kinds:
-    - clause
-    build:
-      n_lists:
-      - 16384
-    query:
-      n_probe:
-      - 4096
 n-bloomwidth:
   perf: false
   datasets:

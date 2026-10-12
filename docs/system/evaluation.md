@@ -409,7 +409,7 @@ resolves at each of its dims.
 suite and dataset the campaign drew claims from, the scratch suites it ran folded in, the arms it never needed dropped.
 Seed 0 everywhere; seeds `{0, 1, 2}` in `filter`, the T2 headline whose confidence intervals rest on them, and in the `seeds-*` suites (C1's crossover cells, C7's 30 M bs 64 cell, all three seeds on one box) (the
 interleaved rounds are the timing repeats elsewhere). Batch sizes are `{1, 16}` (bs 64 only in `codesign-laion30m`,
-`c7-scorepath`, `nsweep-codesign`, `seeds-c7` and `tune-timed`) and ks `{100, 1000}` or a subset. Every SilverTorch cell scans at most a quarter of the
+`c7-scorepath`, `nsweep-codesign` and `seeds-c7`) and ks `{100, 1000}` or a subset. Every SilverTorch cell scans at most a quarter of the
 lists (`n_probe` ≤ `n_lists` / 4, user), and its `n_lists` / `n_probe` come from the tune ([IVF tuning](#ivf-tuning)).
 No LiNR V4 and no openalex (`config/openalex.yaml` and its ETL are backlog). Official SilverTorch runs only `none` /
 `bloom` cells: its clause cells timed our `pack_mask` adapter. The official clause path stays in `PATHS` and the library,
@@ -420,31 +420,28 @@ so the old records still read. There is no unfiltered `quality` suite ([decision
 
 | suite | datasets | arms | feeds |
 |---|---|---|---|
-| `filter` | goodreads, arxiv, pubmed, three kept sweeps each; seeds 0-2 | V1, V2, V3 (pool 5000) triton; `silvertorch` triton clause + bloom and official bloom at the dataset's tuned `n_lists` and `n_probe` {24, n95}; PubMed (0.95 out of reach) at 4096 × {24, 512, 1024} plus `all5` at 16384 / 2048 and `c3_journal_reverse` at 65536 / 1024 (their tuned points); `postfilter` alpha {1, 8} | T2, C6, C7 |
-| `deep` | goodreads, arxiv, pubmed, kept sweeps; the exact V1 / V2 references come from `filter` | `silvertorch` triton clause + bloom along `n_probe` {8 … `n_lists` / 4} at the tuned `n_lists` (goodreads 4096, arxiv 2048), and official bloom along the same curve on goodreads / arxiv, interleaved with triton by backend; PubMed clause at the 21 points of its timed Pareto fronts (n_lists 1024-65536 per sweep) | F3, C6, C7 |
-| `synth` | goodreads-, arxiv-synth (uniform) and arxiv-corr-synth (cluster-correlated, `c001` `c003` `c01`, arxiv-synth's `n_lists` so the two curves pair) ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton clause at every rate (goodreads-synth ten, arxiv-synth nine: C1); `silvertorch` triton clause `n_probe` {24, 64, 256, 1024} (arxiv-synth / corr {24, 64, 256, 512}, the cap); triton + official bloom 24 on arxiv-synth `p001`, `p1`; V3 `candidate_pool_frac` {0.01, 0.05} and `postfilter` {1, 8} on goodreads-synth's first seven rates and arxiv-corr-synth; V2 torch eager and compiled on goodreads-synth `p001 p01 p1`. k 1000 is dropped where N·p < 4000; yfcc10m-synth at k 100 | F1, F2, C1, C2, C6, C7 |
+| `filter` | goodreads, arxiv, pubmed, three kept sweeps each; seeds 0-2 | V1, V2, V3 (pool 5000) triton and `postfilter` alpha {1, 8}, clause only; official bloom at the dataset's tuned `n_lists` and `n_probe` {24, n95} (PubMed 4096 × {24, 512, 1024}) | T2, C6 |
+| `deep` | goodreads, arxiv, kept bloom sweeps; the exact V1 / V2 references come from `filter` | official bloom along `n_probe` {8 … `n_lists` / 4} at the tuned `n_lists` (goodreads 4096, arxiv 2048) | F3 |
+| `synth` | goodreads-, arxiv-synth (uniform) and arxiv-corr-synth (cluster-correlated, `c001` `c003` `c01`) ([datasets](datasets.md#synthetic-selectivity-attrs)) | V1, V2 triton clause at every rate (goodreads-synth ten, arxiv-synth nine: C1); official bloom 24 on arxiv-synth `p001`, `p1`; V3 `candidate_pool_frac` {0.01, 0.05} and `postfilter` {1, 8} on goodreads-synth's first seven rates and arxiv-corr-synth; V2 torch eager and compiled on goodreads-synth `p001 p01 p1`; LiNR and the postfilter clause only. k 1000 is dropped where N·p < 4000 | F1, C1, C2 |
 | `c3` | goodreads-, arxiv-, laion30m-synth `p001 p01 p1`, clause, k 100 | V1 triton vs torch.compile max-autotune; plain torch on goodreads-synth | C3 across N |
 | `c3-real` | the `filter` kept sweeps of goodreads, arxiv, pubmed | V1 triton vs torch.compile max-autotune | C3 on real filters |
-| `codesign` | arxiv (kept sweeps), goodreads `c0_genre` | official and triton bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
-| `codesign-pubmed` | pubmed `c0_mesh` | triton bloom `bloom_path` {partial, full}, `n_lists` 4096 × `n_probe` {24, 1024} | C5 at 10 M |
-| `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | `silvertorch` triton bloom `m_bits` {64 … 2048} × `k_hash` {3, 5}; official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
-| `bloomwidth-timed` | the same | the same widths at `k_hash` 5 (official: its one width), k 100, bs 16, timed | F4a |
-| `v3bits` | goodreads-synth (its first 7 rates), goodreads (`filter`'s kept sweeps); pubmed d768 (kept sweeps, clause only) | V3 triton, `candidate_pool_frac` {0.01, 0.05}; goodreads `k_bits` {64, 128}, clause + bloom; pubmed `k_bits` {256, 768} (256 divides 768 and sits below LiNR's 512; 768 is the default), clause only | C2 |
-| `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | `silvertorch` triton and official with `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}; one interleave group of the three arms; run with `--interleave --profile` | T3, C7 |
-| `laion30m`, `laion30m-bs1`, `laion30m-synth` | laion30m d256 `c0_domain`, `tags4` (pass ≈ 0.0095 / 0.0027); laion30m-synth nine rates (V1 / V2; SilverTorch on the last four); seed 0, k 100, clause | V1, V2 triton (bs 16; synth bs 1 + 16); `silvertorch` triton `n_lists` 16384, `n_probe` {24, 64, 256, 1024, 4096} (4096 = the cap = tags4's n95), bs 16 and (`laion30m-bs1`) bs 1; synth {24, 256, 1024}. One V1 + V2 process per sweep (68 GB) | C1 / C6 at 30 M |
-| `laion30m-x` | laion30m `c0_domain`, `tags4`, bs 1 + 16 | V2 + `silvertorch` 16384 / 4096 interleaved in one process (`--algo linr_v2 --algo silvertorch --interleave`), then V1 alone | C6: IVF vs exact at 0.95 |
-| `codesign-laion30m` | laion30m `c0_domain`, `tags4`, bs 16 + 64, eager | official and triton bloom `bloom_path` {partial, full}, 16384 × {32, 128} | C5 at 30 M |
-| `c7-scorepath` | laion30m `c0_domain`, `tags4`, bs 16 + 64 | triton vs official at `score_path` {fp16, int32}, bloom partial, 16384 × {32, 128}, one group per sweep; `--interleave --profile` | C7 at 30 M |
-| `nsweep-synth` | laion1m-, laion3m-, laion10m-, laion30m-synth and arxiv-synth at d256, nine rates; seeded nested LAION subsets ([datasets](datasets.md#subsets)) | V1, V2 triton interleaved (C1); `silvertorch` triton on `p01 p02 p05 p1` at `n_lists` scaled to the 30 M list size (512 / 2048 / 4096 / 16384; arXiv 2048) × `n_probe` {24, L/64, L/16} | C1 / C6 across N at fixed d (the extension) |
-| `nsweep` | laion1m / 3m / 10m / 30m `c0_domain`, `tags4`, bs 1 + 16 | V1, V2 and `silvertorch` (`n_probe` {24, L/64, L/16, L/4}) in one interleave group per sweep (IVF vs exact); at 30 M V2 + SilverTorch, then V1 alone (memory) | C6 across N |
-| `nsweep-codesign` | laion1m / 3m / 10m / 30m `c0_domain`, `tags4`, bs 16 + 64, eager | official and triton bloom `bloom_path` {partial, full} × `n_probe` {32, 128} at the scaled `n_lists` | C5 across N |
-| `seeds-c1`, `seeds-c1-laion30m`, `seeds-c7` | the C1 crossover cells at bs 16 (arxiv-synth d128 p 0.2 / 0.5, laion30m-synth p 0.1 / 0.2) and C7's 30 M cell at bs 64 | seeds {0, 1, 2} on one box (pod b), so each CI is over one box; own suites, so these keys are separate from the main grid's seed-0 cells of `synth` / `laion30m-synth` / `c7-scorepath` | the CIs those cells carry |
-| `tune-q` | the six benches (goodreads, arxiv, pubmed, goodreads-, arxiv- and arxiv-corr-synth) | `silvertorch` triton, `n_lists` per bench × `n_probe` {8 … 4096} ≤ `n_lists` / 4, clause + bloom, quality only | the tune (n_lists, n95) |
-| `tune-timed` | the same | the timed Pareto candidates (`research/artifacts/campaign-final/tune-timed-candidates.json`), one arm per (dataset, sweep, kind, n_lists), bs {1, 16, 64} | the tune's fronts, F3 |
+| `codesign` | arxiv (kept sweeps), goodreads `c0_genre` | official bloom, `bloom_path` {partial, full} × `n_probe` {8, 32, 128}, `n_lists` arxiv 1664 / goodreads 1024, k 100 | F4b, C5 |
+| `bloomwidth` | goodreads `c0_genre`, arxiv kept, pubmed `c0_mesh` | official bloom `k_hash` {3, 5} (its width is `OfficialConfig.b_multiplier`, not `m_bits`); bs 16; quality only (`perf: false`) | F4a, C4 |
+| `bloomwidth-timed` | the same | official bloom at `k_hash` 5, k 100, bs 16, timed | F4a |
+| `v3bits` | goodreads-synth (its first 7 rates), goodreads (`filter`'s kept sweeps); pubmed d768 (kept sweeps) | V3 triton, `candidate_pool_frac` {0.01, 0.05}, clause only; goodreads `k_bits` {64, 128}; pubmed `k_bits` {256, 768} (256 divides 768 and sits below LiNR's 512; 768 is the default) | C2 |
+| `h2h` | goodreads `c0_genre`, arxiv `c0_maincat`, `none` + `bloom`, d128 | official `score_path` {fp16, int32}, `n_probe` 24, bs {1, 16}, k {100, 1000}; one interleave group per cell; run with `--interleave --profile` | T3 (published side) |
+| `laion30m`, `laion30m-synth` | laion30m d256 `c0_domain`, `tags4` (pass ≈ 0.0095 / 0.0027); laion30m-synth nine rates; seed 0, k 100, clause | V1, V2 triton (bs 16; synth bs 1 + 16). One V1 + V2 process per sweep (68 GB) | C1 at 30 M |
+| `laion30m-x` | laion30m `c0_domain`, `tags4`, bs 1 + 16 | V2, then V1 alone | the exact side at 30 M |
+| `codesign-laion30m` | laion30m `c0_domain`, `tags4`, bs 16 + 64, eager | official bloom `bloom_path` {partial, full}, 16384 × {32, 128} | C5 at 30 M |
+| `c7-scorepath` | laion30m `c0_domain`, `tags4`, bs 16 + 64 | official at `score_path` {fp16, int32}, bloom partial, 16384 × {32, 128}, one group per sweep; `--interleave --profile` | T3 at 30 M |
+| `nsweep-synth` | laion1m-, laion3m-, laion10m-, laion30m-synth and arxiv-synth at d256, nine rates; seeded nested LAION subsets ([datasets](datasets.md#subsets)) | V1, V2 triton interleaved | C1 across N at fixed d (the extension) |
+| `nsweep` | laion1m / 3m / 10m / 30m `c0_domain`, `tags4`, bs 1 + 16 | V1, V2 in one interleave group per sweep; at 30 M V2, then V1 alone (memory) | the exact side across N |
+| `nsweep-codesign` | laion1m / 3m / 10m / 30m `c0_domain`, `tags4`, bs 16 + 64, eager | official bloom `bloom_path` {partial, full} × `n_probe` {32, 128} at the scaled `n_lists` | C5 across N |
+| `seeds-c1`, `seeds-c1-laion30m`, `seeds-c7` | the C1 crossover cells at bs 16 (arxiv-synth d128 p 0.2 / 0.5, laion30m-synth p 0.1 / 0.2) and the 30 M score-path cell at bs 64 | seeds {0, 1, 2} on one box (pod b), so each CI is over one box; own suites, so these keys are separate from the main grid's seed-0 cells of `synth` / `laion30m-synth` / `c7-scorepath` | the CIs those cells carry |
 
-`tune-q` and `tune-timed` are generated by
-[`research/artifacts/campaign-final/build_tune.py`](../../research/artifacts/campaign-final/build_tune.py) and pasted into
-`suites.yaml`.
+No suite runs SilverTorch's `triton` / `torch` backends, LiNR (or the postfilter) on a bloom filter, or YFCC: they are out
+of the study ([decisions](../../research/decisions.md#goal-and-scheduling)). The adapted SilverTorch (`official-fork`)
+runs from the NUMBERS suites ([`research/artifacts/numbers/`](../../research/artifacts/numbers/README.md)).
 
 ### IVF tuning
 
@@ -468,20 +465,14 @@ explicitly (user, 2026-10-08). A slot left `{}` runs at the library default `n_l
 `n_probe` 24 only. n95 / `n_lists` depends on the pass rate as well as N: goodreads `c0_genre`
 (0.33) needs `n_lists` / 64, and PubMed `all5` (0.018) needs more than `n_lists` / 16.
 
-The per-bench tune (night-queue item 8; `tune-q` / `tune-timed` in the final grid) supersedes IVF-TUNE's single slot where
-it measured a front: PubMed's timed fronts at v2.11 (`campaign-v2.11/pubmed-tune-timed`) have no single best `n_lists`
-(low pass rates fastest at 4096-16384, `c3_journal_reverse` at 65536), so PubMed's `filter` adds each sweep's tuned point
-and its `deep` runs the front points themselves.
+The per-bench tune (night-queue item 8) ran on our Triton SilverTorch, which is out of the study; its suites (`tune-q`,
+`tune-timed`) are gone from `suites.yaml`, and the adapted code's `n_lists` sweep is NUMBERS'.
 
-`codesign` is the S9 ablation of the bloom path, on both backends.
-- **official:** `partial` (fused partial masks over the probed clusters,
-  the library default, which every `filter` / `deep` official cell runs
-  with the key absent) against `full` (a full-N bool mask, then IVF).
-- **triton** (C5-OURS): our fused scorer against `bloom_full_mask`, then
-  the same scorer. This separates the co-design idea from Meta's
-  implementation of it.
+`codesign` is the S9 ablation of the bloom path on Meta's code as published: `partial` (fused partial masks over the
+probed clusters, the library default, which every `filter` / `deep` official cell runs with the key absent) against
+`full` (a full-N bool mask, then IVF).
 
-`--interleave` pairs partial and full of one backend per group. Every
+`--interleave` pairs partial and full per group. Every
 cell carries `bloom_path` in `params`, so no key collides with the
 `filter` / `deep` cells; latency and `peak_fwd_mib` are the compared fields.
 `bloomwidth` declares `perf: false`: `load_matrix` sets
