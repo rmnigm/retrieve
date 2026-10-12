@@ -603,13 +603,15 @@ def test_codesign_and_bloomwidth_suites():
 
 
 # G-key: resume keys of cells that exist before and after the redesign, as today's code
-# (b96e1f2) computed them. Old records must keep matching (docs/system/evaluation.md § Resume).
+# (b96e1f2) computed them. Old records must keep matching (docs/system/evaluation.md § Resume),
+# except the filter cells of self_match datasets, which gained ``self_excluded`` on purpose
+# (docs/system/evaluation.md § Self-match).
 OLD_KEYS = [
-    ("filter", "arxiv", '{"algo":"linr_v3","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{},"seed":1,"suite":"filter","sweep":"all4"}'),  # noqa: E501
+    ("filter", "arxiv", '{"algo":"linr_v3","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{},"seed":1,"self_excluded":true,"suite":"filter","sweep":"all4"}'),  # noqa: E501
     ("filter", "goodreads", '{"algo":"postfilter","backend":"torch","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{"alpha":8},"seed":0,"suite":"filter","sweep":"c1_lang_reverse"}'),  # noqa: E501
     ("filter", "goodreads", '{"algo":"linr_v1_filter_mask","backend":"triton","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{},"seed":2,"suite":"filter","sweep":"all4"}'),  # noqa: E501
-    ("filter", "pubmed", '{"algo":"linr_v2","backend":"triton","code_version":"CV","dataset":"pubmed","dim":768,"filter_kind":"clause","inputs":"content_d768","params":{},"seed":0,"suite":"filter","sweep":"all5"}'),  # noqa: E501
-    ("codesign", "arxiv", '{"algo":"silvertorch","backend":"official","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{"bloom_path":"full","n_lists":1664,"n_probe":32},"seed":0,"suite":"codesign","sweep":"c3_nversions"}'),  # noqa: E501
+    ("filter", "pubmed", '{"algo":"linr_v2","backend":"triton","code_version":"CV","dataset":"pubmed","dim":768,"filter_kind":"clause","inputs":"content_d768","params":{},"seed":0,"self_excluded":true,"suite":"filter","sweep":"all5"}'),  # noqa: E501
+    ("codesign", "arxiv", '{"algo":"silvertorch","backend":"official","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{"bloom_path":"full","n_lists":1664,"n_probe":32},"seed":0,"self_excluded":true,"suite":"codesign","sweep":"c3_nversions"}'),  # noqa: E501
 ]  # fmt: skip
 
 

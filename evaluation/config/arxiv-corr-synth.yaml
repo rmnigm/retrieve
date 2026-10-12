@@ -7,6 +7,7 @@ data_dir: data/arxiv-papers
 content_dir: {128: content_d128}   # relative to data_dir
 dims: [128]
 users_limit: 10000
+self_match: true                          # queries are catalogue items (docs/system/evaluation.md § Self-match)
 filters:
   attrs: item_attrs_corr.pt             # relative to data_dir
   query_attrs: query_attrs_corr.pt

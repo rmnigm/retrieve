@@ -103,8 +103,11 @@ def test_a_pre_h2_text_record_keeps_the_key_a_run_computes_today():
         sweeps=["c0_maincat"], seeds=[0],
     )  # fmt: skip
     assert job.key()["inputs"] == "content_d128"
+    # arxiv is self_match: today's key adds ``self_excluded``, so the D1 record never resumes it
+    today = job.key()
+    assert today.pop("self_excluded") is True
     assert records.record_key(D1_ARXIV) == records.resume_key(
-        job.key(), D1_ARXIV["env"]["code_version"]
+        today, D1_ARXIV["env"]["code_version"]
     )
 
 

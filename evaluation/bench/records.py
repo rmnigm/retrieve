@@ -75,7 +75,8 @@ def inputs_of(rec: dict[str, Any]) -> str:
 
 
 def key_block(rec: dict[str, Any]) -> dict[str, Any]:
-    return {k: inputs_of(rec) if k == "inputs" else rec[k] for k in KEY_FIELDS}
+    key = {k: inputs_of(rec) if k == "inputs" else rec[k] for k in KEY_FIELDS}
+    return {**key, "self_excluded": True} if rec.get("self_excluded") else key
 
 
 def resume_key(key: dict[str, Any], code_version: str) -> str:

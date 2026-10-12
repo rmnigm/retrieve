@@ -27,7 +27,7 @@ from torch import nn
 
 from bench import algos, inputs, measure, oracle, records
 from bench.config import QUERY_PARAMS, Dataset, Job, interleave_units, shared_key
-from bench.metrics import accumulate, accumulator, finalize, jaccard_at_k
+from bench.metrics import accumulate, accumulator, drop_self, finalize, jaccard_at_k
 from eval_datasets.layout import atomic_write
 
 MODES = ("eager", "graph")
@@ -82,7 +82,10 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
     quality pass scores: ``keep`` (not skip-masked), ``oracle_rows`` (kept and ≥ 1
     survivor), ``heldout_rows`` (kept, ≥ 1 target and,
     on filter cells, ``target_in_filter``), and ``n_targets_in_filter`` — the held-out
-    targets those rows score (on filter cells only the ones the exact mask admits)."""
+    targets those rows score (on filter cells only the ones the exact mask admits).
+    ``oracle_topk`` is the ``[U, k_max]`` list oracle recall ranks against; on a
+    ``job.self_excluded`` cell it is the k_max + 1 blob without each row's ``self_ids``
+    (the held-out target, the query's own item)."""
     fk, n = job.filter_kind, inp["n_queries"]
     qa_s, skip = inputs.sweep_qa(inp["qa"], job.clauses)
     filters = inputs.build_filters(fk, inp, [job.backend], bloom=job.bloom)
@@ -91,11 +94,19 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
     heldout = keep & (inp["n_targets"] > 0)
     blob = None
     bloom_fp = None
-    oracle_rows = None
+    oracle_rows = oracle_topk = self_ids = self_top1 = None
     if fk != "none":
         blob = sweep_oracle(job, inp, k_max, device, filters, qa_s, skip, warn_missing=True)
         heldout &= blob["target_in_filter"]
-        oracle_rows = keep & (blob["topk"][:, 0] != -1)
+        oracle_topk = blob["topk"]
+        if job.self_excluded:
+            self_ids = inp["targets"][:, 0]
+            reach = keep & blob["target_in_filter"]
+            self_top1 = (oracle_topk[reach, 0] == self_ids[reach]).double().mean().item()
+            logger.info("  self-match {}/{}: oracle top-1 is the query's own item on {:.4f} of "
+                        "{} rows", job.dataset, job.sweep, self_top1, int(reach.sum()))  # fmt: skip
+            oracle_topk = drop_self(oracle_topk, self_ids)
+        oracle_rows = keep & (oracle_topk[:, 0] != -1)
         if fk == "bloom":
             assert filter_mod is not None
             counts = oracle.pass_counts(filter_mod, qa_s, skip, inp["n_items"], device=device)
@@ -106,6 +117,9 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
         "skip": skip,
         "filter_mod": filter_mod,
         "blob": blob,
+        "oracle_topk": oracle_topk,
+        "self_ids": self_ids,
+        "self_top1_share": self_top1,
         "keep": keep,
         "oracle_rows": oracle_rows,
         "heldout_rows": heldout,
@@ -128,11 +142,12 @@ def sweep_oracle(
 ) -> dict[str, Any]:
     """The blob v4 of a filter job's sweep at ``k_max`` (``oracle.load_or_build``) under the
     exact mask (``inputs.exact_filter`` over the cell's standalone ``filters``); ``qa_s, skip``
-    are the sweep's ``inputs.sweep_qa``."""
+    are the sweep's ``inputs.sweep_qa``. A self-excluded cell's blob is at ``k_max + 1``, cut
+    from a wider cached one when there is one."""
     return oracle.load_or_build(
         job.data.gt_dir,
         job.sweep,
-        k_max,
+        k_max + job.self_excluded,
         item_embs=inp["item_embs"],
         queries=inp["queries"],
         targets=inp["targets"],
@@ -143,6 +158,7 @@ def sweep_oracle(
         attrs_digest=inp["attrs_digest"],
         device=device,
         warn_missing=warn_missing,
+        slice_wider=job.self_excluded,
     )
 
 
@@ -233,9 +249,12 @@ def quality(
     are held at ``QUALITY_CPU_THREADS`` for the loop. Returns the metrics, the per-query
     recall ``{recall_oracle@k, heldout_recall@k: [n_kept] float32}`` (NaN on a row the side
     does not score; the values the sums add up) and the ``[n_kept, k_max]`` ids / scores (for
-    the parity spill)."""
+    the parity spill). With ``assets["self_ids"]`` the module returns ``k_max + 1`` and the
+    oracle side scores it without the row's own item; the held-out side keeps the first
+    ``k_max`` (its target *is* that item)."""
     rows = assets["keep"].nonzero().reshape(-1)
     blob = assets["blob"]
+    k_out = max(ks)
     acc_o = accumulator(list(ks), device) if blob is not None else None
     acc_h = accumulator(list(ks), device)
     nan = partial(torch.full, (rows.numel(),), float("nan"), device=device)
@@ -247,7 +266,8 @@ def quality(
     queries = inp["queries"].to(device)
     qa_all = assets["qa_s"].to(device) if assets["qa_s"] is not None else None
     targets = inp["targets"].to(device)
-    topk = blob["topk"].to(device) if blob is not None else None
+    topk = assets["oracle_topk"].to(device) if blob is not None else None
+    self_ids = assets["self_ids"].to(device) if assets["self_ids"] is not None else None
     in_filter = blob["targets_in_filter"].to(device) if blob is not None else None
     threads = torch.get_num_threads()
     torch.set_num_threads(QUALITY_CPU_THREADS)
@@ -258,6 +278,8 @@ def quality(
             q = queries.index_select(0, sel_d)
             qa = qa_all.index_select(0, sel_d) if qa_all is not None else None
             ids, scores = module(q, filter_arg(module, qa))
+            ids_o = drop_self(ids, self_ids.index_select(0, sel_d)) if self_ids is not None else ids
+            ids, scores = ids[:, :k_out], scores[:, :k_out]
             # a compiled arm's outputs live in CUDA-graph buffers the next call overwrites
             ids_all.append(ids.clone())
             sc_all.append(scores.float().clone())
@@ -267,7 +289,7 @@ def quality(
                     idx = m.nonzero().reshape(-1).to(device, non_blocking=True)
                     r = accumulate(
                         acc_o,
-                        ids.index_select(0, idx),
+                        ids_o.index_select(0, idx),
                         topk.index_select(0, sel_d.index_select(0, idx)),
                         ranked=True,
                     )
@@ -288,6 +310,9 @@ def quality(
     out: dict[str, Any] = {"heldout": finalize(acc_h)}
     if acc_o is not None:
         out["oracle"] = finalize(acc_o)
+    if self_ids is not None:
+        out["self_excluded"] = True
+        out["self_top1_share"] = assets["self_top1_share"]
     ids_t = torch.cat(ids_all) if ids_all else torch.empty(0, 0, dtype=torch.long)
     sc_t = torch.cat(sc_all) if sc_all else torch.empty(0, 0)
     return out, {n: t.cpu() for n, t in per_q.items()}, ids_t, sc_t
@@ -834,16 +859,18 @@ def run(
                         rec["quality_source"] = {"seed": src["seed"], "code_version": code_version}
                     elif not skip_quality:
                         stage = "quality"
-                        module.k = k_max
+                        extra = int(job.self_excluded)  # the own item, dropped in scoring
+                        module.k = k_max + extra
                         qual, per_q, ids, scores = quality(module, inp, assets, job.ks, device)
                         if job.algo in PER_K_QUALITY:
                             for k in (k for k in job.ks if k != k_max):
-                                module.k = int(k)
+                                module.k = int(k) + extra
                                 qk, pk, _, _ = quality(module, inp, assets, [k], device)
                                 for part, m in qk.items():
-                                    qual[part].update(m)
+                                    if isinstance(m, dict):
+                                        qual[part].update(m)
                                 per_q.update(pk)
-                            module.k = k_max
+                        module.k = k_max
                         qual.update(parity(out_dir, job, params, ids, scores, job.ks))
                         del ids, scores
                         rec["quality"] = qual

@@ -263,6 +263,9 @@ Hub revision `pinkmeme/eval-arxiv-papers@354e6937` (`item_attrs_narrow.pt` sha25
 Arxiv has **no user sequences**, so `prep` does no interactions and no
 time-split — it emits `item_id_map.json`, `papers.parquet`, and a
 sampled `heldout.parquet`. Held-out items stay in the index.
+Each query is therefore its own target's text, so `config/arxiv.yaml` (and arxiv-synth,
+arxiv-corr-synth, which share these queries) sets `self_match: true`: oracle metrics drop the
+query's own item ([evaluation § Self-match](evaluation.md#self-match)).
 
 The two encode steps use the same model (`nomic-embed-text-v1.5`,
 Matryoshka-truncated) with **different prefixes** — `"search_document: "`
@@ -607,8 +610,9 @@ not published). Pods that need it copy it; a rebuild with this code is **not byt
 sources:
 
 - `heldout` — item-as-query: a held-out article's title (from the article
-  parquets) is the query and the article itself is the single relevant item.
-  Always available. **Every held-out row keeps its query row** — an article
+  parquets) is the query and the article itself is the single relevant item;
+  the article stays in the catalogue, so `config/pubmed.yaml` sets `self_match: true`
+  ([evaluation § Self-match](evaluation.md#self-match)). Always available. **Every held-out row keeps its query row** — an article
   without a title gets an empty string, it is not dropped — so
   `query_emb.pt` stays aligned 1:1 with `heldout.parquet` and
   `eval_split.parquet`, which `bench check` verifies.

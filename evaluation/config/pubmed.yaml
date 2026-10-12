@@ -8,6 +8,7 @@ data_dir: data/pubmed-medcpt
 content_dir: content_d768                 # relative to data_dir
 dims: [768]
 users_limit: 10000
+self_match: true                          # queries are catalogue items (docs/system/evaluation.md § Self-match)
 filters:
   attrs: item_attrs_narrow.pt
   reverse: clause_is_reverse_narrow.pt
