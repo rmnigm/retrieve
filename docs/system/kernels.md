@@ -16,9 +16,8 @@ There is no CUDA C++ or CuTe DSL backend ([Deleted backends](#deleted-backends))
 
 **What ships** ([decisions](../../research/decisions.md#goal-and-scheduling)): LiNR's
 and the filters' Triton kernels, and SilverTorch on Meta's official code,
-adapted (`backend="official-fork"`, the `official-fork/` workspace member,
-on `dev/meta-fork` until its review accepts; its section joins this page
-with that merge). The [SilverTorch kernels](#silvertorch-kernels) below
+adapted (`backend="official-fork"`, the `official-fork/` workspace member;
+its section is [below](#official-fork--our-fork-of-metas-ops)). The [SilverTorch kernels](#silvertorch-kernels) below
 (`codesigned_probe_score*`, `bloom_full_mask` and their reference twins)
 are our Triton reimplementation: in this tree, not in the paper or the
 release, deleted at roadmap TRITON-ST-DELETE. The

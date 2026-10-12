@@ -28,12 +28,12 @@
 | item | value |
 |---|---|
 | GPU | one **NVIDIA A100-SXM4-80GB** |
-| driver | **580.159.04** |
+| driver | per pod, recorded per record in `env.driver` (570.195.03 on pod 1) |
 | GPUs used per measurement | **1** — every number in this work is single-GPU. Neither paper's multi-GPU configuration is reproduced |
 | SM clock control | **none available.** `nvidia-smi -lgc` is denied in this container and there is no `sudo`; the tool reports *"The current user does not have permission to change clocks"* |
 | observed SM clocks | 210 MHz idle, **1410 MHz under load** (the boost clock), on every under-load sample of every run recorded to date |
 | profiling | `ncu` is **blocked** in the container; per-kernel attribution comes from `torch.profiler` |
-| exclusivity | the GPU is **shared**. GPU work is serialized with an advisory lock (`flock /workspace/gpu.lock`), one job at a time, but jobs from different workers alternate on the lock — see §4 |
+| exclusivity | **one job per GPU** (AGENTS.md rule 1): each job has its own `CUDA_VISIBLE_DEVICES`, inductor cache and results path, under a per-GPU lock; the measurement legs ran on three A100-SXM4-80GB pods (pod 1, pod b, pod d with two GPUs) — see §4 |
 | storage | `/workspace` is a 100 GB quota volume; virtual environments live on the local disk under `/venvs/` |
 
 The box is a rental and has been re-provisioned during this project: the working
@@ -50,8 +50,7 @@ datasets.
 | OS / Python | Linux, **Python 3.11** |
 | PyTorch | **2.10.0+cu128** (the wheel is built against CUDA 12.8) |
 | Triton | **3.6.0** |
-| CUDA toolkit on the box | **12.4 only** — `nvcc 12.4` at `/usr/local/cuda`. There is no 12.8 toolkit here; earlier notes claiming a 12.8 build are stale and were corrected on 2026-09-15 |
-| toolkit / wheel mismatch | building a C++/CUDA extension with nvcc 12.4 against the cu128 wheel is a **minor** version mismatch: torch warns (`cpp_extension.py: minor version mismatch`) and builds. It raises only on a *major* mismatch, and every CUDA test the upstream package ships passes on the resulting extension |
+| CUDA toolkit | **12.8** (`nvcc` 12.8.93) from the pod image ([`infra/runpod/Dockerfile`](../../infra/runpod/Dockerfile)), matching the wheel's CUDA 12.8 |
 | Meta's SilverTorch, adapted (the study's arm) | the `official-fork/` workspace member (`silvertorch-fork`, ops `torch.ops.stfork.*`): Meta's code vendored at `21aa35e`, synced to upstream `22c2007`, with our changes listed in its `CHANGES.md`; built `-O3`; review ACCEPT at `1f6fed8` ([meta-published-vs-adapted](meta-published-vs-adapted.md)) |
 | Meta's SilverTorch as published (the parity reference) | `silvertorch` **1.0.0** at commit **`21aa35e28b6dd9a91e9ee35efb0857715e86bda7`** (`meta-recsys/silvertorch`, Apache-2.0), installed through the repo's `official` extra. Build: **2 m 17 s**, `ninja`, 10 translation units, `TORCH_CUDA_ARCH_LIST="8.0"`, `MAX_JOBS=32` |
 | linter | `ruff` **0.15.6** |
@@ -87,8 +86,11 @@ cell, and each record's `env` block is the authority for that cell
 | `perf[].*` | per `(k, batch, mode)`: median / p20 / p80 / IQR, outlier counts, window spread, `peak_fwd_mib`, `load: closed_loop`, and for a non-capturable path a null median with a `reason` |
 | `schema_version` | **3** since H2 (the key block gained `inputs`, the encoder / embedding identity); **2** since C5 |
 
-Seeds: **`seed: 0` only** in everything measured to date. Multi-seed cells and
-confidence intervals are roadmap **D1** (paper gap G4) and are listed in §6.
+Seeds: the final pass runs seed 0 everywhere and seeds {0, 1, 2} on the
+`filter` cells a confidence interval rests on
+([decisions](../decisions.md#campaign-v2-user-2026-10-08)); the NUMBERS legs
+run seed 0. Seeds and confidence intervals everywhere come with the final full
+rerun (§6).
 
 ## 4. Timing: which clock estimator, and why the question is not pedantic
 

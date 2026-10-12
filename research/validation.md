@@ -29,7 +29,7 @@ adapted backend's own gates are the META-FORK section (review ACCEPT at
 [Meta as published vs adapted](paper/meta-published-vs-adapted.md).
 
 **Environment all rows were measured on**: A100-SXM4-80GB, torch
-2.10.0+cu128, triton 3.6.0, nvcc 12.4 (CUDA 12.8 runtime), Python 3.11,
+2.10.0+cu128, triton 3.6.0, CUDA 12.8 toolkit (nvcc 12.8.93, the pod image), Python 3.11,
 Meta's `silvertorch` at the pinned commit. SM clocks cannot be locked; the
 sampled clock under load was 1410 MHz. A new pod is a new environment:
 rerun the library suite before trusting any row on it.
