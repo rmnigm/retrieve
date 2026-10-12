@@ -1935,6 +1935,38 @@ n-timed-d768:
     backends:
     - official-fork
     filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+        query:
+          n_probe:
+          - 2048
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+        query:
+          n_probe:
+          - 8192
+          - 16384
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
     - clause
     build:
       n_lists:
@@ -1947,6 +1979,36 @@ n-timed-d768:
           n_probe:
           - 24
           - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      pubmed:
+        sweeps:
+        - all5
+        query:
+          n_probe:
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      pubmed:
+        sweeps:
+        - all5
+        query:
+          n_probe:
+          - 16384
   - algo: silvertorch
     backends:
     - official-fork
@@ -1971,6 +2033,38 @@ n-timed-d768:
     - clause
     build:
       n_lists:
+      - 16384
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+        query:
+          n_probe:
+          - 2048
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+        query:
+          n_probe:
+          - 8192
+          - 16384
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
       - 4096
     datasets:
       pubmed:
@@ -1981,6 +2075,38 @@ n-timed-d768:
           - 24
           - 256
           - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      pubmed:
+        sweeps:
+        - c3_journal_reverse
+        query:
+          n_probe:
+          - 512
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      pubmed:
+        sweeps:
+        - c3_journal_reverse
+        query:
+          n_probe:
+          - 1024
+          - 16384
 n-st-k2048-d768:
   datasets:
   - pubmed
@@ -2027,3 +2153,35 @@ n-st-k2048-d768:
           - 24
           - 512
           - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 16384
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+        query:
+          n_probe:
+          - 2048
+          - 4096
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 65536
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+        query:
+          n_probe:
+          - 8192
+          - 16384
