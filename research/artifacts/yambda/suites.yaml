@@ -1,0 +1,15 @@
+# A5-yambda (user ruling 2026-10-13 item 4): our top-k recall against end-task (held-out) recall on Yambda-500m, unfiltered.
+# The adapted SilverTorch along n_probe (8 to n_lists / 4) at three n_lists, plus the exact scan as the held-out reference.
+a5-yambda:
+  perf: false
+  datasets: [yambda-500m]
+  dims: [64, 128, 256]
+  filter_kinds: [none]
+  ks: [100, 1000]
+  batch_sizes: [16]
+  seeds: [0]
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
+    - {algo: silvertorch, backends: [official-fork], build: {n_lists: [1024]}, query: {n_probe: [8, 16, 32, 64, 128, 256]}}
+    - {algo: silvertorch, backends: [official-fork], build: {n_lists: [4096]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
+    - {algo: silvertorch, backends: [official-fork], build: {n_lists: [16384]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]}}
