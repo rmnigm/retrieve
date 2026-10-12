@@ -591,7 +591,7 @@ live in `test_official.py`.
   the full chain (`set_item_attributes` with reverse flags, `set_backend`,
   `set_device`); `build()` with neither or both sources raises.
 - `kmeans_init` (`TestKMeansInit`): the default is `"random"`
-  ([decisions](../decisions.md#library): the recorded numbers depend on it); a `"kmeans++"` module builds on
+  ([decisions](../../research/decisions.md#library): the recorded numbers depend on it); a `"kmeans++"` module builds on
   `torch` / `triton`, its centroids differ from random init's, are
   reproducible, and `build_timings["kmeans_s"] > 0`.
 - Edge case: `n_lists = N` (one item per cluster) → recall ≥ 0.85 at
@@ -669,7 +669,7 @@ chunk-tail size, on CUDA and CPU. And `init="kmeans++"`:
 ### [`test_boundary.py`](../../retrieve/tests/correctness/test_boundary.py)
 
 The library side of the library-harness boundary
-([decisions](../decisions.md#harness)), for
+([decisions](../../research/decisions.md#harness)), for
 each of `SilverTorch` (`filter_mode="exact"`), `LiNRV1`–`LiNRV3` (with an
 `ExactAttributeFilter`) on a tiny index, on `triton` and `torch`:
 

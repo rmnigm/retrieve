@@ -310,7 +310,7 @@ bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with 
 # V-LAION30 (claims first, user 2026-10-10): how SilverTorch / V1 / V2 scale to 30 M under a site
 # filter (c0_domain, pass 5e-7 ... 4e-2) and a bucket conjunction (tags4). Seed 0, k 100, clause only;
 # SilverTorch alone at bs 1 (laion30m-bs1). n_lists ~ 4 sqrt(30 M) to a power of two; n_probe
-# under the 25 % cap, set from the calibration cells (docs/validation.md, laion30m); 64 and 256 complete the 30 M probe curve (F3).
+# under the 25 % cap, set from the calibration cells (research/validation.md, laion30m); 64 and 256 complete the 30 M probe curve (F3).
 laion30m:
   datasets: [laion30m]
   dims: [256]
@@ -544,7 +544,7 @@ seeds-c7:                      # c7-scorepath's cell at bs 64, seeds 0-2 (run wi
     - {algo: silvertorch, backends: [triton], build: {bloom_path: [partial], n_lists: [16384]}, query: {n_probe: [32, 128]}}
     - {algo: silvertorch, backends: [official], build: {bloom_path: [partial], n_lists: [16384], score_path: [fp16, int32]}, query: {n_probe: [32, 128]}}
 
-# Per-bench SilverTorch tuning, quality only (generated: docs/artifacts/campaign-final/build_tune.py).
+# Per-bench SilverTorch tuning, quality only (generated: research/artifacts/campaign-final/build_tune.py).
 tune-q:
   perf: false
   datasets: [goodreads, goodreads-synth, arxiv, arxiv-synth, arxiv-corr-synth, yfcc10m, yfcc10m-synth, pubmed]
@@ -580,7 +580,7 @@ tune-q:
     - {algo: silvertorch, backends: [triton], build: {n_lists: [65536]}, datasets: {pubmed: {sweeps: [c0_mesh, c3_journal_reverse, all5]}}, filter_kinds: [clause], query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]}}
     - {algo: silvertorch, backends: [triton], build: {n_lists: [65536]}, datasets: {pubmed: {sweeps: [c0_mesh]}}, filter_kinds: [bloom], query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]}}
 
-# The timed Pareto points of the tuning (generated: docs/artifacts/campaign-final/build_tune.py).
+# The timed Pareto points of the tuning (generated: research/artifacts/campaign-final/build_tune.py).
 tune-timed:
   datasets: [arxiv, arxiv-corr-synth, arxiv-synth, goodreads, goodreads-synth, pubmed, yfcc10m, yfcc10m-synth]
   dims: [128, 192, 768]

@@ -1,10 +1,13 @@
 """Report relative markdown links whose target does not exist; in the wiki (AGENTS.md,
-README.md, docs/ minus paper/ and artifacts/) also backticked repo paths that do not exist
-and `bench` / `eval-data` / `train` subcommands the click groups do not define. The command
-table is read from the CLI sources with ast: nothing is imported or run."""
+README.md, docs/, research/ minus paper/, artifacts/ and log.md) also backticked repo paths
+that do not exist and `bench` / `eval-data` / `train` subcommands the click groups do not
+define; and `docs/... § Heading` citations in tracked files whose heading is gone (SCHEMA:
+cited headings are stable). The command table is read from the CLI sources with ast:
+nothing is imported or run."""
 
 import ast
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -12,7 +15,9 @@ ROOT = Path(__file__).resolve().parent.parent
 LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 FENCE = re.compile(r"^\s*```")
 CODE = re.compile(r"`([^`]+)`")
-REPO_PATH = re.compile(r"(?:retrieve|evaluation|scripts|docs)/[\w./-]*")
+REPO_PATH = re.compile(r"(?:retrieve|evaluation|scripts|docs|research)/[\w./-]*")
+SECTION = re.compile(r"((?:docs|research)/[\w/-]+\.md) ?§ ?([^.;:)\"\n,]+)")
+HEADING = re.compile(r"^(?:#+ (.*)|\*\*([^*]+)\*\*)", re.M)
 LINE_SUFFIX = re.compile(r"(#.*|:\d+(-\d+)?)$")
 CLI_CALL = re.compile(r"(?<![\w./-])(bench|eval-data|train) ([a-z][\w-]*)")
 CLIS = {
@@ -77,11 +82,55 @@ def commands(package: Path) -> set[str]:
 
 
 def in_wiki(rel: str) -> bool:
-    if rel == "docs/log.md":  # append-only history: it names what was removed
+    if rel == "research/log.md":  # append-only history: it names what was removed
         return False
     if rel in ("AGENTS.md", "README.md"):
         return True
-    return rel.startswith("docs/") and not rel.startswith(("docs/paper/", "docs/artifacts/"))
+    return rel.startswith(("docs/", "research/")) and not rel.startswith(
+        ("research/paper/", "research/artifacts/")
+    )
+
+
+def _plain(text: str) -> str:
+    return re.sub(r"[`*\"]|\]\([^)]*\)|\[", "", text).strip().lower()
+
+
+def section_citations() -> int:
+    """``§`` citations (code comments, configs, pages) whose heading is gone. A cited
+    section matches a heading, its title before " — " / " (", or a bold paragraph label, by
+    prefix either way (a citation runs on into prose: "§ Bucketing for why ...")."""
+    heads: dict[str, list[str]] = {}
+    bad = 0
+    files = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
+    ).stdout.split()
+    for rel in files:
+        if rel == "research/log.md" or rel.startswith("research/artifacts/"):
+            continue
+        try:
+            text = (ROOT / rel).read_text()
+        except (UnicodeDecodeError, FileNotFoundError):
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            for page, cited in SECTION.findall(line):
+                want = _plain(cited)
+                if not want or want[0].isdigit():  # "§3.4": a numbered section, not a heading
+                    continue
+                if page not in heads:
+                    target = ROOT / page
+                    heads[page] = (
+                        [
+                            t.rstrip(".:")
+                            for a, b in HEADING.findall(target.read_text())
+                            for t in {_plain(a or b), *re.split(r" — | \(", _plain(a or b))[:1]}
+                        ]
+                        if target.exists()
+                        else []
+                    )
+                if not any(h.startswith(want) or want.startswith(h) for h in heads[page] if h):
+                    print(f"SECTION {rel}:{lineno} -> {page} § {cited.strip()}")
+                    bad += 1
+    return bad
 
 
 only = sys.argv[1:]
@@ -136,6 +185,8 @@ for md in sorted(ROOT.rglob("*.md")):
             if not (md.parent / path).exists():
                 print(f"BROKEN {rel}:{lineno} -> {target}")
                 broken += 1
+if not only:
+    broken += section_citations()
 if not only and RUNTIME - runtime_seen:
     print(f"no doc names {sorted(RUNTIME - runtime_seen)}; drop the stale RUNTIME entry")
     broken += 1

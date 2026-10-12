@@ -25,7 +25,7 @@ and `herdr` for remote attach. Every `runpodctl` command prints JSON.
   pre-trusts the checkout.
   It never touches an existing checkout. A headless `herdr server` starts at boot
   (log `/workspace/.pod-home/herdr.log`), so herdr sessions outlive SSH disconnects.
-- Disks follow `docs/system/storage.md`: `/workspace` (slow network volume, survives
+- Disks follow `research/environment/storage.md`: `/workspace` (slow network volume, survives
   restarts) holds only the checkout and `/workspace/.pod-home` (`secrets.env`,
   `gitconfig`, `claude/` which `~/.claude` points at). Everything large and
   regenerable is on the container disk, which a restart wipes: `RETRIEVE_DATA_ROOT=/data`,
@@ -110,7 +110,7 @@ refresh the alias; the herdr machine keeps working through it.
 | `--volume GB` | 30 | pod volume at `/workspace`: checkout and pod state only. Slow network FS. |
 | `--nv ID` | – | attach a network volume instead of `--volume` (pins the pod to its datacenter) |
 
-Datasets go on the container disk, never on `/workspace` (`docs/system/storage.md`:
+Datasets go on the container disk, never on `/workspace` (`research/environment/storage.md`:
 the volume reads at ~52 MB/s). Size `--disk` as base image (~15 GB) + venv (~8 GB) +
 the datasets resident at once + scratch; sizes per dataset are in
 `docs/system/datasets.md` and `storage.md` (e.g. PubMed needs ~111 GB processed plus

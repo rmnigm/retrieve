@@ -4,7 +4,7 @@ GPU retrieval framework for recommender systems (PyTorch + Triton). My master's 
 
 The library half is the package `torchretrieve` (not yet published on PyPI; release is roadmap F4); this repo also holds the training / evaluation harness used in the thesis.
 
-**The study.** A reproducibility study of two industrial GPU retrieval papers: **SilverTorch** (Meta), run as Meta's official SilverTorch code adapted by us (improvements listed in its CHANGES file, each gated bit-exact against the published code), against **LiNR** (LinkedIn) V1–V3, implemented here from the paper's text. Our earlier Triton reimplementation of SilverTorch is not part of the paper or of the released code ([decisions](docs/decisions.md#goal-and-scheduling)).
+**The study.** A reproducibility study of two industrial GPU retrieval papers: **SilverTorch** (Meta), run as Meta's official SilverTorch code adapted by us (improvements listed in its CHANGES file, each gated bit-exact against the published code), against **LiNR** (LinkedIn) V1–V3, implemented here from the paper's text. Our earlier Triton reimplementation of SilverTorch is not part of the paper or of the released code ([decisions](research/decisions.md#goal-and-scheduling)).
 
 ## Layout
 
@@ -17,15 +17,18 @@ A third member, `official-fork/` — Meta's official SilverTorch code, adapted (
 
 Datasets, virtual environments and campaign scratch live *outside* the repo, on
 the GPU pod's container disk (pods are launched with [`infra/runpod/pod.sh`](infra/runpod/pod.sh)) — see [`docs/system/storage.md`](docs/system/storage.md)
-for the paths, the environment variables and the space budget.
+for where the harness looks and the environment variables, and
+[`research/environment/storage.md`](research/environment/storage.md) for the pods' disks and space budget.
 
 ## Install (library only)
 
-If you just want the modules:
+If you just want the modules, once the package is on PyPI (roadmap F4):
 
 ```bash
 pip install torchretrieve
 ```
+
+Until then, install from a clone: `pip install ./retrieve`.
 
 Source-only distribution — Triton kernels JIT-compile on first call. Requires a CUDA-capable GPU. See [`retrieve/README.md`](retrieve/README.md) for the quick example and module list.
 
@@ -56,22 +59,19 @@ The lockfile lives at the root (`uv.lock`); the per-member lockfiles are obsolet
 
 ## Docs
 
-**Documentation** ([`docs/`](docs/index.md)) is a wiki of what is true now:
-[`index.md`](docs/index.md) lists every page and
-[`SCHEMA.md`](docs/SCHEMA.md) its conventions. Start with
-[`roadmap.md`](docs/roadmap.md) (the open work queue, gates and
-dependencies), [`backlog.md`](docs/backlog.md) (known work that is not
-queued), [`decisions.md`](docs/decisions.md) (standing decisions and
-constraints) and [`validation.md`](docs/validation.md) (which gates pass and
-the measured results that stand). Two contracts apply everywhere:
-[`agent-orchestration.md`](docs/contracts/agent-orchestration.md) (one
-orchestrator, constrained workers, which model takes which work, and the
-rule that everything lands on `staging` at `origin`) and
-[`coding-guidelines.md`](docs/contracts/coding-guidelines.md) (thin code, no
-self-compat, no comment slop, and what is deliberately not the goal). Raw
-scripts and outputs behind the numbers are in
-[`docs/artifacts/`](docs/artifacts/). Agents start at
-[`AGENTS.md`](AGENTS.md).
+Two trees, one set of conventions ([`research/SCHEMA.md`](research/SCHEMA.md)):
+
+- **Project documentation** ([`docs/`](docs/index.md)): how the library and the
+  harness work, kept in sync with the code. [`docs/index.md`](docs/index.md)
+  lists every page.
+- **Research wiki** ([`research/`](research/index.md)): the agentic working
+  wiki behind the paper — the work queue ([`roadmap.md`](research/roadmap.md)),
+  standing decisions ([`decisions.md`](research/decisions.md)), what is
+  validated and measured ([`validation.md`](research/validation.md)), the
+  process contracts, the paper drafts ([`research/paper/`](research/paper/))
+  and the raw scripts behind every number
+  ([`research/artifacts/`](research/artifacts/)). Agents start at
+  [`AGENTS.md`](AGENTS.md).
 
 **System design** ([`docs/system/`](docs/system/)) — how the thing works, kept in
 sync with the code:
@@ -83,7 +83,7 @@ sync with the code:
 - [`evaluation.md`](docs/system/evaluation.md) — the benchmark harness.
 - [`datasets.md`](docs/system/datasets.md) — dataset ETL and the SASRec training pipeline.
 - [`checkpoints.md`](docs/system/checkpoints.md) — trained models + HF Hub workflow.
-- [`storage.md`](docs/system/storage.md) — the GPU pods' disks, what may live on each, and the space budget.
+- [`storage.md`](docs/system/storage.md) — where the harness keeps data, results and caches, and its environment variables.
 
 **Library user guide** ([`retrieve/docs/`](retrieve/docs/)) — ships in the sdist,
 written for someone who installed `torchretrieve` and does not have this repo:
@@ -93,6 +93,7 @@ written for someone who installed `torchretrieve` and does not have this repo:
 [indexing-and-ops](retrieve/docs/indexing-and-ops.md),
 [adding-a-dataset](retrieve/docs/adding-a-dataset.md).
 
-**Papers** ([`articles/`](articles/)) — pandoc renderings of the three papers
-this repo reproduces or benchmarks against (SilverTorch, LiNR, Yambda). Frozen
-source material: cited by the docs, never edited.
+**Papers** ([`articles/`](articles/)) — pandoc renderings of the two papers
+this repo reproduces (SilverTorch, LiNR), plus the Yambda benchmark sources the
+`yambda` ETL adapts. Frozen source material: cited by the docs, never edited;
+gitignored, so not in a fresh clone.
