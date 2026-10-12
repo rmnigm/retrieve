@@ -304,17 +304,3 @@ def load_or_build(
     atomic_write(path, lambda fh: torch.save(blob, fh))
     logger.info("  saved oracle → {} (pass_rate={:.4f})", path, blob["pass_rate"])
     return blob
-
-
-__all__ = [
-    "BLOB_VERSION",
-    "ITEM_CHUNK",
-    "attrs_digest",
-    "blob_path",
-    "bloom_fp_rate",
-    "compute",
-    "fingerprint",
-    "load_or_build",
-    "pass_counts",
-    "pass_rate",
-]

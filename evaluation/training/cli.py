@@ -20,5 +20,3 @@ main.add_command(upload_checkpoint, "upload-checkpoint")
 
 if __name__ == "__main__":
     main()
-
-__all__ = ["main"]

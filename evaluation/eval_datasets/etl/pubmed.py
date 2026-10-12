@@ -1386,16 +1386,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-__all__ = [
-    "cap_mesh_by_rarity",
-    "load_mesh_tree_tops",
-    "main",
-    "mesh_category_of",
-    "parse_medline_gz",
-    "parse_mesh_field",
-    "parse_year",
-    "plan_budget",
-    "year_to_bucket",
-]

@@ -280,21 +280,3 @@ def validate_layout(data_dir: Path, content_dir: Path | None = None) -> list[str
             if rows != n_queries:
                 problems.append(f"eval_split rows {rows} != queries {n_queries}")
     return problems
-
-
-__all__ = [
-    "EXPECTED_DOC_PREFIX",
-    "EXPECTED_QUERY_PREFIX",
-    "apply_users_limit",
-    "assert_prefixes",
-    "atomic_write",
-    "check_items_aligned",
-    "drop_legacy_padding_row",
-    "load_item_attrs",
-    "load_query_attrs",
-    "load_sharded",
-    "load_text_items",
-    "load_text_queries",
-    "prefix_problem",
-    "validate_layout",
-]

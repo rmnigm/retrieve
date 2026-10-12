@@ -284,6 +284,3 @@ def ingest_cmd(name: str, **kw) -> None:
         click.echo(f"PROBLEM {p}")
     click.echo(f"{name}: {'ok' if not problems else f'{len(problems)} problem(s)'}")
     raise SystemExit(1 if problems else 0)
-
-
-__all__ = ["ingest", "ingest_cmd", "nearest_items", "parse_clause"]

@@ -320,6 +320,3 @@ def fetch(repo_id, prefix, results) -> None:
             shutil.copyfile(local / f["path"], dst)
     click.echo(f"{man['n_files']} files, {man['n_records']} record(s) from {repo_id}/{prefix} "
                f"-> {results}; " + ("CITABLE" if man["citable"] else "NOT CITABLE"))  # fmt: skip
-
-
-__all__ = ["RESULTS_REPO", "fetch", "files", "manifest", "readme", "upload", "verify"]

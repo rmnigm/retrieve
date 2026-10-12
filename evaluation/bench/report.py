@@ -2122,6 +2122,3 @@ def report(root, out, gate, manifest, only, dim, k, bs, mode, backend, bands) ->
         f"{len(c.written)} artifacts from {c.prov['n_records']} records — "
         + ("CITABLE" if c.prov["citable"] else "NOT CITABLE: " + "; ".join(c.prov["blockers"]))
     )
-
-
-__all__ = ["ARTIFACTS", "generate", "provenance", "report"]

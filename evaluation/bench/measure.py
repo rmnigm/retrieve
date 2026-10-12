@@ -544,29 +544,3 @@ def profile_once(fn: Callable[[], Any], top: int = 8) -> dict[str, Any]:
             "the profiler dropped device activities at the window edges"
         )
     return kernel_summary(events, top)
-
-
-__all__ = [
-    "LIB",
-    "NotCapturable",
-    "clock_histogram",
-    "clock_report",
-    "clocks",
-    "code_version",
-    "files_hash",
-    "graph_callable",
-    "index_bytes",
-    "kernel_scope",
-    "kernel_summary",
-    "latency",
-    "latency_group",
-    "profile_once",
-    "provenance",
-    "repo_dirty",
-    "setup",
-    "smi_device",
-    "stats",
-    "subtree_dirty",
-    "timed_build",
-    "warm_gpu_once",
-]

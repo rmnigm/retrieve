@@ -210,22 +210,3 @@ def aggregate(results_dir: Path, out: Path | None = None) -> Path:
 
 def read_table(path: Path) -> list[dict[str, Any]]:
     return pq.read_table(path).to_pylist()
-
-
-__all__ = [
-    "KEY_FIELDS",
-    "SCHEMA_VERSION",
-    "aggregate",
-    "append_record",
-    "inputs_of",
-    "key_block",
-    "latest",
-    "read_keys",
-    "read_records",
-    "read_table",
-    "record_files",
-    "record_key",
-    "record_path",
-    "resume_key",
-    "samples_path",
-]

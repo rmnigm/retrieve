@@ -71,6 +71,3 @@ def upload_checkpoint(
 
 if __name__ == "__main__":
     upload_checkpoint()
-
-
-__all__ = ["upload_checkpoint"]

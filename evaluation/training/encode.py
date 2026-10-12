@@ -147,12 +147,3 @@ def encode_split(
         atomic_write(cache, lambda fh: torch.save(blob, fh))
         logger.info("wrote {} ({:.2f} GB)", cache, est / 2**30)
     return item_embs, queries, targets, n_targets
-
-
-__all__ = [
-    "D128_DROP05_DEFAULTS",
-    "ENCODE_CACHE",
-    "encode_queries",
-    "encode_split",
-    "load_model_for_eval",
-]

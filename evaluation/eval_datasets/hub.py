@@ -484,24 +484,3 @@ def publish_checkpoint(
         write_card=write_card,
         dry_run=dry_run,
     )
-
-
-__all__ = [
-    "EVAL_REPOS",
-    "RAW_REPOS",
-    "EVAL_IGNORE_PATTERNS",
-    "EPOCH_SNAPSHOT_PATTERN",
-    "data_root",
-    "eval_dir",
-    "ckpt_dir",
-    "raw_dir",
-    "download_eval_dataset",
-    "download_checkpoint",
-    "download_raw",
-    "download_raw_file",
-    "upload_eval_dataset",
-    "upload_checkpoint",
-    "fetch",
-    "publish",
-    "publish_checkpoint",
-]

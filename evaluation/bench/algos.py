@@ -194,22 +194,3 @@ def compile_module(module: nn.Module, mode: str) -> nn.Module:
     cls = type(module)  # SilverTorch's capturable is a read-only property: override per instance
     module.__class__ = type(cls.__name__, (cls,), {"capturable": False})
     return module
-
-
-__all__ = [
-    "ALGOS",
-    "BACKENDS",
-    "BLOOM_DEFAULTS",
-    "DISPATCH",
-    "FILTER_KINDS",
-    "FILTER_MODE",
-    "OFFICIAL_BACKENDS",
-    "PATHS",
-    "SILVERTORCH_DEFAULTS",
-    "build",
-    "build_filter",
-    "compile_module",
-    "filter_backend",
-    "is_valid_combo",
-    "official_config",
-]
