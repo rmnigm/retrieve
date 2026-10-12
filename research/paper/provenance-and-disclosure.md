@@ -35,6 +35,7 @@
 | profiling | `ncu` is **blocked** in the container; per-kernel attribution comes from `torch.profiler` |
 | exclusivity | **one job per GPU** (AGENTS.md rule 1): each job has its own `CUDA_VISIBLE_DEVICES`, inductor cache and results path, under a per-GPU lock; the measurement legs ran on three A100-SXM4-80GB pods (pod 1, pod b, pod d with two GPUs) — see §4 |
 | storage | `/workspace` is a 100 GB quota volume; virtual environments live on the local disk under `/venvs/` |
+| compute (approximate) | final pass 73.5 GPU-h (sized from its records); NUMBERS about 26 GPU-h on pod 1 (its driver log, 48 runs, 2026-10-11/12) plus about 30 GPU-h on pods b and d (the plan's estimate, their logs are on their boxes) |
 
 The box is a rental and has been re-provisioned during this project: the working
 tree, the virtual environments and the staged datasets of the 2026-09-06 session

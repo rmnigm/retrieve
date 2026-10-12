@@ -47,9 +47,11 @@ LiNR V1 to V3, which we implemented from the paper.
   k 100 only.
 - **Claims C1-C6:** LiNR from the final pass plus the LiNR-only NUMBERS legs
   (bs 64 / 256, correlated filters, k 2048, the V3 candidate pool); the
-  SilverTorch probe curves (C6) from the adapted code. C4 and C5 come from
-  Meta's code as published in the final pass (C5 only there: the adapted code
-  refuses the full-mask path), and C7 from the adaptation's gate grid.
+  SilverTorch probe curves, ceiling split and local pass rate (C6) and the bloom
+  widths (C4, NUMBERS A4) from the adapted code. C4's "as published" column and
+  C5 come from Meta's code as published in the final pass (C5 only there: the
+  adapted code refuses the full-mask path), and C7 from the adaptation's gate
+  grid. No Triton SilverTorch record is a source.
 - **The script:** [`build_results.py`](../artifacts/results-draft/build_results.py)
   writes every table and figure to Hub `artifacts/results-draft/20261012`
   ([hub-index](../artifacts/hub-index.md)).
@@ -58,7 +60,8 @@ All latencies are per batch, CUDA-graph mode, median. "Recall" is **Our recall@k
 It is not the papers' end-task recall (held-out interactions or labels
 found); on Goodreads the two move together (Pearson 0.88-0.94 per filter
 over SilverTorch, LiNR V1 / V2 and V3 configurations; once our recall
-reaches 0.90, end-task recall is a median 0.99 of the exact scan's,
+reaches 0.90, end-task recall is 0.93-1.0 of the exact scan's (median 0.99
+over the approximate configurations),
 [validation](../validation.md#numbers-adapted-silvertorch-over-the-study-grid)). "Ratio" is SilverTorch's latency over the
 faster of LiNR V1 and V2 in the same cell: below 1 means SilverTorch wins.
 
@@ -80,7 +83,7 @@ reaches the target. Real filters, exact clause filtering, k 100:
 | LAION 3 M (256) | `tags4` | 8192 / 2048 | 0.50 / 0.43 / 0.66 | not reached (top 0.91) |
 | | `c0_domain` | not reached (top 0.87) | LiNR | LiNR |
 | PubMed (10 M, 768) | `c0_mesh` | 4096 / 512 | 0.41 / 0.27 / 0.34 | not reached (top 0.9499) |
-| | `c3_journal_reverse` | 65536 / 1024 | 0.04 / 0.20 / 0.47 | not reached (top 0.92) |
+| | `c3_journal_reverse` | 65536 / 1024 | 0.045 / 0.20 / 0.47 | not reached (top 0.92) |
 | | `all5` | not reached (top 0.90) | LiNR | LiNR |
 | YFCC (10 M, 192) | `tags_and` | not reached (top 0.72) | LiNR | LiNR |
 | LAION 10 M (256) | `tags4` | 4096 / 1024 or 16384 / 4096 | 0.26 / 0.39 / 0.66 | 0.41 / 0.45 / 0.78 |
@@ -92,14 +95,14 @@ reaches the target. Real filters, exact clause filtering, k 100:
 quarter of the lists.
 
 - **Where SilverTorch reaches the target on a real filter, it is faster than
-  the best exact LiNR at every size**, from 0.8 M to 30 M items: 0.04-0.71 of
+  the best exact LiNR at every size**, from 0.8 M to 30 M items: 0.045-0.71 of
   LiNR's latency at 0.90, at every batch size. At 0.95 it stays faster, but
   its lead shrinks at bs 64 (0.98 on arXiv `c0_maincat`).
 - **Where it cannot reach the target, exact LiNR wins by default.** That is a
   recall ceiling, not a speed loss: LAION `c0_domain` up to 10 M, LAION 1 M
   `tags4`, YFCC, PubMed `all5`, and 0.95 on PubMed. More lists do not lift it
   much: on LAION 1 M / 3 M, 4096-16384 lists end at 0.82-0.91, and fp16
-  scoring would add at most 0.006, so the limit is the IVF partition rather
+  scoring would add at most 0.009, so the limit is the IVF partition rather
   than int8 (C6).
 - **LiNR's faster variant on real filters** is V2 at bs 1 almost everywhere,
   and V1 at bs 16 and 64. PubMed `c3_journal_reverse` (pass rate ≈ 1) is the
@@ -109,7 +112,7 @@ quarter of the lists.
 ### At the paper's production setting (24 probes)
 
 Table: `at24.csv`. At 24 probes SilverTorch is always faster: 0.02-0.99 of
-LiNR at bs 1 and 0.02-0.39 at bs 16. But its recall there is far from exact:
+LiNR at bs 1 and 0.02-0.395 at bs 16. But its recall there is far from exact:
 0.42-0.89 on Goodreads, 0.68-0.85 on arXiv, 0.39-0.81 on PubMed, 0.44 on
 YFCC, 0.33-0.57 on LAION, and 0.05 on the most selective synthetic filter.
 24 probes is a reference row, not a comparison at equal quality.
@@ -149,8 +152,8 @@ Table: `tuned.csv`. Figure: `fig_h2h_synth`. At 0.90, k 100:
 
 Table: `memory.csv`. The adapted code's int8 index is about 70 % of LiNR's
 fp16 index at ≤ 3 M items (arXiv 776 vs 1,095 MiB) and 56 % on PubMed
-(9.0 vs 16.2 GiB). It needs a k-means build: 2-4 s at ≤ 3 M, 29-85 s at
-10 M with 4096 lists, and 24-29 min with 65536 lists at 10-30 M. LiNR builds
+(8.8 vs 15.8 GiB). It needs a k-means build: 2-4 s at ≤ 3 M, 29-85 s at
+10 M with 4096 lists, and 10-29 min with 65536 lists at 10-30 M. LiNR builds
 in about a second.
 
 ## Claim verification
@@ -163,22 +166,29 @@ apart from the head-to-head above. Claims C1-C7 are listed in
 
 | claim | verdict | evidence |
 |---|---|---|
-| C1: V1 beats V2 at high pass rate, V2 wins at low | **reproduced at bs 1, weak at bs 16, gone at bs 64 / 256.** At bs 1, V2 wins below a pass rate of 0.79-0.97 at every N and d, and by 2-5× at 0.001. At bs 16, V2 wins only below about 0.02, by at most 25 %. At bs 64 and 256, V1 is faster on every real filter (V2 1.3-35× slower at bs 64, LAION 2.0-2.2×; at bs 256 V2 times out on PubMed `c3_journal_reverse` / `all5` and YFCC). Correlated filters (arxiv-corr-synth) change nothing: V2 at 0.35-0.41 of V1 at bs 1, 0.92-1.26 at bs 16. At k 2048, V2 wins at bs 1 (0.08-0.77) and at bs 16 only on PubMed | `c1_crossover.csv`, `c1_curves.csv`, `c1_real.csv`, `linr_numbers.csv` |
-| C2: V3 keeping 1 % gives about 10 % at near-parity recall | **not comparable as stated.** LiNR's recall is end-task recall (recall@2000 against its product's relevance labels), and the evaluation protocol is not published in enough detail to rebuild. Under our metric (share of the exact filtered top-k returned), on the real filters a 1 % candidate pool reaches a median recall of 0.89, at 0.83 of V2's latency at bs 16 and 1.08 at bs 1. Parity with the exact scan (0.99) needs a 20 % pool, where V3 is no faster than V2 (1.01 at bs 16, 1.14 at bs 1). Median recall rises with the pool from 0.84 (0.5 %) to 0.99 (20 %) | `c2_v3.csv` |
+| C1: V1 beats V2 at high pass rate, V2 wins at low | **reproduced at bs 1, weak at bs 16, gone at bs 64 / 256.** At bs 1, V2 wins below a pass rate of 0.79-0.97 at every N and d, and by 1.6-5.1× at 0.001. At bs 16, V2 wins only below about 0.02, by at most 25 %. At bs 64 and 256, V1 is faster on every real filter (V2 1.3-35× slower at bs 64, LAION 2.0-2.2×; at bs 256 V2 times out on PubMed `c3_journal_reverse` / `all5` and YFCC). Correlated filters (arxiv-corr-synth) change nothing: V2 at 0.35-0.41 of V1 at bs 1, 0.92-1.26 at bs 16. At k 2048, V2 wins at bs 1 (0.08-0.77) and at bs 16 only on PubMed | `c1_crossover.csv`, `c1_curves.csv`, `c1_real.csv`, `linr_numbers.csv` |
+| C2: V3 keeping 1 % gives about 10 % at near-parity recall | **not comparable as stated.** LiNR's recall is end-task recall (recall@2000 against its product's relevance labels), and the evaluation protocol is not published in enough detail to rebuild. Under our metric (share of the exact filtered top-k returned), on the real filters a 1 % candidate pool reaches a median recall of 0.89, at 0.83 of V2's latency at bs 16 and 1.08 at bs 1. Parity with the exact scan (0.99) needs a 20 % pool, where V3 is no faster than V2 (1.01 at bs 16, 1.14 at bs 1). Median recall rises with the pool from 0.84 (0.5 %) to 0.99 (20 %). On LAION 1-30 M a 1 % pool reaches 0.89 and V3 runs at 1.11× V2 at bs 1 and 0.97× at bs 16; 20 % reaches 0.98 (V2 there from the final pass, not interleaved) | `c2_v3.csv` |
 | C3: the custom filter kernel is about 100× faster than native masking | **direction reproduced, size not.** Eager PyTorch is 1.4-2.0× slower at bs 1 and 5.8-6.8× at bs 16. `torch.compile` max-autotune runs at 0.5-1.06× of Triton at bs 1 (median 0.85-0.96, so mostly faster) and 1.5-4.8× slower at bs 16 | `c3_torch.csv` |
 
 ### SilverTorch: the adapted code and Meta's code as published
 
 | claim | verdict | evidence |
 |---|---|---|
-| C4: bloom false-positive rate about 0.067 at 1024 bits | **ours is lower.** At 1024 bits, 0 false positives on arXiv and Goodreads and 1e-5 on PubMed `c0_mesh` (k_hash 3, Meta's code as published). The adapted code's default bloom adds an exact recheck, so it returns no false positives by construction | `c4_bloom.csv` |
+| C4: bloom false-positive rate about 0.067 at 1024 bits | **ours is lower, and the adapted code removes them.** The adapted code's bloom before its exact recheck (NUMBERS A4): the false-positive rate falls with width, on PubMed `c0_mesh` (k_hash 3) from 2.4 % at 64 bits to 9e-6 at 1024; on arXiv and Goodreads it is 0 from 256 bits. Recall is the same at every width, because the recheck removes every false positive, so the width costs only memory (PubMed index 9.1 GiB at 64 bits, 11.4 at 2048). Meta's code as published, at its own width: 0 on arXiv and Goodreads, 9e-6 on PubMed `c0_mesh` (k_hash 3) | `c4_bloom.csv` |
 | C5: co-design (probe then filter) 1.79-2.15× faster than filter then probe | **Measured on Meta's code as published only:** holds at 30 M (1.07-2.20 at bs 16, 1.69-5.56 at bs 64) and at 10 M bs 64 (1.13-2.35); reversed at 0.8-3 M at bs 1-16 (0.78-0.89). The adapted code refuses the full-mask path by design (K fix 17), so it has no C5 column | `c5_meta.csv` |
-| C6: int8 IVF cannot reach 0.95 recall; selective filters need more probes | **partially, on the adapted code.** At 24 probes recall falls with selectivity (0.93 to 0.05 on goodreads-synth from pass rate 1 to 0.001). With enough probes, 0.95 is reached on Goodreads, arXiv, LAION `tags4` at 10 M and 30 M, and most synthetic filters. It is not reached on LAION `c0_domain` at any size (top 0.85-0.91), PubMed (`c0_mesh` 0.9499, `c3_journal_reverse` 0.92, the int8 ceiling; fp16 0.996) or YFCC (0.72; per-row int8 0.75, fp16 0.97) | `c6_recall.csv`, `c6_ceiling.csv` |
+| C6: int8 IVF cannot reach 0.95 recall; selective filters need more probes | **partially, on the adapted code.** At 24 probes recall falls with selectivity (0.93 to 0.05 on goodreads-synth from pass rate 1 to 0.001), and per query it follows the *local* pass rate (the share of the query's unfiltered top-100 that passes) more than the global one: Spearman 0.24-0.73 against 0.01-0.60 at 32 probes on Goodreads and arXiv, higher in all 45 (filter, probe count) cells. With enough probes, 0.95 is reached on Goodreads, arXiv, LAION `tags4` at 10 M and 30 M, and most synthetic filters. It is not reached on LAION `c0_domain` at any size (top 0.85-0.91), on PubMed (`c0_mesh` 0.9499; `c3_journal_reverse` 0.92, the int8 ceiling, fp16 0.996) or on YFCC (`tags_and` 0.72). The split on the adapted index, over the same probed lists (int8 as shipped / per-row int8 / fp16): yfcc10m-synth at pass rate 1, 4096 lists / 256 probes, 0.53 / 0.75 / 0.97; LAION 1 M / 3 M at most 0.009 from fp16, so there the IVF partition is the limit | `c6_recall.csv`, `c6_ceiling.csv`, `c6_local_pass.csv` |
 | C7 (restated): the adaptation keeps Meta's results and removes its overheads | **ids and scores identical to Meta's code in 1,536 / 1,536 gate cells at ≤ 10 M (30 M in [validation](../validation.md#meta-fork-backendofficial-fork)); eager time 0.12-0.82 of Meta's (median per dataset and filter), at most 1.03.** On the NUMBERS legs, eager and graph return the same ids on all 2,151 adapted cells | `adaptation.csv`, `summary.json` |
 
 The four paper claims tested only by arithmetic or not testable here
 (production pipelines, TCO, A/B tests, scale above our data) are listed in
 [claims](claims.md) and are not repeated here.
+
+## Uncertainty
+
+Every number on this page is seed 0, so it carries no confidence interval
+and no paired test. Seeds and error bars come with the final full rerun
+(user, 2026-10-11); the interleaving (SilverTorch and LiNR in one process per
+cell group) is what keeps the ratios comparable meanwhile.
 
 ## Still open
 

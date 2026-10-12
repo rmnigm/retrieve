@@ -293,6 +293,22 @@ blocks = {
         [16],
         perf=False,
     ),
+    # C4 / F4a on the study's arm (controller c3 ruling 1): the final pass's bloomwidth grid, adapted backend, quality only
+    "n-bloomwidth": suite(
+        ["goodreads", "arxiv", "pubmed"],
+        [
+            {
+                "algo": "silvertorch",
+                "backends": ["official-fork"],
+                "build": {"m_bits": [64, 128, 256, 512, 1024, 2048], "k_hash": [3, 5]},
+            }
+        ],
+        [100, 1000],
+        [16],
+        kinds=("bloom",),
+        perf=False,
+        sw={"goodreads": ["c0_genre"], "arxiv": ["all4", "c0_maincat", "c3_nversions"], "pubmed": ["c0_mesh"]},
+    ),
     "n-curve-q-all": suite(
         WIDE,
         curve_arms(WIDE, wide=None),
