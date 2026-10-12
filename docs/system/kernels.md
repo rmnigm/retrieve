@@ -562,7 +562,7 @@ only storing `-inf`: 913 µs, bound by program count, not bytes
 ([v2-prof](../../research/artifacts/campaign-v2/v2-prof/README.md)). The stride
 does not change which program reduces a lane or how: each lane is still
 one `tl.sum` over D in the same layout, so scores are bit-identical to
-the one-tile grid ([validation](../../research/validation.md#campaign-v2-phase-v-not-yet-validated), "V2 Fix A").
+the one-tile grid ([validation](../../research/validation.md#campaign-v2-phase-v), "V2 Fix A").
 `programs` is a field of the tile config. The default 864 is one wave on
 A100 (108 SMs × 8 resident 8-warp programs); swept over {864, …, 13824},
 it was the best or within 1 % of the best at bs {1, 16}, p {0.001, 0.01, 1},
@@ -1134,7 +1134,7 @@ The scales stay `abs_max / 127.0`: eager PyTorch evaluates a division by a
 Python scalar as a multiply by fp32(1/127), and inductor emits the same multiply,
 so they already agree (a correctly rounded division would not).
 Measured in
-[validation](../../research/validation.md#campaign-v2-phase-v-not-yet-validated), *V-GRAPH-IDS*.
+[validation](../../research/validation.md#campaign-v2-phase-v), *V-GRAPH-IDS*.
 
 ### [`quantize_oporp_1bit`](../../retrieve/src/retrieve/indexing/quantize.py) (`retrieve.indexing`)
 
@@ -1842,7 +1842,7 @@ loads beside the pinned upstream in one process (package `silvertorch_fork`, ops
 `torch.ops.stfork.*`, C++ namespace `st::ops` kept, extensions loaded `RTLD_LOCAL`), Apache-2.0
 with Meta's `LICENSE` and headers and one "Modified by the retrieve authors" line per changed
 file. `CHANGES.md` lists every change; each has its gate row in
-[validation](../../research/validation.md#meta-fork-backendofficial-fork-not-yet-validated).
+[validation](../../research/validation.md#meta-fork-backendofficial-fork).
 `SilverTorch(backend="official-fork")` selects it.
 
 **Forward: one op.** `SilverTorch(backend="official-fork")` runs phase 1 (ours) and then one

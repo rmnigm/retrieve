@@ -1,7 +1,7 @@
 # D3 PubMed `bloomwidth-timed` at campaign-v2.1, and the surprise gate it tripped
 
 Roadmap D3, the PubMed timed piece, on pod `a100-x1-b` (1x A100-SXM4-80GB, GPU 0 shared through `flock`), code_version
-`f01255f1`. State: [validation](../../../validation.md#campaign-v2-phase-v-not-yet-validated). NOT CITABLE until D1-G.
+`f01255f1`. State: [validation](../../../validation.md#campaign-v2-phase-v). NOT CITABLE until D1-G.
 
 | file | what |
 |---|---|

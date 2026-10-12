@@ -83,7 +83,7 @@ validates its own):
 | `"triton"` | fused Triton kernels. The default everywhere. | every module |
 | `"torch"` | pure-torch eager equivalent, same semantics, larger intermediates | every module |
 | `"official"` | Meta's own `meta-recsys/silvertorch` ops (`torch.ops.st.*`) for phases 2+3 — the reference backend; eager-only; needs the `official` extra | **`SilverTorch` only** |
-| `"official-fork"` | our fork of those ops ([`official-fork/`](../../official-fork/CHANGES.md), package `silvertorch_fork`, `torch.ops.stfork.*`) through the same adapter; loads beside `"official"` in one process; CUDA-graph capturable and compilable (META-FORK C4, [validation](../../research/validation.md#meta-fork-backendofficial-fork-not-yet-validated)); needs the `official` extra | **`SilverTorch` only** |
+| `"official-fork"` | our fork of those ops ([`official-fork/`](../../official-fork/CHANGES.md), package `silvertorch_fork`, `torch.ops.stfork.*`) through the same adapter; loads beside `"official"` in one process; CUDA-graph capturable and compilable (META-FORK C4, [validation](../../research/validation.md#meta-fork-backendofficial-fork)); needs the `official` extra | **`SilverTorch` only** |
 
 The `"official"` backend needs an optional extra: `torchretrieve[official]`
 (`uv sync --extra official`) installs Meta's own `meta-recsys/silvertorch`,
