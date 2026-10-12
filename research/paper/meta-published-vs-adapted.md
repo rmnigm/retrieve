@@ -1,18 +1,18 @@
 ---
 title: meta-published-vs-adapted
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-12
 type: comparison
 tags: [paper]
-sources: [official-fork/ (dev/meta-fork), research/validation.md, research/artifacts/hub-index.md, research/paper/reproduction-deviations.md]
+sources: [official-fork/, research/validation.md, research/artifacts/hub-index.md, research/paper/reproduction-deviations.md]
 ---
 
 # Meta's SilverTorch: as published vs adapted
 
-> **Status: NOT CITABLE.** The adapted code is on `dev/meta-fork` and is
-> not reviewed yet (roadmap [META-FORK](../roadmap.md#1-meta-fork-review-accept-tag)).
-> Every state below is a gate result that has not passed review; no number
-> here is paper material (CLAUDE.md rule 2).
+> **Status: NOT CITABLE.** The adapted code passed its review (ACCEPT at
+> `1f6fed8`, tag `campaign-fork`, [validation](../validation.md#meta-fork-backendofficial-fork-not-yet-validated));
+> its numbers stay NOT CITABLE until its NUMBERS legs pass, so no number
+> here is paper material yet (CLAUDE.md rule 2).
 >
 > **What this page is.** The study's SilverTorch arm is Meta's official
 > SilverTorch code, adapted by us ([decisions](../decisions.md#goal-and-scheduling)).
@@ -20,7 +20,7 @@ sources: [official-fork/ (dev/meta-fork), research/validation.md, research/artif
 > and why, grouped by the defect in the published code each change removes,
 > and the parity gate that holds the adapted code to the published code.
 > The per-change list (files, mechanism, commit) has one home,
-> `official-fork/CHANGES.md` on `dev/meta-fork`; it is not restated here.
+> [`official-fork/CHANGES.md`](../../official-fork/CHANGES.md); it is not restated here.
 > Meta's code as published is the reference column of this page, not an arm
 > of the study. The comparison the study makes is SilverTorch (adapted)
 > against LiNR ([claims](claims.md)).
@@ -89,10 +89,10 @@ State (NOT CITABLE; raw outputs on the Hub, [hub-index](../artifacts/hub-index.m
 | the unmodified adapted tree against the published code (C0) | 126 / 126 arXiv d128 cells `torch.equal` | `artifacts/meta-fork/c0` |
 | S and capture after C3 / C4 | no device-to-host copy and no pageable upload per forward at C4; capture equal to eager | `artifacts/meta-fork/c3-c4` |
 | X at ≤ 10 M, head 82fafb6 | 1,536 / 1,536 cells `torch.equal` to the published `-O3` code (goodreads, arXiv d128 / d256, PubMed d768, YFCC d192) | `artifacts/meta-fork/head-82fafb6` |
-| compile gate | green on `dev/meta-fork` (its validation rows) | — |
-| R (C12, C13) | running | — |
-| X at 30 M (LAION d256) | running | — |
-| review | not started | — |
+| compile gate | pass: `fullgraph`, 0 graph breaks, exports | — |
+| R (C12, C13) | 0 false positives on every cell; recall against an exact oracle 1.0 up to ties at the k-th score | `artifacts/meta-fork/pod-b-32c0d61` |
+| X at 30 M (LAION d256) | bloom partial + full 64 / 64 `torch.equal` at `32c0d61`; none / exact 72 / 72 at an earlier head | `artifacts/meta-fork/laion30m-b1-32c0d61` |
+| review | ACCEPT at `1f6fed8` | — |
 
 ## 4. Speed against the published code
 
