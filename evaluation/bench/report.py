@@ -770,7 +770,7 @@ def tab_matched(c) -> list[Path]:
         _write(c.out / "tables" / "tab-matched_recall.tex", tex),
         _write(c.out / "matched_recall.json", json.dumps(dump, indent=1) + "\n"),
     ]
-    return written + (tab_matched_bands(c) if getattr(c, "bands", None) else [])
+    return written + (tab_matched_bands(c) if c.bands else [])
 
 
 BAND_MIN_QUERIES = 20  # a band with fewer of a cell's queries is left blank
@@ -2010,9 +2010,22 @@ class Ctx:
     provenance verdict and the one set of selectors."""
 
     def __init__(
-        self, results_dir: Path, out: Path, gate: str | None, manifest: Path | None, **sel: Any
+        self,
+        results_dir: Path,
+        out: Path,
+        gate: str | None,
+        manifest: Path | None,
+        *,
+        dim: int,
+        k: int,
+        bs: int,
+        mode: str,
+        backend: str,
+        bands: tuple[float, ...] | None = None,
     ) -> None:
         self.results_dir, self.out = Path(results_dir), Path(out)
+        self.dim, self.k, self.bs = dim, k, bs
+        self.mode, self.backend, self.bands = mode, backend, bands
         self.manifest, self.why = None, None
         if manifest is None:
             self.flat, self.rows = _load(self.results_dir, self.out)
@@ -2032,8 +2045,6 @@ class Ctx:
         _one_inputs_per_dataset(self.rows)
         self.prov = provenance(self.recs if manifest is None else used, gate)
         self.written: list[Path] = [self.flat]
-        for k, v in sel.items():
-            setattr(self, k, v)
 
 
 def generate(
@@ -2043,8 +2054,14 @@ def generate(
     gate: str | None = None,
     only: tuple[str, ...] = (),
     manifest: Path | None = None,
-    **sel: Any,
+    dim: int,
+    k: int,
+    bs: int,
+    mode: str,
+    backend: str,
+    bands: tuple[float, ...] | None = None,
 ) -> Ctx:
+    sel = {"dim": dim, "k": k, "bs": bs, "mode": mode, "backend": backend, "bands": bands}
     c = Ctx(results_dir, out, gate, manifest, **sel)
     for name in only or tuple(ARTIFACTS):
         c.written += ARTIFACTS[name](c)
