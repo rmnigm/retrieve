@@ -56,6 +56,7 @@ TIMED = [  # later wins between two stable records of one cell
     "A2-laion30m-synth",
     "A3-st-k2048",
 ]
+BLOOM_FP = "artifacts/results-draft/20261013-bloom-fp"  # fp_adapted.py: SilverTorch's own bloom, whole index
 ADAPTED = (
     "artifacts/results-draft/20261012-adapted"  # ceiling_adapted.py, gls_adapted.py
 )
@@ -517,16 +518,25 @@ def c3(df):
     ]
 
 
-def c4(df):
-    """Bloom width: the adapted code over m_bits (NUMBERS A4) beside Meta's code as published at its own width."""
-    meta = df[(df.suite == "bloomwidth") & (df.backend == "official")]
-    x = pd.concat([meta, params(leg("A4-bloomwidth"))])
-    x = x[x.perf_k.isna() | (x.perf_k == 100)].drop_duplicates(
-        ["dataset", "sweep", "backend", "m_bits", "k_hash"]
+def c4():
+    """C4 on SilverTorch's own bloom (user's bloom-reporting ruling): its false-positive rate per width over the whole index
+    (BLOOM_FP, fp_adapted.py, recheck off) beside the adapted code's recall and index size at that width (NUMBERS A4). The A4 records'
+    `bloom_fp_rate` is our standalone LiNR bloom's, so it goes to linr_bloom_fp, never beside SilverTorch's."""
+    fp = pd.read_csv(HUB / BLOOM_FP / "fp_adapted.csv")
+    a4 = params(leg("A4-bloomwidth"))
+    a4 = a4.drop_duplicates(["dataset", "sweep", "m_bits", "k_hash"])
+    a4 = a4[["dataset", "sweep", "m_bits", "k_hash", "oracle_recall@100", "index_mib"]]
+    st = fp.merge(
+        a4, on=["dataset", "sweep", "m_bits", "k_hash"], suffixes=("_bloom", "_index")
     )
-    cols = ["dataset", "sweep", "backend", "m_bits", "k_hash", "bloom_fp_rate"]
-    cols += ["oracle_recall@100", "index_mib"]
-    return x[cols].sort_values(["dataset", "sweep", "backend", "k_hash", "m_bits"])
+    linr = params(leg("A4-bloomwidth")).drop_duplicates(
+        ["dataset", "sweep", "m_bits", "k_hash"]
+    )
+    linr = linr[["dataset", "sweep", "m_bits", "k_hash", "bloom_fp_rate"]].rename(
+        columns={"bloom_fp_rate": "linr_bloom_fp_rate"}
+    )
+    keys = ["dataset", "sweep", "k_hash", "m_bits"]
+    return st.sort_values(keys), linr.sort_values(keys)
 
 
 def c5(df, gc):
@@ -752,6 +762,7 @@ def main():
     c1t, c1c = c1(df)
     meta5, adapted5 = c5(df, gc)
     c6q, c6c = c6(load_curves())
+    c4b = c4()
     nsw, nmem = linr_vs_n(df)
     pairs, equal = eager_graph_ids(timed_all)
     tables = {
@@ -767,7 +778,8 @@ def main():
         "linr_numbers": linr_numbers(df),
         "c2_v3": c2(df),
         "c3_torch": c3(df),
-        "c4_bloom": c4(df),
+        "c4_bloom": c4b[0],
+        "linr_bloom_fp": c4b[1],
         "c5_meta": meta5,
         "c5_adapted": adapted5,
         "c6_recall": c6q,
