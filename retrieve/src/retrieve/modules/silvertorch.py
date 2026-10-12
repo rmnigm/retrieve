@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from functools import partial
 from typing import Literal, NamedTuple
 
 import torch
@@ -58,17 +57,6 @@ class PreparedFilter(NamedTuple):
     plan_slots: int = 0
     plan_stack: int = 0
 
-    def select(self, rows: Tensor) -> PreparedFilter:
-        """The prepared filter of a row subset (device ``index_select``; not for official plans)."""
-        if self.plans_data is not None or self.plan_blob is not None:
-            raise ValueError("official bloom plans are not row-sliceable; prepare the subset")
-        bits, attrs = self.query_bits, self.query_attrs
-        return PreparedFilter(
-            query_bits=None if bits is None else bits.index_select(0, rows),
-            query_attrs=None if attrs is None else attrs.index_select(0, rows),
-            sparse=self.sparse,  # a subset's bounds are among the batch's
-        )
-
 
 __all__ = ["FilterMode", "OfficialConfig", "SilverTorch", "SilverTorchBuilder"]
 
@@ -82,42 +70,12 @@ SPARSE_PASS_BOUND = 1 / 256
 class SilverTorch(RetrievalModule):
     """Co-designed IVF + INT8 ANN + optional attribute filter (paper Algorithm 1, §4.2): an ``[N,
     D]`` int8 index with one global scale, per-row int8-quantized queries, and an int8×int8 →
-    int32 dot dequantized once. ``filter_mode`` fuses a predicate into the probe+score kernel —
-    ``"none"`` (plain ANN), ``"bloom"`` (subset test, needs ``m_bits``/``k_hash``), or
-    ``"exact"`` (exact-clause, no false positives). ``bloom_path="full"`` (bloom on triton /
-    torch) runs the subset test over all N first (``bloom_full_mask``) and the probe scorer reads
-    that packed mask: the co-design ablation against the fused default ``"partial"``, same
-    results (kernels.md § bloom_full_mask).
-
-    ``backend="triton"`` (default) keeps all probe intermediates off HBM; ``backend="torch"``
-    runs the same semantics eager but materializes ``[B, P, D]``, so large ``P·B·D`` needs the
-    Triton backend. ``backend="official"``
-    routes phases 2+3 to Meta's own ``torch.ops.st.*`` kernels (``meta-recsys/silvertorch``,
-    the ``official`` extra) — the reference the Triton kernels are checked against: same
-    k-means, same int8 codes and probes, the official scorer over the same cluster-sorted table
-    (the CSR every backend registers: ``cluster_offsets`` / ``cluster_sizes`` / ``sort_perm`` /
-    ``inv_perm``), the official bloom index + expression parser for
-    ``filter_mode="bloom"`` (their hash, sized by ``OfficialConfig.b_multiplier``; ``m_bits`` is
-    optional there) and our ``clause_mask`` packed into the scorer's bit mask for
-    ``filter_mode="exact"``. It is **eager-only** (every official op syncs the host):
-    ``torch.compile`` of an official module raises. ``triton`` and ``torch`` call the same
-    op names in ``retrieve.ops.triton`` / ``retrieve.ops.reference`` (resolved through
-    ``interfaces.ops_for``). See docs/system/kernels.md for every backend's design and
-    constraints. ``triton`` and ``torch`` register the same buffers
-    (a checkpoint is portable between them in every ``filter_mode``); an official state_dict
-    is portable to them only without bloom (``bloom_index`` / ``bundle_b_offsets`` instead of
-    ``bloom_transposed``). ``backend="official-fork"`` runs the same official path on our fork of
-    Meta's ops (``official-fork/``, ``torch.ops.stfork.*``; kernels.md § official-fork).
-    ``load_state_dict`` into a
-    module of the same shape (one whose ``register_index`` already ran) re-derives the two
-    Python-scalar caches the forwards read (``_global_scale_f``, ``_probe_width``) from
-    the loaded buffers, so a loaded index scores like the one that was saved.
-
-    After ``register_index``, ``build_timings`` holds the wall seconds of the four build
-    phases (``kmeans_s``, ``assemble_s``, ``quantize_s``, ``filter_s``; device-synchronised)
-    and ``set_query_params(n_probe=...)`` changes the probe width without a rebuild. ``k`` is a
-    plain attribute, settable at any time. ``capturable`` says whether a forward can be
-    CUDA-graph captured / compiled: every backend but ``official``."""
+    int32 dot dequantized once. ``filter_mode`` picks the predicate fused into the probe+score
+    (``"none"``, ``"bloom"``, ``"exact"``), ``backend`` the implementation (``"triton"``,
+    ``"torch"``, ``"official"``: Meta's ops, eager-only; ``"official-fork"``: our fork of them).
+    Buffers, state-dict portability, the load hook and ``build_timings``: architecture.md §
+    SilverTorch; each backend's design: kernels.md § SilverTorch kernels. ``capturable``: every
+    backend but ``official``."""
 
     centroids: Tensor
     item_codes: Tensor
@@ -222,13 +180,6 @@ class SilverTorch(RetrievalModule):
         self.backend = backend
         self.bloom_path: BloomPath = bloom_path
         self.build_timings: dict[str, float] = {}
-        # Dispatch table built once; forward calls the bound method for this backend.
-        self._forward_impl = {
-            "triton": self._forward_ops,
-            "torch": self._forward_ops,
-            "official": self._forward_official,
-            "official-fork": self._forward_fork,
-        }[backend]
         # The two Python-scalar caches below (_global_scale_f, _probe_width) are set by
         # register_index; a state-dict load replaces the buffers they were derived from, so
         # they are re-derived after every load_state_dict.
@@ -242,14 +193,6 @@ class SilverTorch(RetrievalModule):
     def is_official(self) -> bool:
         return self.backend in OFFICIAL_BACKENDS
 
-    @property
-    def has_bloom(self) -> bool:
-        return self.filter_mode == "bloom"
-
-    @property
-    def has_exact(self) -> bool:
-        return self.filter_mode == "exact"
-
     def register_index(
         self,
         item_embs: Tensor,
@@ -262,9 +205,7 @@ class SilverTorch(RetrievalModule):
         assignments = self._build_ivf(item_embs)
         t1 = lap()
         # One layout on every backend (kernels.md § SilverTorch kernels): the int8 table in
-        # cluster-sorted (CSR) order plus the permutation both ways. Frozen order: centroids,
-        # item_codes, global_scale, cluster_offsets, cluster_sizes, sort_perm, inv_perm, then
-        # the filter buffers.
+        # cluster-sorted (CSR) order plus the permutation both ways.
         perm, inv_perm, cluster_offsets, cluster_sizes = csr_layout(assignments, self.n_lists)
         ivf = {
             "cluster_offsets": cluster_offsets,
@@ -279,9 +220,8 @@ class SilverTorch(RetrievalModule):
         t2 = lap()
         self._quantize_items(item_embs, perm)
         t3 = lap()
-        # Buffer registration order is frozen (state-dict key order): centroids, item_codes,
-        # global_scale, the IVF buffers, then the filter buffers — hence the IVF buffers are
-        # registered here, after the quant buffers.
+        # Frozen state-dict key order (architecture.md § SilverTorch): the IVF buffers go after
+        # the quant buffers.
         for name, buf in ivf.items():
             self.register_buffer(name, buf)
         self._register_filter_buffers(
@@ -465,17 +405,11 @@ class SilverTorch(RetrievalModule):
             )
             return PreparedFilter(plans_data=data, plans_offsets=offsets)
         # One plan per distinct expression, as a server batching shared filters would send.
-        unique = list(dict.fromkeys(expressions))
-        row_plan = {e: i for i, e in enumerate(unique)}
+        unique, index = _unique_plans(expressions, query_clause_attrs.device)
         data, offsets = official_mod.parse_plans(
             unique, cfg.n_stored_hashes, cfg.max_sub_queries, backend=self.backend
         )
-        index = torch.tensor([row_plan[e] for e in expressions], dtype=torch.int64)
-        return PreparedFilter(
-            plans_data=data,
-            plans_offsets=offsets,
-            plan_index=index.to(query_clause_attrs.device, non_blocking=True),
-        )
+        return PreparedFilter(plans_data=data, plans_offsets=offsets, plan_index=index)
 
     def _prepare_device_plans(
         self, expressions: list[str], query_clause_attrs: Tensor
@@ -484,10 +418,7 @@ class SilverTorch(RetrievalModule):
         distinct expression with the row → plan index (both bloom paths)."""
         cfg = self.official
         rows, n_clauses = query_clause_attrs.shape
-        unique = list(dict.fromkeys(expressions))
-        row_plan = {e: i for i, e in enumerate(unique)}
-        index = torch.tensor([row_plan[e] for e in expressions], dtype=torch.int64)
-        index = index.to(query_clause_attrs.device, non_blocking=True)
+        unique, index = _unique_plans(expressions, query_clause_attrs.device)
         plans = official_mod.prepare_plans(
             unique,
             cfg.n_stored_hashes,
@@ -533,7 +464,11 @@ class SilverTorch(RetrievalModule):
                 "torch.compile / torch.export: Meta's scorers sync the host (kernels.md § "
                 "official). Call the module eagerly, or use backend='triton' / 'torch'."
             )
-        return self._forward_impl(query, prepared)
+        if self.backend == "official":
+            return self._forward_official(query, prepared)
+        if self.backend == "official-fork":
+            return self._forward_fork(query, prepared)
+        return self._forward_ops(query, prepared)
 
     def _phase1_probe_ids(self, query: Tensor) -> Tensor:
         """Phase 1 proper: centroid scores → top-``n_probe`` cluster ids ``[B, n_probe]``."""
@@ -565,7 +500,7 @@ class SilverTorch(RetrievalModule):
         layout = (self._phase1_probe_ids(query), self.cluster_offsets, self.item_codes)
         tail = (self._global_scale_f, self.k, self._probe_width)
 
-        if self.has_exact and prepared is not None:
+        if self.filter_mode == "exact" and prepared is not None:
             return ops.codesigned_probe_score_exact(
                 query,
                 *layout,
@@ -575,7 +510,7 @@ class SilverTorch(RetrievalModule):
                 prepared.query_attrs,
                 *tail,
             )
-        if self.has_bloom and prepared is not None:
+        if self.filter_mode == "bloom" and prepared is not None:
             qpos = prepared.query_bits
             table, freq = self.bloom_transposed, self.bloom_bit_freq
             if self.bloom_path == "full":
@@ -610,11 +545,11 @@ class SilverTorch(RetrievalModule):
         filtering_bit_mask: Tensor | None = None
         partial: tuple[Tensor, Tensor, Tensor] | None = None
 
-        if self.has_exact and prepared is not None:
+        if self.filter_mode == "exact" and prepared is not None:
             filtering_bit_mask = ops_for("triton").clause_mask_packed(
                 self.item_clause_attrs, self.clause_is_reverse, prepared.query_attrs
             )  # high-first words over cluster-sorted ids = the scorer's read order
-        elif self.has_bloom and prepared is not None:
+        elif self.filter_mode == "bloom" and prepared is not None:
             plans = (prepared.plans_data, prepared.plans_offsets)
             if cfg.bloom_path == "partial":
                 partial = official_mod.bloom_partial_masks(
@@ -669,9 +604,9 @@ class SilverTorch(RetrievalModule):
         cfg = self.official
         exact = None
         bloom = None
-        if self.has_exact and prepared is not None:
+        if self.filter_mode == "exact" and prepared is not None:
             exact = (self.item_clause_attrs, self.clause_is_reverse, prepared.query_attrs)
-        elif self.has_bloom and prepared is not None:
+        elif self.filter_mode == "bloom" and prepared is not None:
             plans = official_mod.DevicePlans(
                 prepared.plan_blob, prepared.plan_slots, prepared.plan_stack
             )
@@ -724,30 +659,34 @@ class SilverTorch(RetrievalModule):
         return masked_topk(scores, self.k, valid=valid, gather_ids=candidate_ids, pad_to_k=False)
 
 
+def _unique_plans(expressions: list[str], device: torch.device) -> tuple[list[str], Tensor]:
+    """The distinct expressions in first-seen order and the ``[B]`` int64 row → plan index."""
+    unique = list(dict.fromkeys(expressions))
+    row_plan = {e: i for i, e in enumerate(unique)}
+    index = torch.tensor([row_plan[e] for e in expressions], dtype=torch.int64)
+    return unique, index.to(device, non_blocking=True)
+
+
 def _rederive_cached_scalars(module: SilverTorch, incompatible_keys) -> None:
     """``load_state_dict`` post-hook: re-derive ``_global_scale_f`` and ``_probe_width`` from
     the loaded buffers. Both are plain Python scalars cached at ``register_index`` so the
     forwards issue no per-call ``.item()`` sync (cudagraph capture) and no shape read (SymInt
-    under ``torch.compile(dynamic=True)``); a load replaces the buffers underneath them. The
-    ``.item()`` syncs here run once, at load time. Buffers absent from the module (a load
-    before ``register_index``, or a ``strict=False`` partial load) leave the corresponding
-    cache untouched."""
-    if hasattr(module, "global_scale"):
-        module._global_scale_f = float(module.global_scale.item())
-    if hasattr(module, "cluster_sizes"):
-        module._probe_width = probe_width(module.cluster_sizes, module.n_probe)
-
-
-def _synced_clock(device: torch.device) -> float:
-    torch.cuda.synchronize(device)
-    return time.perf_counter()
+    under ``torch.compile(dynamic=True)``); a load replaces the buffers underneath them."""
+    module._global_scale_f = float(module.global_scale.item())
+    module._probe_width = probe_width(module.cluster_sizes, module.n_probe)
 
 
 def _lap(item_embs: Tensor) -> Callable[[], float]:
     """Phase clock for ``build_timings``: device-synchronised wall seconds."""
-    if not item_embs.is_cuda:
-        return time.perf_counter
-    return partial(_synced_clock, item_embs.device)
+
+    device = item_embs.device
+
+    def clock() -> float:
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        return time.perf_counter()
+
+    return clock
 
 
 class SilverTorchBuilder:

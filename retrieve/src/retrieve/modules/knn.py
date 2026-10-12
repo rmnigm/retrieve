@@ -157,19 +157,14 @@ class FullScanKNN(RetrievalModule):
         candidate_ids: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         if candidate_ids is not None:
-            return self._forward_candidates(query, candidate_ids)
+            valid = candidate_ids >= 0
+            cand_embs = self.item_embs[candidate_ids.clamp_min(0)]
+            scores = torch.bmm(query.unsqueeze(1), cand_embs.transpose(1, 2)).squeeze(1)
+            return masked_topk(
+                scores, self.k, valid=valid, gather_ids=candidate_ids, pad_to_k=False
+            )
         scores = query @ self.item_embs.t()
         topk_scores, topk_ids = torch.topk(scores, self.k, dim=1)
         if mask is not None:
             topk_ids, _ = post_filter_topk(topk_ids, mask)
         return topk_ids, topk_scores
-
-    def _forward_candidates(
-        self,
-        query: Tensor,
-        candidate_ids: Tensor,
-    ) -> tuple[Tensor, Tensor]:
-        valid = candidate_ids >= 0
-        cand_embs = self.item_embs[candidate_ids.clamp_min(0)]
-        scores = torch.bmm(query.unsqueeze(1), cand_embs.transpose(1, 2)).squeeze(1)
-        return masked_topk(scores, self.k, valid=valid, gather_ids=candidate_ids, pad_to_k=False)

@@ -14,47 +14,7 @@ package ``silvertorch_fork``, ``torch.ops.stfork.*``): the upstream-shaped ops u
 schemas, plus the fork's own (``search``, the whole forward after phase 1; the prepared bloom
 searches; ``probe_prep``; ``official-fork/CHANGES.md``); both load in one process.
 
-Op schemas matched against the upstream registrations (``TORCH_LIBRARY_FRAGMENT(st,
-…)`` at 21aa35e):
-
-- ``fused_kmean_ann(Tensor cluster_offsets, Tensor cluster_ids, Tensor cluster_length,
-  Tensor embeddings, Tensor queries, int max_tensor_size_per_row,
-  Tensor? filtering_bit_mask=None, int invalid_index_value=-1, int divisor_for_int8=-1,
-  Tensor? filtering_bit_index=None, Tensor? per_embedding_scale=None) -> (Tensor,
-  Tensor)`` — ``fused_kmean_ann.cpp:400-413``. ``cluster_offsets`` int64 ``[n_lists+1]``,
-  ``cluster_ids`` / ``cluster_length`` int64 ``[B, P]``, ``embeddings`` int8 ``[N, D]``
-  **cluster-sorted**, ``queries`` int8 ``[B, D]``; returns ``scores`` (int32 when
-  ``divisor_for_int8 == -1``, fp16 otherwise) and ``indices`` int32, both ``[B,
-  round_up(max_tensor_size_per_row, 32)]``, pads at the dtype minimum /
-  ``invalid_index_value``.
-- ``fused_kmean_ann_with_partial_masks(…same five tensors…, int max_tensor_size_per_row,
-  Tensor partial_mask_column_counts_cumsum, Tensor partial_mask_first_item_offset_in_column,
-  Tensor partial_mask_column_results, int invalid_index_value=-1, int divisor_for_int8=-1,
-  Tensor? filtering_bit_index=None, Tensor? per_embedding_scale=None, Tensor?
-  cluster_warp_size=None, Tensor? cluster_warp_rounded_length_cumsum=None, Tensor?
-  cluster_remaining_length_cumsum=None, Tensor? cluster_warp_size_cumsum=None, int
-  total_cluster_rounded_warps=0, int total_cluster_remaining_warps=0) -> (Tensor,
-  Tensor)`` — ``fused_kmean_ann.cpp:415-436``.
-- ``bloom_index_build(Tensor feature_ids, Tensor feature_offsets, Tensor feature_values,
-  float b_multiplier, int k, bool fast_build=False) -> (Tensor, Tensor)`` —
-  ``bloom_indexer.cpp:115-125``; int32 ``[F]``, int64 ``[N·F+1]``, int64 ``[nnz]``,
-  ``b_multiplier > 1.0``; returns ``bloom_index`` int64 ``[W]`` and
-  ``bundle_b_offsets`` int64 ``[n_bundles+1]``.
-- ``parse_expression_query_batch(str[] expressions, Tensor silvertorch_ks, int
-  bloom_hash_k, bool return_query_plan=True, int max_sub_queries=5) -> (int, Tensor[])``
-  — ``expression_query_parser.cpp:456-465``; CPU-only (the CUDA registration forwards
-  to it); ``silvertorch_ks`` is unused upstream; returns ``(max_stack_size,
-  [plans_data int8, plans_offsets int64])``.
-- ``bloom_index_search_batch(Tensor bloom_index, Tensor bloom_bundle_b_offsets, Tensor
-  bloom_query_plans_data, Tensor bloom_query_plans_offsets, int k, int hash_k, bool
-  return_bool_mask=True) -> Tensor`` — ``bloom_index_search.cpp:549-558``; bool ``[B,
-  n_bundles·2048]`` or packed int64 ``[B, n_bundles·32]``.
-- ``bloom_index_search_batch_return_partial_response(…same four…, Tensor
-  selected_cluster_offsets, Tensor selected_cluster_lengths, int k, int hash_k, Tensor?
-  query_plan_index=None) -> (Tensor, Tensor, Tensor)`` — ``bloom_index_search.cpp:560-571``;
-  int64 ``[B, P]`` doc-start / length per probe; returns ``column_counts_cumsum`` int32
-  ``[B·P]``, ``first_item_offset_in_column`` int8 ``[B·P]``, ``column_mask_response``
-  int64 ``[Σ columns]``.
+The op schemas the adapter matches: docs/system/kernels.md § official, "Ops called".
 
 On ``official`` everything here is **eager only**: each upstream op syncs the host, so there is
 no ``torch.compile`` / CUDA-graph path and the layer refuses to compile it. The fork's ops do
@@ -82,19 +42,12 @@ PACKAGES: dict[str, tuple[str, str]] = {
     "official-fork": ("silvertorch_fork", "stfork"),
 }
 
-# Bit order the official *scorer* uses when it reads a ``filtering_bit_mask`` word (and the
-# partial column masks): doc ``d`` is bit ``63 - d % 64`` of word ``d // 64`` — "lower doc id
-# put at higher bits", ``bloom_index_util.cuh`` ``get_bit_64_bit_mask`` /
-# ``get_next_32_bit_mask`` (lines 125-180 at 21aa35e). Measured three independent ways, all
-# HIGH-first (kernels.md, "Bit order — measured, high-first").
-# ``tests/parity/test_official.py`` T3 pins it (``OFFICIAL_BIT_ORDER``); nothing else in
-# the adapter hard-codes it.
+# The scorer reads doc ``d`` of a ``filtering_bit_mask`` / partial column mask at bit
+# ``63 - d % 64`` of word ``d // 64`` (kernels.md § official, "Bit order — measured, high-first").
 MASK_BIT_ORDER: BitOrder = "high_first"
 
-# Order of the packed output of ``bloom_index_search_batch(return_bool_mask=False)``:
-# ``store<bool>`` unpacks the raw word from bit 63 downwards
-# (``bloom_index_search_cuda.cu:552-556``), so the raw int64 word is high-first. This one is
-# unambiguous in the source; T3 round-trips it anyway.
+# ``bloom_index_search_batch(return_bool_mask=False)`` packs from bit 63 downwards
+# (``bloom_index_search_cuda.cu:552-556``).
 BLOOM_OUTPUT_BIT_ORDER: BitOrder = "high_first"
 
 # ``MAX_K_V2`` (``bloom_index_util.h:45``): the search kernel keeps the resolved hash
@@ -219,8 +172,6 @@ class OfficialConfig:
 
 DEFAULT_CONFIG = OfficialConfig()
 
-
-# --- availability ---------------------------------------------------------------------
 
 _LOAD_MEMO: dict[str, object] = {}
 

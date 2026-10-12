@@ -10,11 +10,6 @@ from torch import Tensor, nn
 
 from retrieve.functional import compact_mask
 
-# Two backend vocabularies, one per family. Every LiNR layer and every standalone filter
-# has exactly a Triton path and a torch path; only ``SilverTorch`` also routes to Meta's
-# official ops and to our fork of them (``official-fork``). Each constructor validates its
-# own literal via ``check_backend`` so a typo — or a SilverTorch-only value handed to a LiNR
-# module — raises instead of silently running the torch path.
 LinrBackend = Literal["torch", "triton"]
 OfficialBackend = Literal["official", "official-fork"]
 OFFICIAL_BACKENDS: tuple[str, ...] = get_args(OfficialBackend)

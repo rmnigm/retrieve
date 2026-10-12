@@ -14,7 +14,7 @@ import triton
 import triton.language as tl
 from torch import Tensor
 
-# By name, not `common.<fn>` — see the note in clause_mask.py.
+# `common` helpers by name, not `common.<fn>` (kernels.md, the conventions list)
 from retrieve.ops.triton._host import (
     CompactLaunch,
     check_contiguous,

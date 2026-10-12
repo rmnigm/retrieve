@@ -13,12 +13,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.library import triton_op, wrap_triton
 
-# Imported by name, not as `common.<fn>`: torch.compile re-compiles a
-# @triton_op's kernel through inductor, which rebuilds the kernel's global
-# namespace from the JITFunction's globals and captures @triton.jit callees
-# by name. A module object is not captured, so `clause_pass(...)`
-# raises NameError('common is not defined') at ast_to_ttir time — eager
-# Triton resolves the attribute and never sees it (tests/compile catches it).
+# `common` helpers by name, not `common.<fn>` (kernels.md, the conventions list)
 from retrieve.ops.triton._host import check_contiguous, grid_batch_tiles, wide
 from retrieve.ops.triton.common import clause_pass, row_base, tile_rows
 

@@ -36,7 +36,11 @@ def default_divisor(d: int) -> int:
     return 1 << max(0, math.ceil(math.log2(need)))
 
 
-# --- attributes → features / expressions ------------------------------------------------
+def _divisor(score_path: ScorePath, divisor: int | None, d: int) -> int:
+    """The op's ``divisor_for_int8``: ``-1`` (raw int32 dot) or the fp16 path's power of two."""
+    if score_path == "int32":
+        return -1
+    return default_divisor(d) if divisor is None else int(divisor)
 
 
 def attrs_to_features(attrs: Tensor) -> tuple[Tensor, Tensor, Tensor]:
@@ -139,14 +143,21 @@ def parse_plans(
     into Meta's CPU parser (≈ 59 µs at B=16). The search ops decode plans on the host per call
     (``bloom_index_search_cuda.cu:1045``), so CPU plans spare them a D2H. Query preparation:
     ``SilverTorch.prepare_queries`` runs it outside ``forward``."""
+    _max_stack, data, offsets = _parse(expressions, hash_k, max_sub_queries, backend)
+    return data.contiguous(), offsets.contiguous()
+
+
+def _parse(
+    expressions: list[str], hash_k: int, max_sub_queries: int, backend: OfficialBackend
+) -> tuple[int, Tensor, Tensor]:
+    """Meta's CPU parser over a batch: ``(max_stack_size, plans_data, plans_offsets)``."""
     st = ensure_loaded(backend)
     # `silvertorch_ks` is accepted and ignored upstream (expression_query_parser.cpp:395).
     ks = torch.ones(len(expressions), dtype=torch.int64)
-    _max_stack, plans = st.parse_expression_query_batch(
+    max_stack, (data, offsets) = st.parse_expression_query_batch(
         list(expressions), ks, int(hash_k), True, int(max_sub_queries)
     )
-    data, offsets = plans
-    return data.contiguous(), offsets.contiguous()
+    return max_stack, data, offsets
 
 
 class DevicePlans(NamedTuple):
@@ -192,11 +203,7 @@ def prepare_plans(
     :func:`plan_capacity_bytes`, so it has one shape per ``(slots, n_clauses, hash_k)`` (a graph
     replays any batch of that shape). Query preparation: ``SilverTorch.prepare_queries`` runs it
     outside ``forward``."""
-    st = ensure_loaded(backend)
-    ks = torch.ones(len(expressions), dtype=torch.int64)
-    max_stack, (data, offsets) = st.parse_expression_query_batch(
-        list(expressions), ks, int(hash_k), True, int(max_sub_queries)
-    )
+    max_stack, data, offsets = _parse(expressions, hash_k, max_sub_queries, backend)
     capacity = slots * plan_capacity_bytes(n_clauses, hash_k)
     if len(expressions) > slots or data.numel() > capacity:
         raise ValueError(
@@ -214,9 +221,6 @@ def max_partial_columns(rows: int, n_probe: int, max_tensor_size_per_row: int) -
     starting ``off < 64`` into a 64-doc column spans ``ceil((len + off) / 64) ≤ len // 64 + 2``
     columns, and a row's clusters hold ≤ ``max_tensor_size_per_row`` docs."""
     return rows * (max_tensor_size_per_row // 64 + 2 * n_probe)
-
-
-# --- masks ------------------------------------------------------------------------------
 
 
 def _shifts(bit_order: BitOrder, device: torch.device) -> Tensor:
@@ -260,9 +264,6 @@ def reverse_bits64(x: Tensor) -> Tensor:
     x = ((x >> 16) & _i64(0x0000FFFF0000FFFF)) | ((x & _i64(0x0000FFFF0000FFFF)) << 16)
     x = ((x >> 32) & _i64(0x00000000FFFFFFFF)) | ((x & _i64(0x00000000FFFFFFFF)) << 32)
     return x
-
-
-# --- scoring ------------------------------------------------------------------------------
 
 
 def fused_scores(
@@ -335,13 +336,47 @@ def dequantize_scores(
     ids = torch.where(
         valid, sort_perm[indices.long().clamp_min(0)], indices.new_full((), -1).long()
     )
+    if raw.dtype == torch.int32 and divisor != -1:
+        raise ValueError("int32 scores imply divisor_for_int8 == -1")
+    return _dequant(raw, q_scales, global_scale, divisor), ids, valid
+
+
+def _dequant(raw: Tensor, q_scales: Tensor, global_scale: float | Tensor, divisor: int) -> Tensor:
+    """``[B, M]`` raw scores → fp32, in the operation order the bit-exact gates pin."""
     if raw.dtype == torch.int32:
-        if divisor != -1:
-            raise ValueError("int32 scores imply divisor_for_int8 == -1")
-        scores = raw.to(torch.float32) * q_scales.unsqueeze(1) * global_scale
-    else:
-        scores = raw.to(torch.float32) * (divisor * q_scales * global_scale).unsqueeze(1)
-    return scores, ids, valid
+        return raw.to(torch.float32) * q_scales.unsqueeze(1) * global_scale
+    return raw.to(torch.float32) * (divisor * q_scales * global_scale).unsqueeze(1)
+
+
+def _raw_scores(
+    query: Tensor,
+    probe_ids: Tensor,
+    cluster_offsets: Tensor,
+    cluster_sizes: Tensor,
+    item_codes_sorted: Tensor,
+    max_tensor_size_per_row: int,
+    score_path: ScorePath,
+    divisor: int | None,
+    filtering_bit_mask: Tensor | None,
+    partial: tuple[Tensor, Tensor, Tensor] | None,
+    backend: OfficialBackend,
+) -> tuple[Tensor, Tensor, Tensor, int]:
+    """Our int8 query quantization into the official scorer: ``(raw, indices, q_scales, div)``."""
+    q_codes, q_scales = quantize_int8(query)
+    div = _divisor(score_path, divisor, item_codes_sorted.shape[1])
+    raw, idx = fused_scores(
+        q_codes,
+        probe_ids,
+        cluster_offsets,
+        cluster_sizes,
+        item_codes_sorted,
+        max_tensor_size_per_row,
+        divisor=div,
+        filtering_bit_mask=filtering_bit_mask,
+        partial=partial,
+        backend=backend,
+    )
+    return raw, idx, q_scales, div
 
 
 def official_scores_full(
@@ -364,23 +399,18 @@ def official_scores_full(
     top-k: ``(scores fp32 [B, M], ids int64 [B, M], valid bool [B, M])`` with ``M =
     padded_rows(max_tensor_size_per_row)``. Slot order is the op's (warp-aligned segments
     per probe, then remainders) — fine for a top-k, not a concatenation."""
-    q_codes, q_scales = quantize_int8(query)
-    div = (
-        -1
-        if score_path == "int32"
-        else (default_divisor(item_codes_sorted.shape[1]) if divisor is None else int(divisor))
-    )
-    raw, idx = fused_scores(
-        q_codes,
+    raw, idx, q_scales, div = _raw_scores(
+        query,
         probe_ids,
         cluster_offsets,
         cluster_sizes,
         item_codes_sorted,
         max_tensor_size_per_row,
-        divisor=div,
-        filtering_bit_mask=filtering_bit_mask,
-        partial=partial,
-        backend=backend,
+        score_path,
+        divisor,
+        filtering_bit_mask,
+        partial,
+        backend,
     )
     return dequantize_scores(raw, idx, q_scales, global_scale, sort_perm, div)
 
@@ -408,23 +438,18 @@ def official_probe_score(
     mapped through ``sort_perm`` (kernels.md § official, "Epilogue"). Dequantizing multiplies by
     positive scales, so the order is the dequantized scores' and each winner's score is the same
     two fp32 multiplies as :func:`dequantize_scores`: bit-identical, ties aside."""
-    q_codes, q_scales = quantize_int8(query)
-    div = (
-        -1
-        if score_path == "int32"
-        else (default_divisor(item_codes_sorted.shape[1]) if divisor is None else int(divisor))
-    )
-    raw, idx = fused_scores(
-        q_codes,
+    raw, idx, q_scales, div = _raw_scores(
+        query,
         probe_ids,
         cluster_offsets,
         cluster_sizes,
         item_codes_sorted,
         max_tensor_size_per_row,
-        divisor=div,
-        filtering_bit_mask=filtering_bit_mask,
-        partial=partial,
-        backend=backend,
+        score_path,
+        divisor,
+        filtering_bit_mask,
+        partial,
+        backend,
     )
     valid = idx >= 0
     floor = torch.iinfo(raw.dtype).min if raw.dtype == torch.int32 else float("-inf")
@@ -433,11 +458,7 @@ def official_probe_score(
     top_valid = valid.gather(1, top_slot)
     pos = idx.gather(1, top_slot).long().clamp_min(0)
     ids = torch.where(top_valid, sort_perm[pos], -1)
-    if raw.dtype == torch.int32:
-        scores = top_raw.to(torch.float32) * q_scales.unsqueeze(1) * global_scale
-    else:
-        scores = top_raw.to(torch.float32) * (div * q_scales * global_scale).unsqueeze(1)
-    scores = torch.where(top_valid, scores, float("-inf"))
+    scores = torch.where(top_valid, _dequant(top_raw, q_scales, global_scale, div), float("-inf"))
     if actual_k < k:
         pad = k - actual_k
         ids = torch.cat([ids, ids.new_full((ids.shape[0], pad), -1)], dim=1)
@@ -482,11 +503,7 @@ def fork_search(
     raw scores and the ``[B, k]`` epilogue of :func:`official_probe_score` → ``(ids int64 [B, k],
     scores fp32 [B, k])``, ``-1`` / ``-inf`` pads (kernels.md § official-fork)."""
     st = ensure_loaded("official-fork")
-    div = (
-        -1
-        if score_path == "int32"
-        else (default_divisor(item_codes_sorted.shape[1]) if divisor is None else int(divisor))
-    )
+    div = _divisor(score_path, divisor, item_codes_sorted.shape[1])
     b = bloom
     return st.search(
         query,
@@ -510,9 +527,6 @@ def fork_search(
         0 if b is None else int(b.hash_k),
         *(exact if exact is not None else (None, None, None)),
     )
-
-
-# --- bloom search ---------------------------------------------------------------------
 
 
 def bloom_partial_masks(
@@ -626,9 +640,7 @@ def bloom_filtering_mask(
     return packed.contiguous()
 
 
-# --- test support: probes used by tests/parity/test_official.py, not by the adapter ---------
-
-
+# Test probes: used by tests/parity/test_official.py, not by the adapter.
 def padded_rows(max_tensor_size_per_row: int) -> int:
     """Output width the scorer allocates: ``max_tensor_size_per_row`` rounded up to the warp."""
     return (max_tensor_size_per_row + WARP - 1) // WARP * WARP

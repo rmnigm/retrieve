@@ -14,8 +14,7 @@ import math
 import torch
 from torch import Tensor
 
-# splitmix64 finalizer constants, expressed as signed int64 (torch has no uint64);
-# named once — the per-clause salt derivation below is their only consumer.
+# splitmix64 finalizer constants, expressed as signed int64 (torch has no uint64).
 _SALT_C1 = 0x9E3779B97F4A7C15 - (1 << 64)
 _SALT_C2 = 0xBF58476D1CE4E5B9 - (1 << 64)
 
@@ -64,18 +63,11 @@ def _mix64(x: Tensor, c1: Tensor | int, c2: Tensor | int) -> Tensor:
 
 def generate_clause_salt(c_dim: int, device: torch.device) -> Tensor:
     """``[C]`` int64 per-clause hash salt — ``_mix64`` of the clause index under the
-    splitmix64 constants. Pure function of ``c_dim`` (no seed), so it is identical on
-    every device and every call; ``BloomFilter`` / ``SilverTorch`` register it once as
-    the ``clause_salt`` buffer at ``register_index`` so the per-forward query build
-    issues no host→device copy (the previous per-call ``torch.tensor(_SALT_C1,
-    device=cuda)`` was a pageable H2D copy that broke raw CUDA-graph capture and cost
-    ~0.4 ms of launch overhead per eager bloom forward). The constants are applied as
-    Python ints, so the one path that still derives the salt per call — a ``SilverTorch``
-    bloom index registered without attributes — copies nothing either."""
+    splitmix64 constants. Pure function of ``c_dim`` (no seed), identical on every device;
+    ``BloomFilter`` / ``SilverTorch`` register it once as the ``clause_salt`` buffer, so a
+    forward issues no host→device copy. The constants go in as Python ints, so deriving it per
+    call (a ``SilverTorch`` bloom index registered without attributes) copies nothing either."""
     clause_ids = torch.arange(c_dim, dtype=torch.int64, device=device)
-    # Python-int constants: a wrapped scalar rides along the multiply kernel's arguments,
-    # so even the per-call fallback (an index registered without attributes) issues no
-    # host→device copy. Same int64 wrap-around arithmetic, bit-identical result.
     return _mix64(clause_ids, _SALT_C1, _SALT_C2)
 
 
@@ -242,7 +234,7 @@ def build_transposed_sigs(sorted_sigs: Tensor, *, chunk: int = TRANSPOSE_CHUNK) 
     for word in range(w):
         for s0 in range(0, n, chunk):
             col = sorted_sigs[s0 : s0 + chunk, word]
-            if col.numel() % 64:  # the last chunk: pad to whole words, as the unchunked build did
+            if col.numel() % 64:  # the last chunk: pad to whole words
                 col = torch.cat([col, col.new_zeros(64 - col.numel() % 64)])
             bits = (col.unsqueeze(0) >> shifts.unsqueeze(1)) & 1  # [64 (m), chunk]
             out[word * 64 : (word + 1) * 64, s0 // 64 : s0 // 64 + col.numel() // 64] = (

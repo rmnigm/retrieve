@@ -133,7 +133,7 @@ def combine_indices(
     ids, counts = f0.evaluate_indices(f0.prepare_queries(q0))
 
     for f, q in zip(filters[1:], query_clause_attrs[1:], strict=True):
-        b, p = ids.shape
+        p = ids.shape[1]
         if p == 0:
             return ids, counts
         valid = counts_to_valid(counts, p)
@@ -144,10 +144,6 @@ def combine_indices(
         sub_mask = sub_mask & valid
         new_counts = sub_mask.sum(dim=1)
         new_p = int(new_counts.max().item())
-        if new_p == 0:
-            ids = torch.empty(b, 0, dtype=torch.long, device=ids.device)
-            counts = new_counts
-            continue
         sorted_idx = sub_mask.float().argsort(dim=1, descending=True, stable=True)[:, :new_p]
         ids = ids.gather(1, sorted_idx)
         counts = new_counts
