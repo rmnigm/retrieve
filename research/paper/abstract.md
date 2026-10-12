@@ -46,15 +46,14 @@ paper (deadline 19 October) must stand behind each sentence:
 | five public datasets, real and synthetic filters, up to 30M items | [datasets](../../docs/system/datasets.md) | setup fact |
 | adapting Meta's released SilverTorch code | `official-fork/` ([Meta as published vs adapted](meta-published-vs-adapted.md)) | review ACCEPT (`1f6fed8`, tag `campaign-fork`); the abstract claims no property of it |
 | LiNR pre- vs post-filtering: holds for single queries, largely disappears in batches | C1 ([claims](claims.md), [results](results.md#claim-verification)) | LiNR final pass, D1-G green ([validation](../validation.md)); the NUMBERS bs 64 / 256 legs strengthen it (V1 faster on every real filter there) |
-| LiNR 1-bit variant: faster only for batched queries, recall recovered with enough bits | C2 | LiNR final pass; our code length is capped at the embedding dimension against LiNR's 512 bits ([LN-8](reproduction-deviations.md#4-linr-v1v3--deviations)): say so in the paper |
+| LiNR 1-bit variant: faster only for batched queries, recall recovered with enough bits | C2 | LiNR final pass; "recall" here must be ours (share of the exact filtered top-k returned), not LiNR's end-task recall, which is not comparable; our code length is capped at the embedding dimension against LiNR's 512 bits ([LN-8](reproduction-deviations.md#4-linr-v1v3--deviations)): say so in the paper |
 | SilverTorch co-design beats filtering the full index first only at 30M items | C5, Meta's code as published | measured on the published code; the adapted code is not yet timed on it |
-| recall at the default probe count falls with filter selectivity | C6 | holds on the adapted code: at 24 probes 0.93 at pass rate 1 down to 0.05 at 0.001 (goodreads-synth); NUMBERS legs, not citable until their gate is declared green |
-| at matched recall, IVF faster for broad filters, exhaustive scan for highly selective ones | the head-to-head in [results](results.md#the-tuned-point-per-dataset-size) | **holds, with one exception the paper should state.** Measured on the NUMBERS legs (not citable until their gate is declared green): wherever SilverTorch reaches 0.90 / 0.95 it is faster at bs 1; on highly selective filters (pass rate 0.001 at ≤ 3 M, LAION `c0_domain`, YFCC) it cannot reach the target and the exhaustive scan wins. The exception: on broad filters (pass rate ≥ 0.1) at bs ≥ 16 and 0.95, LiNR V1 wins on ≤ 3 M synthetic sets (up to 2.7×) |
+| recall at the default probe count falls with filter selectivity | C6 | holds on the adapted code: at 24 probes 0.93 at pass rate 1 down to 0.05 at 0.001 (goodreads-synth); NUMBERS legs, gate green |
+| at matched recall, IVF faster for broad filters, exhaustive scan for highly selective ones | the head-to-head in [results](results.md#the-tuned-point-per-dataset-size) | **holds, with one exception the paper should state.** Measured on the NUMBERS legs (gate green): wherever SilverTorch reaches 0.90 / 0.95 it is faster at bs 1; on highly selective filters (pass rate 0.001 at ≤ 3 M, LAION `c0_domain`, YFCC) it cannot reach the target and the exhaustive scan wins. The exception: on broad filters (pass rate ≥ 0.1) at bs ≥ 16 and 0.95, LiNR V1 wins on ≤ 3 M synthetic sets (up to 2.7×) |
 | we release all code and measurements | [release and licenses](release-and-licenses.md) | the anonymous mirror must exist by the paper deadline |
 
 ## Open before the paper
 
-- The NUMBERS gate declared green (the matched-recall and C6 rows rest on it).
 - The anonymous code mirror for review.
 - A GenAI statement may be requested at camera-ready (drafted in the
   session, not recorded here).

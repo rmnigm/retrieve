@@ -249,10 +249,10 @@ paper.
   FPR against width (both blooms showed zero false positives, so S8 needs
   roadmap D3), seeds 1-2, k in {500, 1000}.
 
-## META-FORK: `backend="official-fork"` (not yet validated)
+## META-FORK: `backend="official-fork"`
 
 Our fork of Meta's SilverTorch ([`official-fork/`](../official-fork/CHANGES.md), head `46ff49e`, merged at
-`1f6fed8`): one row per gate. fork-review: **ACCEPT** at `1f6fed8`; NOT CITABLE until its NUMBERS legs pass. Every timing below is pod b's A100 (GPU 0, SM
+`1f6fed8`): one row per gate. fork-review: **ACCEPT** at `1f6fed8`; **citable** since the NUMBERS gate is green (below). Every timing below is pod b's A100 (GPU 0, SM
 clocks unlocked), or pod 1's / pod d's where named. Raw outputs: Hub `artifacts/meta-fork/pod-b-32c0d61`, plus
 the runners' `head-82fafb6`, `laion30m-82fafb6` and `laion30m-b1-32c0d61` ([hub index](artifacts/hub-index.md)); scripts in
 [`artifacts/meta-fork/`](artifacts/meta-fork/README.md). Triton left the study on 2026-10-11 (user), so the
@@ -281,18 +281,22 @@ NUMBERS): the adapted backend at FORK_HEAD `cc595da` (code_version
 `eb600da1`), LiNR-only legs on the final pass's library `e16512f5`, A100-SXM4-80GB
 on pods 1, b and d, seed 0. Every leg is on the Hub as `numbers/<leg>`
 ([hub-index](artifacts/hub-index.md)); the results draft reads them
-([results](paper/results.md)). **NOT CITABLE until the gate below is declared
-green.**
+([results](paper/results.md)). **Gate green (controller ACCEPT, 2026-10-12),
+with the exclusions in the first row; the legs' numbers are citable** on the
+same model as D1-G ([decisions](decisions.md#goal-and-scheduling)): the
+excluded cells are listed and reported, never quoted as measured.
 
 | gate / leg | state | notes |
 |---|---|---|
-| NUMBERS gate: every planned cell ok | **met, with listed gaps** | Timed legs (A2 / A2b / A3): every picked point `ok` (5,094 perf rows after merging reruns). Gaps: yfcc10m-synth LiNR at k 1000 misses the 0.99 exact gate (V1 p01 0.9885, the fp16 storage of [HB-6](paper/reproduction-deviations.md#6-deviations-of-our-harness-against-the-papers-protocols--and-against-itself)), so YFCC synth is reported at k 100 only (controller); the k 1000 records stay on the Hub as gate misses. LiNR at bs 256 is partial on PubMed `all5` and YFCC (out of memory; bs 64 only there). The `failed` records in A2-laion30m-real (3), L1 (6) and L1b (4) are superseded by `ok` reruns in the same leg |
-| NUMBERS gate: eager and graph ids equal on every adapted cell | **pass**, 2,151 / 2,151 | canonical id hashes of every adapted (cell, bs, k) timed in both modes, all A legs |
+| NUMBERS gate: every planned cell ok | **green, with three exclusions** | Timed legs (A2 / A2b / A3): every picked point `ok` (5,094 perf rows after merging reruns). (1) yfcc10m-synth LiNR at k 1000 is below the 0.99 exact gate (V1 0.983-0.995, the fp16 storage of [HB-6](paper/reproduction-deviations.md#6-deviations-of-our-harness-against-the-papers-protocols--and-against-itself)): the user's YFCC allowance covers k 1000, so those cells are included and flagged (the p01 / p1 k 1000 cells did not run: the harness gate stopped them). (2) LiNR V2 at bs 256 on PubMed `c3_journal_reverse` / `all5` and YFCC is a **TIMEOUT**: no usable result after 3.6-9.8 h with the GPU's 80 GB full (`c3_journal_reverse` finished at 2.55 s a batch after 11 h; `all5` and YFCC never did); YFCC V1 at bs 256 did not run either (same process). (3) Sub-millisecond cells unstable in every run are kept and flagged (row *Unstable cells*). The `failed` records in A2-laion30m-real (3), L1 (6) and L1b (4) are superseded by `ok` reruns in the same leg |
+| NUMBERS gate: eager and graph ids equal on every adapted cell | **green**, 2,151 / 2,151 | canonical id hashes of every adapted (cell, bs, k) timed in both modes, all A legs |
 | NUMBERS gate: int32 scores equal to the published code where both ran | **not exercised by these legs** | no NUMBERS leg runs `backend="official"`; equality to the published code is the META-FORK X gate above (1,536 / 1,536 at ≤ 10 M, 64 / 64 bloom at 30 M) |
 | Unstable cells | **kept and flagged** | A2-small 69 unstable → all 69 stable in `A2-small-rerun` (pod b). A2b 15 → 8 stable in its rerun; 7 unstable in both (5 SilverTorch cells at ~0.2 ms on LAION 1 M, all windows 1410 MHz; 2 LiNR V2 with a clock dip, both stable in A2-small). A2-pubmed 2 and A3 1 unstable, not rerun. The results draft keeps a cell's stable record and flags the rest |
 | Probe curves (A1, A1b) | **done** | quality only, `n_probe` doubling to n_lists / 4; 4096 / 16384 / 65536 lists at 10-30 M; LAION 1 M / 3 M also at 4096 / 8192 and 8192 / 16384 lists, with the int8 / fp16 ceiling check (fp16 ≤ 0.006 above shipped: the limit is the IVF partition). k 1000 runs at every width (A0: 7 / 7 ok) |
 | Timed legs (A2, A2b, A3) | **done** | points picked by `pick_points.py` (dev/numbers); SilverTorch interleaved with LiNR V1 / V2 per cell group, bs 1 / 16 / 64, k 100 / 1000 (A3: k 2048), eager and graph |
 | LiNR-only legs (L1-L4) | **done** | L1 / L1b bs 64 / 256, L2 / L2b V3 candidate pool 0.5-20 %, L3 correlated filters, L4 k 2048 |
+| Our recall against end-task recall (goodreads d128; [script](artifacts/results-draft/product_recall.py), Hub `artifacts/results-draft/20261012-checks`) | **correlated** | Our recall@k (share of the exact filtered top-k returned) against held-out recall@k (share of held-out interactions in the returned top-k), on 17 configurations per filter: SilverTorch probe curve and tuned points, LiNR V1 / V2, LiNR V3 at pools 0.5-20 %; clause, seed 0. Pearson per filter 0.88 / 0.91 / 0.88 at k 100 (Spearman 0.70-0.78) and 0.91-0.94 at k 1000 (Spearman 0.90-0.96); pooled over the 3 filters with held-out recall divided by the exact scan's, Pearson 0.90 (k 100) and 0.91 (k 1000). Where our recall ≥ 0.90, end-task recall is 0.93-1.0 of the exact scan's (median 0.99); below 0.70 it is 0.35-0.83 of it |
+| YFCC's precision losses, explained (CPU; [script](artifacts/results-draft/score_gaps.py), Hub `artifacts/results-draft/20261012-checks`) | **measured** | 500 queries per dataset, fp32 scores of the oracle's top-101. YFCC's items are uint8 CLIP descriptors (non-negative, near-constant norm, cv 0.011), so after L2 normalisation they sit in a narrow cone: a random pair's cosine is 0.97 (PubMed 0.67, arXiv 0.64, LAION 10 M 0.52). The whole top-100 then spans 0.0022 in score (PubMed 0.136, arXiv 0.155, LAION 0.076) and the gap between ranks 100 and 101 is 3.9e-6 (others 7.8e-5 to 1.6e-4). fp16 storage moves a score by 1.5e-5, four times that gap; per-row int8 by 1.9e-4, 9 % of the top-100 span (others 0.4-0.7 %) |
 | Provenance | recorded | the reran A2-small cells ran on pod b's build of the same sources (`_C.so` differs from pod 1's; the build is not byte-reproducible), so cells in one table come from two A100s; each SilverTorch / LiNR ratio is still within one process |
 
 ## Campaign v2 (Phase V): not yet validated

@@ -1,4 +1,4 @@
-"""Tables and figures for research/paper/results.md (NOT CITABLE): adapted official SilverTorch against LiNR V1-V3.
+"""Tables and figures for research/paper/results.md: adapted official SilverTorch against LiNR V1-V3.
 
 Usage: build_results.py HUB OUT
 
@@ -9,7 +9,9 @@ artifacts/meta-fork/<gate>/out/*.json. Every number is read from those files.
 The head-to-head is the NUMBERS A2 / A3 legs only: SilverTorch (backend "official-fork") at the picked points, interleaved
 with LiNR V1 / V2 in one process per cell group. A cell measured twice (A2-small and its rerun, A2b and its rerun, A2-small
 and A2b at LAION 1 / 3 M) keeps its stable record, the later leg's when both are stable; a cell unstable in every run keeps
-its record and the flag. yfcc10m-synth is read at k 100 only (its LiNR k 1000 cells miss the exact gate, HB-6). LiNR's
+its record and the flag. yfcc10m-synth LiNR at k 1000 is kept and flagged: fp16 item storage against the fp32 oracle
+(HB-6; the user's YFCC allowance covers k 1000). LiNR V2 at bs 256 on PubMed c3_journal_reverse / all5 and YFCC is a
+TIMEOUT (no usable result after 3.6-9.8 h at 80 GB), shown as such in linr_numbers. LiNR's
 claims (C1-C3) read campaign-final plus the LiNR-only NUMBERS legs (L1-L4); C4 / C5 / C7 read the final pass and the gates.
 """
 
@@ -110,10 +112,11 @@ def load_records():
 def load_timed():
     """Every timed record of the A2 / A3 legs, and one record per cell (module docstring)."""
     raw = params(pd.concat([leg(n).assign(leg_rank=i) for i, n in enumerate(TIMED)]))
-    df = raw[
-        raw.perf_mode.notna() & ~((raw.dataset == "yfcc10m-synth") & (raw.perf_k > 100))
-    ]
+    df = raw[raw.perf_mode.notna()]
     df["unstable"] = df.unstable.fillna(False).astype(bool)
+    df["fp16_flag"] = (
+        (df.dataset == "yfcc10m-synth") & df.algo.isin(LINR) & (df.perf_k >= 1000)
+    )
     key = CELL + ["algo", "backend", "n_lists", "n_probe", "perf_mode"]
     df = df.sort_values(["unstable", "leg_rank"], ascending=[True, False])
     return raw, df.drop_duplicates(key)
@@ -217,7 +220,9 @@ def head_to_head(timed, mode="graph"):
         v=lambda d: d.algo.map(LINR)
     )
     ms = li.pivot_table(index=CELL, columns="v", values="perf_median_ms")
-    ms["linr_unstable"] = li.groupby(CELL).unstable.any()
+    ms["linr_unstable"] = (
+        li.groupby(CELL).unstable.any() | li.groupby(CELL).fp16_flag.any()
+    )
     ms["linr_ms"] = ms[["V1", "V2"]].min(axis=1)
     ms["linr_best"] = ms[["V1", "V2"]].idxmin(axis=1)
     h = st.merge(ms.reset_index(), on=CELL)
@@ -329,6 +334,17 @@ def linr_numbers(df):
         columns="v",
         values="perf_median_ms",
     ).reset_index()
+    pv["V2_status"] = "ok"
+    timeout = pv.dataset.isin(["pubmed", "yfcc10m"]) & (pv.perf_bs == 256)
+    timeout &= pv.sweep.isin(["c3_journal_reverse", "all5", "tags_and"])
+    pv.loc[timeout, ["V2", "V2_status"]] = [np.nan, "TIMEOUT"]
+    missing = [
+        dict(leg="L1-linr-bs64", dataset=ds, dim=d, filter_kind="clause", sweep=sw)
+        | dict(perf_bs=256, perf_k=k, V2_status="TIMEOUT")
+        for ds, d, sw in [("yfcc10m", 192, "tags_and")]
+        for k in [100, 1000]
+    ]
+    pv = pd.concat([pv, pd.DataFrame(missing)], ignore_index=True)
     pv["v2_over_v1"] = pv.V2 / pv.V1
     return pv
 
@@ -644,7 +660,7 @@ def fig_synth(h, path):
             )
             ax.legend(fontsize=6)
     fig.suptitle(
-        "NOT CITABLE: NUMBERS legs, SilverTorch adapted from Meta's code against LiNR",
+        "NUMBERS legs (gate green): SilverTorch adapted from Meta's code against LiNR",
         fontsize=9,
     )
     fig.tight_layout()
@@ -682,7 +698,7 @@ def fig_tuned(tn, path):
                 title=f"recall >= {t}, bs {bs}, k 100",
             )
     fig.suptitle(
-        "NOT CITABLE: tuned SilverTorch point per cell; filters it cannot reach are not drawn",
+        "Tuned SilverTorch point per cell (NUMBERS, gate green); filters it cannot reach are not drawn",
         fontsize=9,
     )
     fig.tight_layout()
@@ -707,7 +723,7 @@ def fig_c1(curves, path):
             title=f"LiNR V2 against V1, bs {bs}",
         )
         ax.legend(fontsize=7)
-    fig.suptitle("NOT CITABLE until D1-G", fontsize=9)
+    fig.suptitle("LiNR final pass (D1-G green)", fontsize=9)
     fig.tight_layout()
     fig.savefig(path.with_suffix(".png"), dpi=150)
     fig.savefig(path.with_suffix(".pdf"))
@@ -751,7 +767,7 @@ def main():
     }
     with open(OUT / "tables.md", "w") as f:
         f.write(
-            "# results-draft tables (NOT CITABLE). SilverTorch measured on the NUMBERS legs\n\n"
+            "# results-draft tables. SilverTorch measured on the NUMBERS legs (gate green), LiNR final pass (D1-G green)\n\n"
         )
         for name, t in tables.items():
             t.to_csv(OUT / f"{name}.csv", index=False)
