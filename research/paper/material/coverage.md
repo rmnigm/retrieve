@@ -68,7 +68,7 @@ the outline did not yet use are marked **add**.
 
 | subtree | used in |
 |---|---|
-| `artifacts/meta-fork/head-82fafb6` | the 1,536-cell X grid and its speed: §6 T3 (`adaptation.csv`) |
+| `artifacts/meta-fork/head-82fafb6` | the 1,488-cell X grid (without YFCC) and its speed: §6 T3 (`adaptation.csv`) |
 | `artifacts/meta-fork/pod-b-32c0d61` | the head's 300 X cells and 36 R cells, speed at the head: §6 T3 |
 | `artifacts/meta-fork/laion30m-b1-32c0d61` | X 64 / 64 bloom at 30 M, speed median 0.279: §6 T3 |
 | `artifacts/meta-fork/head-r-82fafb6` | gate R (0 false positives, configured width + recheck): §4.4 (0 false positives), §6 |
@@ -91,7 +91,7 @@ the outline did not yet use are marked **add**.
 | Library suite (1017 passed), harness suite (970 passed, 161 s) | §8 availability: the gates a reviewer can rerun (material C2 Q16) |
 | V1-FUSE | §4.3 mechanism (compiled torch's bs 1 win: reduction order, fp16 top-k keys) |
 | META-FORK: build, Meta's suite (122), library tests, X, speed, S, capture, compile, R, C10, C11 | §6 T3 (X, R, S, capture, compile, speed); C10 / C11 are design facts for CHANGES, not paper rows |
-| NUMBERS: gate, eager / graph ids 2,151 / 2,151, unstable cells, probe curves, timed legs, LiNR legs | §3 (protocol, unstable cells), §4, §5 |
+| NUMBERS: gate, eager / graph ids 2,115 / 2,115, unstable cells, probe curves, timed legs, LiNR legs | §3 (protocol, unstable cells), §4, §5 |
 | NUMBERS: end-task bridge | §3 recall paragraph |
 | NUMBERS: YFCC precision losses | not used: YFCC is out of the study |
 | NUMBERS: bloom width (A4) | §4.4, with the FPR attribution caveat |

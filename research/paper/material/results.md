@@ -45,7 +45,7 @@ condition given with it.
 
 | claim | verdict | condition | alternative wording (survey pattern 6) |
 |---|---|---|---|
-| C1 (L-3…L-5) | **reproduced in shape at bs 1, not in location; weak at bs 16; reversed at bs ≥ 64** (final wording: outline open item 3) | a V1 / V2 crossover in pass rate exists at bs 1 at every N and d, at p 0.79-0.97. LiNR's own high-pass setting (p ≈ 0.11) has V1 faster by 3.0×; ours has V2 faster there (fused V2, LN-1 / L-12) | "partially confirmed: the crossover exists, at a far higher pass rate than in the original" |
+| C1 (L-3…L-5) | **reproduced in shape at bs 1, not in location; weak at bs 16; reversed at bs ≥ 64** (final wording: outline open item 3) | a V1 / V2 crossover in pass rate exists at bs 1 at every N and d, at p 0.85-0.97. LiNR's own high-pass setting (p ≈ 0.11) has V1 faster by 3.0×; ours has V2 faster there (fused V2, LN-1 / L-12) | "partially confirmed: the crossover exists, at a far higher pass rate than in the original" |
 | C2 (L-6) | **not comparable as stated** (end-task recall, unpublished protocol); under our metric **holds in direction, not in size, at bs 16 only** | 1 % pool: V3 at 0.83 of V2 at bs 16, recall 0.89 (median); slower at bs 1 (1.08). Goodreads end-task bridge below | "cannot be fully assessed due to the recall definition; on our metric, the gain appears only at bs 16" |
 | C3 (L-2) | **holds in direction, not in size** | eager torch 1.4-2.0× (bs 1), 5.8-6.8× (bs 16), never near 100×; `torch.compile` is mostly faster at bs 1 | "the gap is significantly narrower than in the original" |
 | C4 (S-8…S-10, S-14) | **FPR: far below the paper's at 1024 bits, on SilverTorch's own bloom** (no recheck: 0 on arXiv / Goodreads, 4.3e-8 on PubMed at 1024 bits / k_hash 5); **memory: reproduced as arithmetic** (N · m_bits / 8); no false negatives; the transposed layout is **not in the released code** (OF-1) | `fp_adapted.py` on the adapted index; NUMBERS A4; final-pass `bloomwidth` on Meta's code as published | "confirmed within the original evaluation scope (FPR, memory); the layout claim cannot be assessed on the released code" |
@@ -90,7 +90,7 @@ L-3 / L-5):
 **Mechanism.** Our V2 is a fused compaction plus scoring kernel (LN-1).
 LiNR §6 says its numbers are un-fused and predicts that fusing changes the
 V1 / V2 picture (L-12). This explains why the bs 1 crossover moves from
-below 11 % to 0.79-0.97. Batching favours V1: V2 gathers per query, V1
+below 11 % to 0.85-0.97. Batching favours V1: V2 gathers per query, V1
 scores one shared matrix at memory bandwidth.
 
 ### C2: V3 keeping ~1 % gives ~10 % at near-parity recall (L-6)
@@ -260,7 +260,7 @@ Highest recall@100 on the probe curve, with the smallest
 | LAION 10 M | `c0_domain` / `tags4` | 0.897 / 0.951 | — / 4096/1024 | — / 65536/16384 |
 | LAION 30 M | `c0_domain` / `tags4` | 0.908 / 0.961 | 16384/4096 / 4096/1024 | — / 16384/4096 |
 
-- **Synthetic filters.** 0.95 is reached on 18 of 31 synthetic sweeps
+- **Synthetic filters.** 0.95 is reached on 18 of 27 synthetic sweeps
   (7 uniform sets × 4 pass rates + 3 correlated), including all three
   arxiv-corr-synth sweeps. Not reached: p 0.001 at 0.8-10 M; laion3m-synth
   p 0.01; any laion1m-synth sweep (only 512 lists, probes ≤ 128: a short
@@ -506,7 +506,7 @@ labelled approximate, controller c3 ruling 8):
 
 | id | effect on a verdict |
 |---|---|
-| LN-1 / L-12 (fused V2) | moves C1's bs 1 crossover from below 11 % (LiNR) to 0.79-0.97: "reproduced in shape", not in location |
+| LN-1 / L-12 (fused V2) | moves C1's bs 1 crossover from below 11 % (LiNR) to 0.85-0.97: "reproduced in shape", not in location |
 | LN-5, HB-2 (recall@k against the exact oracle; LiNR used end-task recall@2000) | makes C2 "not comparable as stated"; any recall-based verdict (C2, C6) is on our metric; the Goodreads bridge links the two |
 | LN-3 (pool as a fraction of passing items, min 2,000) | C2's "1 %" is a different absolute pool; the LAION curve is flat below 5 % |
 | LN-8 (V3 bits capped at d; LiNR 512) | C2's recall at a 1 % pool is lower at d ≤ 256; near parity only at 768 bits (PubMed) |

@@ -281,7 +281,7 @@ novelty the call asks for. Kept apart from §4 (survey pattern 2).
 - Synthetic filters: at p ≥ 0.01 SilverTorch wins wherever it reaches the
   target (0.03-0.94); LiNR V1 wins the 17 reached cells at p ≥ 0.1 with
   bs ≥ 16 where many probes are needed (worst 2.7×). k 1000 shrinks the
-  reached cells (24 of 45 at 0.90 against 35 of 49 at k 100). Bloom
+  reached cells (24 of 44 clause cells per batch size at 0.90 against 35 of 44 at k 100). Bloom
   filtering: SilverTorch wins every bloom cell it reaches (0.09-0.85).
 - Index memory and build time: the adapted int8 clause index is 0.56-0.72
   of LiNR's fp16 index (PubMed 8.8 vs 15.8 GiB), but its bloom index is

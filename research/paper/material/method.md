@@ -124,7 +124,7 @@ State, all from [validation META-FORK](../../validation.md#meta-fork-backendoffi
 | compile | 35 passed: `opcheck` 16 ops, `fullgraph` 0 breaks, default + `reduce-overhead`, dynamic False / True, `torch.export` equals eager; `backend="official"` refuses to compile |
 | Meta's suite / library tests | 122 passed; `test_official.py` 146 passed / 26 skipped (fork-only gates on the `official` parametrisation) |
 | review | **ACCEPT** at `1f6fed8` |
-| NUMBERS gate, eager vs graph ids | 2,151 / 2,151 adapted (cell, bs, k) equal (validation) |
+| NUMBERS gate, eager vs graph ids | 2,115 / 2,115 adapted (cell, bs, k) equal (`summary.json`) |
 | NUMBERS gate, int32 equal to published | **not exercised by the NUMBERS legs** (no leg runs `backend="official"`); equality rests on X above |
 
 ### Q7. Speed against the published code

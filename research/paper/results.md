@@ -135,8 +135,8 @@ Table: `tuned.csv`. Figure: `fig_h2h_synth`. At 0.90, k 100:
 
 ### k 1000, k 2048 and bloom filtering
 
-- **k 1000:** fewer cells reach the target (24 of 45 at 0.90, 17 at 0.95,
-  against 35 and 26 of 49 at k 100). SilverTorch wins every reached cell at
+- **k 1000:** fewer cells reach the target (24 of 44 clause cells per batch size at 0.90, 17 at 0.95,
+  against 35 and 26 of 44 at k 100). SilverTorch wins every reached cell at
   bs 1 (median ratio 0.42 at 0.90), but LiNR V1 wins 7 of 17 at 0.95, bs 64.
 - **k 2048** (the papers' own k; arXiv, Goodreads, PubMed): SilverTorch wins
   at 0.90 and 0.95 on arXiv `c0_maincat` (0.23-0.72) and Goodreads `c0_genre`
