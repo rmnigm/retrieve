@@ -1,7 +1,7 @@
 # D3 PubMed: `bloomwidth` (quality) at campaign-v2
 
 Roadmap D3, the PubMed piece, on pod `a100-x1-b` (1x A100-SXM4-80GB). State and caveats:
-[validation](../../../validation.md#campaign-v2-phase-v-not-yet-validated). NOT CITABLE until D1-G.
+[validation](../../../validation.md#campaign-v2-phase-v). NOT CITABLE until D1-G.
 
 | file | what |
 |---|---|

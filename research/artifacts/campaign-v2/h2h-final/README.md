@@ -7,7 +7,7 @@ code_version `408b1188` (main checkout at staging `f2be5c7`), A100-SXM4-80GB, GP
 0-63,128-191, no neighbour GPU (single-GPU pod). Records: Hub `campaign-v2/goodreads-h2h` and
 `campaign-v2/arxiv-h2h`; logs, the 1 Hz clock trace, the summaries and the `bench report --manifest`
 output: Hub `artifacts/h2h-final` ([hub-index](../../hub-index.md)). Not citable until D1-G. The
-state of the step is in [validation](../../../validation.md#campaign-v2-phase-v-not-yet-validated).
+state of the step is in [validation](../../../validation.md#campaign-v2-phase-v).
 
 | file | what |
 |---|---|

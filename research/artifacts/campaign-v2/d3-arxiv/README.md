@@ -5,7 +5,7 @@ Roadmap Phase V, D3, the arXiv piece. Records on the Hub:
 - `campaign-v2.1/arxiv-bloomwidth-timed`, library `f01255f1`. This replaces `campaign-v2/arxiv-bloomwidth-timed`, which is stale because
   the quantize fix adds ≈ 30 µs to every SilverTorch eager path.
 
-The state is in [validation](../../../validation.md#campaign-v2-phase-v-not-yet-validated). NOT CITABLE until D1-G.
+The state is in [validation](../../../validation.md#campaign-v2-phase-v). NOT CITABLE until D1-G.
 
 | file | what |
 |---|---|

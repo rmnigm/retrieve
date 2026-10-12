@@ -64,7 +64,7 @@ decisions.
   accepted the 25 listed, explained failures of the batching check
   (`median_ms(bs=16) < 16 × median_ms(bs=1)`) without loosening it; the
   checks and the entries are in
-  [validation](validation.md#campaign-v2-phase-v-not-yet-validated) (D1-G).
+  [validation](validation.md#campaign-v2-phase-v) (D1-G).
 - **NUMBERS gate green** (controller ACCEPT, 2026-10-12), on the D1-G
   model, with the user's rulings: yfcc10m-synth LiNR at k 1000 included
   and flagged (the fp16 storage shortfall, HB-6); LiNR V2 at bs 256 on

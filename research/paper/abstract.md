@@ -24,6 +24,11 @@ LiNR and SilverTorch*
 
 > Model-based retrieval implements nearest-neighbour search and attribute filtering as PyTorch operators in the model code, executed inside PyTorch inference rather than by a separate ANN index. This removes a dedicated serving stack and lets search, filtering and scoring be co-designed within one model graph. Two such approaches target semantic search and recommendation: LiNR, an exhaustive GPU scan with pre- or post-filtering, and SilverTorch, an int8 IVF index with a Bloom filter fused into the probe. Each was evaluated only on proprietary data, and they were not compared empirically. We reproduce and test their claims on five public datasets with real and synthetic attribute filters at scales up to 30M items, implementing LiNR from its paper and adapting Meta's released SilverTorch code. For LiNR, the pre- versus post-filtering trade-off holds for single queries but largely disappears in batches, and its 1-bit variant is faster only for batched queries and recovers recall with enough bits per item. For SilverTorch, filtering only the probed clusters beats filtering the full index first only at 30M items, and recall at the default probe count falls with filter selectivity. At matched recall, IVF search is faster for broad filters and exhaustive scanning for highly selective ones. We release all code and measurements.
 
+**Wording note.** The abstract says "pre- or post-filtering" for LiNR; the
+paper text uses LiNR's own terms (V1 and V2 both pre-filter: V1 masks, V2
+gathers; LiNR argues against post-filtering, §5.3, §6). The abstract stays as
+submitted.
+
 The last suggested edit, "recovers recall **only** with enough bits per
 item", was not confirmed; if the registered text differs from the quote
 above, the EasyChair record is the source of truth.
