@@ -143,33 +143,6 @@ measurement legs on the adapted backend; the paper written on them; the
 code cleaned; and **the full rerun of everything, pinned to the last repo
 version, as the very last step**.
 
-### 1. META-FORK: review, ACCEPT, tag
-
-Meta's official SilverTorch code, adapted (`official-fork/`,
-`backend="official-fork"`, branch `dev/meta-fork`): the chain fork-coder →
-GPU gate runner → fork-review, one agent at a time (chain notes under
-`.chains/meta-fork/`). What the adaptation changes and its parity gate:
-[Meta as published vs adapted](paper/meta-published-vs-adapted.md). The
-bar is the user's: bit-exact against Meta's published code, no host syncs,
-CUDA-graph capturable with the compile gate, a clean API, faster than
-Meta's `-O3` build. Being at least as fast as our Triton SilverTorch is
-no longer a target (Triton is out of the study, controller 2026-10-11): no
-new K fixes; the cells still slower than Triton are listed with their
-cause, for the record.
-
-- [ ] **fork-coder's done note**: what is in flight finished, every gate
-  result, the Triton-relative cells with cause.
-- [ ] **fork-review**: the branch against the plan's definition of done
-  (X bit-exact, R, zero host syncs, capture, the compile gate, one clean
-  API, licence and headers, docs). Fixes go back to fork-coder, then
-  review again. **ACCEPT** ends the chain.
-- [ ] **Then** (controller): tag `campaign-fork`; merge `dev/meta-fork`
-  into `staging` (the `official-fork/` member, its validation section,
-  `kernels.md`'s adapted-backend section).
-
-*Gate*: fork-review's ACCEPT note, every gate row green in validation's
-META-FORK section.
-
 ### 1b. DOCS-SPLIT: the project pages carry no research residue
 
 Needs 1 merged (`dev/meta-fork` edits the same pages); CPU, docs only,
@@ -188,84 +161,21 @@ does stays. Headings cited by code (`§`) keep their names.
 moved number present once in `research/`, no `docs/system` page naming a
 branch, pod or step's progress.
 
-### 2. NUMBERS: adapted SilverTorch over the study grid
+### 3. QUALITY: tests, review and fixes, no functional change
 
-Needs 1. Measurement legs at the `campaign-fork` tag, uploaded as Hub
-artifacts / `numbers-*` legs, that give the paper its numbers: SilverTorch
-on `backend="official-fork"` over the study grid (`filter`, `deep`,
-`synth`, `codesign`, `h2h`, tune-timed, `laion30m`, the N-sweep,
-`seeds-c7`, the C6 ceiling checks, `bloomwidth` for C4). LiNR's numbers
-come from `campaign-final` (not rerun here), except where an item below
-runs it beside SilverTorch. Meta's code as published (`official`, `-O3`)
-runs only in the cells that feed T3 and the parity spill (`h2h`,
-`codesign`). Configuration: int32 score path, exact recheck of bloom
-survivors on (C13); fp16 only as a reported variant where cheap
-([decisions](decisions.md#goal-and-scheduling)). Recall targets reported:
-0.90 and 0.95, 0.99 a stretch.
-
-The grid plan the user approved (2026-10-11; plan
-`.chains/results-draft/2026-10-11-163000000-grid-plan.md`), items 1-8 and
-10 (item 9, d apart from the dataset, is not scheduled):
-
-1. **Per-filter probe curves**: every filter sweep (real and synth),
-   `n_probe` doubling from 8 to the cap `n_lists` / 4, k 100 and 1000,
-   bs 1 / 16, in place of the fixed probe sets; the tuned point is
-   reported with the recall each filter gets
-   ([decisions](decisions.md#campaign-v2-user-2026-10-08), operating point).
-2. **Enough clusters at 10-30 M** (user, 2026-10-11): PubMed, YFCC and
-   LAION 10 M and LAION 30 M at `n_lists` {4096, 16384, 65536}, `n_probe`
-   doubling to the cap `n_lists` / 4, with the k 1000 check per `n_lists`
-   (whether the adapted top-k lifts the `n_probe` ≤ 1024 limit at k 1000
-   that forced 4096 lists; where it does not, k 1000 stays at the largest
-   `n_lists` that runs and the paper says so). The tuned point per size is
-   picked from this sweep.
-3. **The adapted code on the LAION N-sweep** (laion1m / 3m / 10m / 30m,
-   d256; real `c0_domain`, `tags4` and the synth rates) with one `n_lists`
-   rule across N (≈ 4√N to a power of two) and item 1's curves: the
-   paper's N axis.
-4. **Time the released configuration**: the shipped bloom default
-   (configured width C12 + exact recheck C13, decided) is what the paper's
-   SilverTorch bloom numbers use; Meta's semantics stay only in the "as
-   published vs adapted" table.
-5. **Interleaved SilverTorch vs LiNR**: SilverTorch and LiNR (V1, V2, the
-   best per cell) interleaved in one process per cell group (ABAB rounds,
-   as `seeds-c1`), so every SilverTorch / LiNR ratio has a paired CI.
-6. **bs 64** (and 256 where LiNR fits at 10 M) on the real filters and the
-   LAION sweep.
-7. **LiNR V3 as a curve**: candidate pool 0.5 / 1 / 2 / 5 / 10 / 20 % on the
-   real filters and the LAION sweep, at the default bits per d: the
-   approximate-vs-approximate comparison at matched recall.
-8. **Correlated filters**: `arxiv-corr-synth` gains LiNR V1 / V2 and the
-   adapted SilverTorch.
-10. **The papers' own k**: k 2048 on a subset (LiNR reports recall@2000;
-    SilverTorch top-k 1024-4096).
-
-The figures the paper leads with also get their points here (user,
-2026-10-11): F1 / F2 at 10 M and 30 M with the low and middle pass rates
-(0.001, 0.003, 0.03, 0.05) on uniform synth, the probe curve at 30 M, seeds
-0-2 on the cells a T2 confidence interval rests on.
-
-- Size the legs from the final pass's per-cell wall times (the method of
-  [F-REPRO sizing](artifacts/f-repro/README.md)).
-- After each leg: `bench upload --verify`, a [hub-index](artifacts/hub-index.md)
-  row, the validation row.
-
-*Gate*: every planned cell `ok`; eager-vs-graph ids equal on every
-adapted cell; the int32 cells' scores `torch.equal` to the published code
-where both ran. *Estimate*: not sized yet.
-
-### 3. RESULTS: the results draft on the real numbers, the abstract fixed
-
-Needs 2. Rebuild the results draft from NUMBERS' legs and LiNR's
-`campaign-final` records (`build_results.py` under the results-draft
-artifacts, on `dev/results-draft`), refresh [results](paper/results.md) and the
-story page, restate C1-C7's status in [claims](paper/claims.md), and fix
-the abstract's sentences ([abstract](paper/abstract.md)) to what the
-numbers say. CPU.
+Running (user, 2026-10-11/12). A test developer (`dev/tests-pass`) and two
+review pairs whose findings two fixers apply (`dev/quality-lib`,
+`dev/quality-harness`); records must not move, bit-exact gates stay
+bit-exact. Merge order: tests, then the fixers rebased on it. Deferred to
+5 / 6 (they change the public surface or the records read): the
+`PreparedFilter` shape, the two `bloom_path` knobs, the Triton SilverTorch
+cut list, `tab_t3` / h2h, pre-schema-4 record readers, the duplicate
+`upload-checkpoint` CLI, ETLs for out-of-study datasets.
 
 ### 4. PAPER: the user writes it
 
-Needs 3. The user writes the paper (ECIR 2027 reproducibility format, 12
+The NUMBERS legs, their results draft and the META-FORK accept (tag
+`campaign-fork`) are done ([validation](validation.md)). The user writes the paper (ECIR 2027 reproducibility format, 12
 pages LNCS) on RESULTS' numbers, against the
 [ECIR criteria](paper/ecir-criteria.md); agents support with tables,
 figures and the `research/paper/` sections on request (F2: the
@@ -291,7 +201,7 @@ gate grid's int32 cells (a rename changes no behaviour).
 
 ### 6. TRITON-ST-DELETE: delete the Triton SilverTorch reimplementation
 
-Needs 5 (rule 5: the adapted backend is accepted and NUMBERS measured it).
+Needs 5 (rule 5: the adapted backend is accepted and NUMBERS measured it, both done).
 Tag `triton-silvertorch-final` on `staging` first, then delete
 `SilverTorch`'s `backend="triton"` and `backend="torch"` paths: the
 `codesigned_probe_score*` and `bloom_full_mask` kernels and their
@@ -322,6 +232,10 @@ one GPU test on a real call is left). The paper's tables are regenerated
 from this parquet; a number that moves against RESULTS' is reported, not
 smoothed.
 
+Before it starts: the scripts under `research/artifacts/` still name
+old pre-split artifact paths (about 127, from the wiki split): fix them; seeds and
+error bars (user, 2026-10-11) are part of this run.
+
 *Gate*: every planned cell `ok`, D1-G's four checks, 0 manifest gaps.
 *Estimate*: sized at the step's start from NUMBERS' and the final pass's
 wall times.
@@ -339,8 +253,8 @@ accounts and the release decisions.
 ## Dependencies
 
 ```
-1 META-FORK ─> tag campaign-fork, merge ─> 2 NUMBERS ─> 3 RESULTS ─> 4 PAPER (user) ─┐
-                                  │           └─> 5 RENAME ─> 6 TRITON-ST-DELETE ──┴─> 7 FULL-RERUN (last) ─> 8 F4
-                                  └─> 1b DOCS-SPLIT (CPU, before 5)
+3 QUALITY ─> 4 PAPER (user) ─┐
+   └─> 5 RENAME ─> 6 TRITON-ST-DELETE ──┴─> 7 FULL-RERUN (last) ─> 8 F4
+1b DOCS-SPLIT (CPU, before 5)
 Needs the user: release decisions before F4
 ```
