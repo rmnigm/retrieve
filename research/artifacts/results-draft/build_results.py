@@ -3,8 +3,8 @@
 Usage: build_results.py HUB OUT
 
 HUB is a local copy of pinkmeme/eval-results holding numbers/<leg>/results.parquet (the NUMBERS legs),
-numbers/A1b-laion-small-lists/ceil/, campaign-final/merged-4016/results.parquet, campaign-final/ceiling-int8-*/ and
-artifacts/meta-fork/<gate>/out/*.json. Every number is read from those files.
+artifacts/results-draft/20261012-adapted/ (the adapted ceiling split and local pass rate), campaign-final/merged-4016/
+results.parquet and artifacts/meta-fork/<gate>/out/*.json. Every number is read from those files.
 
 The head-to-head is the NUMBERS A2 / A3 legs only: SilverTorch (backend "official-fork") at the picked points, interleaved
 with LiNR V1 / V2 in one process per cell group. A cell measured twice (A2-small and its rerun, A2b and its rerun, A2-small
@@ -12,7 +12,9 @@ and A2b at LAION 1 / 3 M) keeps its stable record, the later leg's when both are
 its record and the flag. yfcc10m-synth LiNR at k 1000 is kept and flagged: fp16 item storage against the fp32 oracle
 (HB-6; the user's YFCC allowance covers k 1000). LiNR V2 at bs 256 on PubMed c3_journal_reverse / all5 and YFCC is a
 TIMEOUT (no usable result after 3.6-9.8 h at 80 GB), shown as such in linr_numbers. LiNR's
-claims (C1-C3) read campaign-final plus the LiNR-only NUMBERS legs (L1-L4); C4 / C5 / C7 read the final pass and the gates.
+claims (C1-C3) read campaign-final plus the LiNR-only NUMBERS legs (L1-L4); C4 reads NUMBERS A4 (adapted widths) and Meta's
+code as published (final pass), C5 Meta's code as published, C6 the adapted code's curves, ceiling split and local pass rate
+(ADAPTED), C7 the gates. No Triton SilverTorch record feeds a table.
 """
 
 import glob
@@ -54,6 +56,9 @@ TIMED = [  # later wins between two stable records of one cell
     "A2-laion30m-synth",
     "A3-st-k2048",
 ]
+ADAPTED = (
+    "artifacts/results-draft/20261012-adapted"  # ceiling_adapted.py, gls_adapted.py
+)
 CURVES = [
     "A1-small",
     "A1-pubmed",
@@ -441,14 +446,16 @@ def c2(df):
         & (df.seed == 0)
         & (df.perf_k == 100)
         & (df.backend == "triton")
-        & df.suite.isin(["filter", "synth", "v3bits", "n-v3pool", "n-v3pool-laion"])
+        & df.suite.isin(
+            ["filter", "synth", "nsweep", "v3bits", "n-v3pool", "n-v3pool-laion"]
+        )
     ]
-    v2 = (
-        x[x.algo == "linr_v2"]
+    v2 = (  # LAION's V2 is in nsweep (final pass); V3 never from there, its pools are the NUMBERS legs
+        x[(x.algo == "linr_v2") & (x.suite != "v3bits")]
         .sort_values("suite_rank")
         .drop_duplicates(["dataset", "filter_kind", "sweep", "perf_bs"])
     )
-    v3 = x[x.algo == "linr_v3"]
+    v3 = x[(x.algo == "linr_v3") & (x.suite != "nsweep")]
     m = v3.merge(
         v2[["dataset", "filter_kind", "sweep", "perf_bs", "perf_median_ms"]],
         on=["dataset", "filter_kind", "sweep", "perf_bs"],
@@ -511,10 +518,15 @@ def c3(df):
 
 
 def c4(df):
-    x = df[df.suite == "bloomwidth"]
-    return x[
-        ["dataset", "sweep", "backend", "m_bits", "k_hash", "bloom_fp_rate", "recall"]
-    ].sort_values(["dataset", "backend", "k_hash", "m_bits"])
+    """Bloom width: the adapted code over m_bits (NUMBERS A4) beside Meta's code as published at its own width."""
+    meta = df[(df.suite == "bloomwidth") & (df.backend == "official")]
+    x = pd.concat([meta, params(leg("A4-bloomwidth"))])
+    x = x[x.perf_k.isna() | (x.perf_k == 100)].drop_duplicates(
+        ["dataset", "sweep", "backend", "m_bits", "k_hash"]
+    )
+    cols = ["dataset", "sweep", "backend", "m_bits", "k_hash", "bloom_fp_rate"]
+    cols += ["oracle_recall@100", "index_mib"]
+    return x[cols].sort_values(["dataset", "sweep", "backend", "k_hash", "m_bits"])
 
 
 def c5(df, gc):
@@ -554,8 +566,7 @@ def c6(curves):
     """The adapted code's probe curves (A1 legs, quality only) and the int8 / fp16 ceiling checks."""
     cols = ["dataset", "dim", "filter_kind", "sweep", "pass_rate", "n_lists", "n_probe"]
     q = curves[cols + ["oracle_recall@100", "oracle_recall@1000"]]
-    files = glob.glob(str(HUB / "campaign-final/ceiling-int8-*/ceiling-*.json"))
-    files += glob.glob(str(HUB / "numbers/A1b-laion-small-lists/ceil/ceiling-*.json"))
+    files = glob.glob(str(HUB / ADAPTED / "ceil/ceiling-*.json"))
     ceil = []
     for f in sorted(files):
         d = json.load(open(f))
@@ -570,7 +581,7 @@ def c6(curves):
                 int8_shipped=r["shipped"],
                 int8_per_row=r["per_row"],
                 fp16=r["fp16"],
-                source=f.split("/")[-3],
+                shipped_global=r["global"],
             )
         )
     keys = ["dataset", "filter_kind", "sweep", "n_lists", "n_probe"]
@@ -761,6 +772,7 @@ def main():
         "c5_adapted": adapted5,
         "c6_recall": c6q,
         "c6_ceiling": c6c,
+        "c6_local_pass": pd.read_csv(HUB / ADAPTED / "gls_adapted.csv"),
         "linr_vs_n": nsw,
         "linr_mem_n": nmem,
         "memory": memory(df, timed),
