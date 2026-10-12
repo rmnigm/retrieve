@@ -3,7 +3,7 @@
   <span class="eyebrow">Reproducibility paper · results · 12 Oct 2026</span>
   <h1>Where SilverTorch can reach the recall you ask for, it beats exact LiNR at every size</h1>
   <p class="lede">Two families of filtered GPU retrieval on one A100: <span class="key"><i class="sw" style="background:var(--st)"></i>SilverTorch</span> (Meta's official code, adapted by us) probes a few clusters of an int8 index; <span class="key"><i class="sw" style="background:var(--linr)"></i>LiNR</span> (V1 mask-then-score, V2 gather-then-score, our implementation from the paper) scans every item exactly. Every SilverTorch point here was timed in the same process as LiNR, from 0.8 M to 30 M items.</p>
-  <div class="banner"><span>ⓘ</span><span><b>Citable, seed 0.</b> Both measurement gates are green. <b>Recall</b> here means fidelity to exact search: the share of the exact filtered top-k (highest inner products over the whole catalogue, fp32, same filter) that a method returns. It is not the papers' end-task recall, but on Goodreads the two move together (Pearson 0.88–0.94). Cells unstable in every run, and LiNR on YFCC-synth at k 1000 (fp16 storage), are marked †.</span></div>
+  <div class="banner"><span>ⓘ</span><span><b>Citable, seed 0.</b> Both measurement gates are green. <b>Recall</b> here means fidelity to exact search: the share of the exact filtered top-k (highest inner products over the whole catalogue, fp32, same filter) that a method returns. It is not the papers' end-task recall, but on Goodreads the two move together (Pearson 0.88–0.94). Cells unstable in every run are marked †.</span></div>
 </header>
 
 <section>
@@ -41,7 +41,7 @@
   <span class="eyebrow">5 · Inside LiNR</span>
   <h2>LiNR's V2 beats V1 only for one query at a time</h2>
   <div class="chart"><div class="legend" id="lg-c1"></div><svg id="c-c1" viewBox="0 0 700 300" role="img" aria-label="LiNR V2 over V1 latency against pass rate at bs 1 and bs 16 for three index sizes"></svg></div>
-  <p class="note"><b>How to read it:</b> below the line V2 (gather the passing items, then score) is faster than V1 (score everything, mask). At bs 1 V2 wins below a pass rate of about 0.8–0.97, by more as N grows. At bs 16 the crossover drops to about 0.02; at bs 64 and 256, V1 wins on every real filter, and V2 at bs 256 times out on PubMed and YFCC.</p>
+  <p class="note"><b>How to read it:</b> below the line V2 (gather the passing items, then score) is faster than V1 (score everything, mask). At bs 1 V2 wins below a pass rate of about 0.8–0.97, by more as N grows. At bs 16 the crossover drops to about 0.02; at bs 64 and 256, V1 wins on every real filter, and V2 at bs 256 times out on PubMed.</p>
 </section>
 
 <section>
@@ -58,7 +58,7 @@
 </section>
 
 <footer class="foot">
-  <span>Tables and the script that writes them: <code>research/artifacts/results-draft/build_results.py</code>; outputs on the results Hub under <code>artifacts/results-draft/20261012</code> (checks: <code>20261012-checks</code>). Page text: <code>research/paper/results.md</code>.</span>
+  <span>Tables and the script that writes them: <code>research/artifacts/results-draft/build_results.py</code>; outputs on the results Hub under <code>artifacts/results-draft/20261013</code>. Page text: <code>research/paper/results.md</code>.</span>
   <span>Inputs: the NUMBERS legs (SilverTorch adapted, interleaved with LiNR V1 / V2, bs 1 / 16 / 64, k 100 / 1000), the LiNR final pass (one library version) and the adapted code's gate grid. Latencies are CUDA-graph medians per batch; A100-SXM4-80GB.</span>
 </footer>
 </div>
