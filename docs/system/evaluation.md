@@ -162,10 +162,10 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    batch size (1, 16), mean + p95, label recall on filtered sets, high/low
    pass-rate bucketing by `pass_rate`. Necessary differences: in-process
    (no RPC, no user tower, no 5,000-request replay), smaller catalogs than
-   the papers' 10-80 M / 15.5 M, an 80 GB card, k ≤ 1000 against
-   1024/2000, closed-loop QPS rather than open-loop load, no live updates.
-   `eager` is the comparable number; `graph` is the deployed-best-case
-   number and is reported alongside, never instead.
+   the papers' 10-80 M / 15.5 M, an 80 GB card, k 100 / 1000 with k 2048 on
+   a subset against 1024/2000, closed-loop QPS rather than open-loop load, no
+   live updates. `graph` is the headline mode and `eager` the secondary one,
+   reported beside it ([decisions](../../research/decisions.md#campaign-v2-user-2026-10-08)).
 8. **Cell cost.** Quality once per cell (not per k); perf the suite's
    k × bs × modes × 3 windows. Build params sweep separately from query params (one
    build, many query configs). Measured per-cell wall times are in the

@@ -48,7 +48,7 @@
   <span class="eyebrow">6 · Co-design</span>
   <h2>Meta's "probe, then filter" pays off only at 10–30 M items</h2>
   <div class="chart"><div class="legend" id="lg-c5"></div><svg id="c-c5" viewBox="0 0 700 280" role="img" aria-label="Full-index bloom filter time over probe-then-filter time against index size, Meta's code as published"></svg></div>
-  <p class="note"><b>How to read it:</b> above 1, filtering inside the probed clusters (the paper's co-design) beats building the filter over the whole index first. With Meta's code as published, the paper's 1.79–2.15× shows up at 30 M; below 10 M the full-index path is faster. The adapted code is roughly neutral at bs 1 and gains 1.1–1.6× at bs 64 (median).</p>
+  <p class="note"><b>How to read it:</b> above 1, filtering inside the probed clusters (the paper's co-design) beats building the filter over the whole index first. Measured on Meta's code as published: the paper's 1.79–2.15× shows up at 30 M; below 10 M the full-index path is faster. The adapted code has no full-index path to compare: it filters only the probed clusters by design.</p>
 </section>
 
 <section>

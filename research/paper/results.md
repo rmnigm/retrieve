@@ -47,9 +47,9 @@ LiNR V1 to V3, which we implemented from the paper.
   k 100 only.
 - **Claims C1-C6:** LiNR from the final pass plus the LiNR-only NUMBERS legs
   (bs 64 / 256, correlated filters, k 2048, the V3 candidate pool); the
-  SilverTorch probe curves (C6) from the adapted code. C4 and C5 for Meta's
-  code as published come from the final pass, and C7 from the adaptation's
-  gate grid.
+  SilverTorch probe curves (C6) from the adapted code. C4 and C5 come from
+  Meta's code as published in the final pass (C5 only there: the adapted code
+  refuses the full-mask path), and C7 from the adaptation's gate grid.
 - **The script:** [`build_results.py`](../artifacts/results-draft/build_results.py)
   writes every table and figure to Hub `artifacts/results-draft/20261012`
   ([hub-index](../artifacts/hub-index.md)).
@@ -172,7 +172,7 @@ apart from the head-to-head above. Claims C1-C7 are listed in
 | claim | verdict | evidence |
 |---|---|---|
 | C4: bloom false-positive rate about 0.067 at 1024 bits | **ours is lower.** At 1024 bits, 0 false positives on arXiv and Goodreads and 1e-5 on PubMed `c0_mesh` (k_hash 3, Meta's code as published). The adapted code's default bloom adds an exact recheck, so it returns no false positives by construction | `c4_bloom.csv` |
-| C5: co-design (probe then filter) 1.79-2.15× faster than filter then probe | **Meta's code as published:** holds at 30 M (1.07-2.20 at bs 16, 1.69-5.56 at bs 64) and at 10 M bs 64 (1.13-2.35); reversed at 0.8-3 M at bs 1-16 (0.78-0.89). **Adapted code** (gate grid, ≤ 10 M): neutral at bs 1 (median 0.93-1.03); at bs 64 1.08-1.56 (median), up to 3.2 on multi-clause filters | `c5_meta.csv`, `c5_adapted.csv` |
+| C5: co-design (probe then filter) 1.79-2.15× faster than filter then probe | **Measured on Meta's code as published only:** holds at 30 M (1.07-2.20 at bs 16, 1.69-5.56 at bs 64) and at 10 M bs 64 (1.13-2.35); reversed at 0.8-3 M at bs 1-16 (0.78-0.89). The adapted code refuses the full-mask path by design (K fix 17), so it has no C5 column | `c5_meta.csv` |
 | C6: int8 IVF cannot reach 0.95 recall; selective filters need more probes | **partially, on the adapted code.** At 24 probes recall falls with selectivity (0.93 to 0.05 on goodreads-synth from pass rate 1 to 0.001). With enough probes, 0.95 is reached on Goodreads, arXiv, LAION `tags4` at 10 M and 30 M, and most synthetic filters. It is not reached on LAION `c0_domain` at any size (top 0.85-0.91), PubMed (`c0_mesh` 0.9499, `c3_journal_reverse` 0.92, the int8 ceiling; fp16 0.996) or YFCC (0.72; per-row int8 0.75, fp16 0.97) | `c6_recall.csv`, `c6_ceiling.csv` |
 | C7 (restated): the adaptation keeps Meta's results and removes its overheads | **ids and scores identical to Meta's code in 1,536 / 1,536 gate cells at ≤ 10 M (30 M in [validation](../validation.md#meta-fork-backendofficial-fork)); eager time 0.12-0.82 of Meta's (median per dataset and filter), at most 1.03.** On the NUMBERS legs, eager and graph return the same ids on all 2,151 adapted cells | `adaptation.csv`, `summary.json` |
 
