@@ -27,7 +27,59 @@ const pct = p => p >= 0.01 ? (p * 100).toFixed(p >= 0.1 ? 0 : 1) + " %" : (p * 1
 const fmtMs = v => v < 1 ? (v * 1000).toFixed(0) + " µs" : v.toFixed(2) + " ms";
 const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
 
-/* 1. production setting */
+/* 1. tuned point per dataset size */
+(function () {
+  const svg = document.getElementById("c-size"), ctl = document.getElementById("ctl-size");
+  let t = 0.9;
+  [0.9, 0.95].forEach(v => {
+    const b = document.createElement("button"); b.id = "size-" + v; b.textContent = "recall target " + v.toFixed(2);
+    b.onclick = () => { t = v; draw(); }; ctl.appendChild(b);
+  });
+  const ramp = { 1: "var(--st-1)", 16: "var(--st-2)", 64: "var(--st-3)" };
+  function draw() {
+    [...ctl.children].forEach(b => b.setAttribute("aria-pressed", b.id === "size-" + t));
+    clear(svg);
+    const rows = D.size.filter(r => r.t === t), top = 34, rh = 30, x0 = 220, x1 = 520, cx = 540;
+    const sx = log(0.8, 40, x0, x1);
+    el("text", { x: x0, y: 14, class: "lbl" }, svg, "× faster than the best exact LiNR");
+    el("text", { x: cx, y: 14, class: "lbl" }, svg, "tuned setting");
+    [1, 2, 5, 10, 20].forEach(v => {
+      el("line", { x1: sx(v), x2: sx(v), y1: top - 8, y2: top + rows.length * rh - 6, stroke: v === 1 ? "var(--ink-3)" : "var(--grid)" }, svg);
+      el("text", { x: sx(v), y: top + rows.length * rh + 8, class: "axis", "text-anchor": "middle" }, svg, v + "×");
+    });
+    let prev = null;
+    rows.forEach((r, i) => {
+      const y = top + i * rh + 8;
+      if (r.ds !== prev) { el("text", { x: 0, y: y - 2, class: "lbl" }, svg, r.ds); prev = r.ds; }
+      el("text", { x: 0, y: y + 11, class: "axis" }, svg, r.sweep + " · " + pct(r.pass_rate));
+      const sp = [1, 16, 64].map(b => r.sp[b]).filter(v => v != null);
+      if (!sp.length) {
+        el("rect", { x: x0, y: y - 7, width: x1 - x0, height: 14, rx: 3, fill: "url(#hatch)" }, svg);
+        el("text", { x: x0 + 8, y: y + 4, class: "axis", style: "fill:var(--ink-2)" }, svg, `never reaches ${t.toFixed(2)} (top ${r.top}): exact LiNR ${r.linr} wins`);
+      } else {
+        el("line", { x1: sx(Math.min(...sp)), x2: sx(Math.max(...sp)), y1: y, y2: y, stroke: "var(--st-soft)", "stroke-width": 4 }, svg);
+        [1, 16, 64].forEach(b => {
+          const v = r.sp[b]; if (v == null) return;
+          el("circle", { cx: sx(Math.max(0.8, v)), cy: y, r: 5, fill: b === 1 ? "var(--surface)" : ramp[b], stroke: ramp[b === 1 ? 16 : b], "stroke-width": 2 }, svg);
+        });
+        el("text", { x: cx, y: y + 4, class: "axis" }, svg, r.cfg);
+      }
+      const hit = el("rect", { x: 0, y: y - 14, width: 700, height: rh - 2, class: "hit" }, svg);
+      bindTip(hit, `<b>${r.ds} · ${r.sweep}</b><br>pass rate ${pct(r.pass_rate)}<br>` + (sp.length ? `${r.cfg}, recall ${r.recall}<br>bs 1 / 16 / 64: ${[1, 16, 64].map(b => r.sp[b] == null ? "–" : r.sp[b] + "×").join(" / ")} faster` : `SilverTorch tops out at recall ${r.top}<br>exact LiNR ${r.linr} wins by default`));
+    });
+    const ly = top + rows.length * rh + 26;
+    [[1, "one query"], [16, "batch of 16"], [64, "batch of 64"]].forEach(([b, n], i) => {
+      el("circle", { cx: x0 + i * 100, cy: ly, r: 4.5, fill: b === 1 ? "var(--surface)" : ramp[b], stroke: ramp[b === 1 ? 16 : b], "stroke-width": 2 }, svg);
+      el("text", { x: x0 + i * 100 + 10, y: ly + 4, class: "axis" }, svg, n);
+    });
+    const defs = el("defs", {}, svg), pat = el("pattern", { id: "hatch", width: 8, height: 8, patternUnits: "userSpaceOnUse", patternTransform: "rotate(135)" }, defs);
+    el("rect", { width: 5, height: 8, fill: "var(--linr-soft)" }, pat);
+    svg.setAttribute("viewBox", `0 0 700 ${ly + 14}`);
+  }
+  draw();
+})();
+
+/* 2. production setting */
 (function () {
   const svg = document.getElementById("c-prod");
   const rows = D.prod, top = 34, rh = 40, L = 200, x0 = 210, x1 = 470, r0 = 510, r1 = 680;
@@ -60,11 +112,11 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
   svg.setAttribute("viewBox", `0 0 700 ${top + rows.length * rh + 34}`);
 })();
 
-/* 2. latency vs pass rate */
+/* 3. latency vs pass rate */
 (function () {
   const svg = document.getElementById("c-curve"), ctl = document.getElementById("ctl-curve"), lg = document.getElementById("lg-curve");
   const views = D.curves;
-  let cur = views.findIndex(v => v.ds === "arxiv-synth" && v.bs === 16);
+  let cur = views.findIndex(v => v.ds === "laion30m-synth" && v.bs === 16);
   const style = name => {
     if (name === "LiNR V1") return { c: "var(--linr)", dash: "" };
     if (name === "LiNR V2") return { c: "var(--linr)", dash: "6 4" };
@@ -81,12 +133,12 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
     clear(svg); lg.innerHTML = "";
     const v = views[cur];
     const st = v.series.filter(s => !style(s.name));
-    const ramp = ["var(--st-1)", "var(--st-2)", "var(--st-3)"];
-    const all = v.series.flatMap(s => s.pts.map(p => p[1]));
+    const ramp = { "SilverTorch, 24 probes": "var(--st-1)", "SilverTorch, tuned for 0.90": "var(--st-2)", "SilverTorch, tuned for 0.95": "var(--st-3)" };
+    const all = v.series.flatMap(s => s.pts.map(p => p[1])).filter(x => x != null);
     const lo = Math.min(...all) * 0.85, hi = Math.max(...all) * 1.15;
     const X0 = 60, X1 = 560, Y0 = 330, Y1 = 16;
     const sx = log(0.001, 1, X0, X1), sy = log(lo, hi, Y0, Y1);
-    const ticks = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10].filter(t => t >= lo && t <= hi);
+    const ticks = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100].filter(t => t >= lo && t <= hi);
     ticks.forEach(t => {
       el("line", { x1: X0, x2: X1, y1: sy(t), y2: sy(t), stroke: "var(--grid)" }, svg);
       el("text", { x: X0 - 8, y: sy(t) + 4, class: "axis", "text-anchor": "end" }, svg, fmtMs(t));
@@ -94,7 +146,8 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
     [0.001, 0.01, 0.1, 1].forEach(t => el("text", { x: sx(t), y: Y0 + 18, class: "axis", "text-anchor": "middle" }, svg, pct(t)));
     el("text", { x: (X0 + X1) / 2, y: Y0 + 30, class: "axis", "text-anchor": "middle" }, svg, "share of items passing the filter");
     v.series.forEach(s => {
-      const sty = style(s.name) || { c: ramp[st.indexOf(s)], dash: "" };
+      if (!s.pts.length) return;
+      const sty = style(s.name) || { c: ramp[s.name], dash: "" };
       const d = s.pts.map((p, i) => (i ? "L" : "M") + sx(p[0]).toFixed(1) + " " + sy(p[1]).toFixed(1)).join(" ");
       el("path", { d, fill: "none", stroke: sty.c, "stroke-width": 2, "stroke-dasharray": sty.dash }, svg);
       s.pts.forEach(p => {
@@ -104,18 +157,18 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
       });
       const last = s.pts[s.pts.length - 1];
       const rec = s.pts.filter(p => p[2] != null).map(p => p[2]);
-      const tag = s.name.startsWith("LiNR") ? s.name.replace("LiNR ", "") : s.name.replace("SilverTorch ", "") + (rec.length ? ` · ${Math.min(...rec).toFixed(2)}–${Math.max(...rec).toFixed(2)}` : "");
+      const tag = s.name.startsWith("LiNR") ? s.name.replace("LiNR ", "") : s.name.replace("SilverTorch, ", "");
       s._end = { y: sy(last[1]), tag, c: sty.c };
       lg.insertAdjacentHTML("beforeend", `<span><i class="${sty.dash ? "dash" : ""}" style="border-color:${sty.c}"></i>${s.name}</span>`);
     });
-    const ends = v.series.map(s => s._end).sort((a, b) => a.y - b.y);
+    const ends = v.series.filter(s => s._end).map(s => s._end).sort((a, b) => a.y - b.y);
     for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 13) ends[i].y = ends[i - 1].y + 13;
     ends.forEach(e => el("text", { x: X1 + 10, y: e.y + 4, class: "axis", style: "fill:var(--ink-2)" }, svg, e.tag));
   }
   draw();
 })();
 
-/* 3. matched recall map */
+/* 4. matched recall map */
 (function () {
   const tbl = document.getElementById("c-map"), ctl = document.getElementById("ctl-map");
   let t = 0.95;
@@ -123,19 +176,20 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
     const b = document.createElement("button"); b.id = "map-" + v; b.textContent = "recall target " + v.toFixed(2);
     b.onclick = () => { t = v; draw(); }; ctl.appendChild(b);
   });
-  const cols = [[1, 100], [16, 100], [1, 1000], [16, 1000]];
+  const cols = [[1, 100], [16, 100], [64, 100], [1, 1000], [16, 1000], [64, 1000]];
   function draw() {
     [...ctl.children].forEach(b => b.setAttribute("aria-pressed", b.id === "map-" + t));
     const rows = D.matched.filter(r => r.t === t);
-    const keys = [...new Map(rows.map(r => [r.ds + "|" + r.sweep + "|" + r.kind, r])).values()];
+    const keys = [...new Map(rows.map(r => [r.ds + "|" + r.sweep + "|" + r.kind, r])).values()].sort((a, b) => a.n - b.n || a.ds.localeCompare(b.ds) || a.pass_rate - b.pass_rate);
     let h = "<thead><tr><th>dataset · filter</th>" + cols.map(c => `<th>bs ${c[0]} · k ${c[1]}</th>`).join("") + "</tr></thead><tbody>";
     keys.forEach(k => {
       h += `<tr><td class="row">${k.ds} · ${k.sweep}${k.kind === "bloom" ? " (bloom)" : ""} <small>${pct(k.pass_rate)}</small></td>`;
       cols.forEach(([bs, kk]) => {
         const r = rows.find(x => x.ds === k.ds && x.sweep === k.sweep && x.kind === k.kind && x.bs === bs && x.k === kk);
         if (!r) { h += `<td class="na">–</td>`; return; }
-        const info = r.win === "ST" ? `SilverTorch at ${r.np} probes is ${r.ratio}× LiNR ${r.linr}'s time` : (r.np == null ? `SilverTorch tops out at recall ${r.maxrec}; LiNR ${r.linr} wins by default` : `LiNR ${r.linr} faster`);
-        h += r.win === "ST" ? `<td class="st" data-tip="${info}">${r.ratio.toFixed(2)}</td>` : `<td class="li${r.np == null ? " def" : ""}" data-tip="${info}">${r.linr}</td>`;
+        const f = r.flag ? "†" : "";
+        const info = r.win === "ST" ? `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time` : (r.np == null ? `SilverTorch tops out at recall ${r.maxrec}; LiNR ${r.linr} wins by default` : `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time`);
+        h += r.win === "ST" ? `<td class="st" data-tip="${info}">${r.ratio.toFixed(2)}${f}</td>` : `<td class="li${r.np == null ? " def" : ""}" data-tip="${info}">${r.np == null ? r.linr : r.ratio.toFixed(2)}${f}</td>`;
       });
       h += "</tr>";
     });
@@ -145,7 +199,7 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
   draw();
 })();
 
-/* 4. LiNR V2 / V1 */
+/* 5. LiNR V2 / V1 */
 (function () {
   const svg = document.getElementById("c-c1"), lg = document.getElementById("lg-c1");
   const ramp = ["var(--linr-1)", "var(--linr-2)", "var(--linr-3)"];
@@ -176,7 +230,7 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
   el("text", { x: 395, y: 284, class: "axis", "text-anchor": "middle" }, svg, "share of items passing the filter");
 })();
 
-/* 5. co-design by N */
+/* 6. co-design by N */
 (function () {
   const svg = document.getElementById("c-c5"), lg = document.getElementById("lg-c5");
   const X0 = 70, X1 = 640, Y0 = 240, Y1 = 14;
@@ -209,15 +263,15 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
   });
 })();
 
-/* 6. claims */
+/* 7. claims */
 (function () {
   const C = [
-    ["C1", "ok", "reproduced at bs 1", "<b>LiNR: V2 beats V1 at low pass rates.</b> Holds for one query at a time at every N. At bs 16 V2 wins only below about 2 % passing, by at most 25 %."],
-    ["C2", "part", "partially", "<b>LiNR V3 (1-bit, keep 1 %): about 10 % faster at near-equal recall.</b> 8–25 % faster than V2 at bs 16 on real filters, slower at bs 1. Recall is near-equal only with enough bits (0.99 at 768 bits on PubMed; 0.61–0.92 on arXiv)."],
+    ["C1", "ok", "reproduced at bs 1", "<b>LiNR: V2 beats V1 at low pass rates.</b> Holds for one query at a time at every N. At bs 16 V2 wins only below about 2 % passing, by at most 25 %; at bs 64 and 256 V1 wins on every real filter."],
+    ["C2", "part", "not comparable", "<b>LiNR V3 (1-bit, keep 1 %): about 10 % faster at near-equal recall.</b> LiNR's recall is end-task recall with an unpublished protocol. Under our metric, a 1 % pool reaches 0.89 (median) and is 17 % faster than V2 at bs 16; parity needs a 20 % pool, where V3 is no faster."],
     ["C3", "part", "direction only", "<b>LiNR: native masking is about 100× slower than a custom kernel.</b> We see 1.4–2× (bs 1) and 6–7× (bs 16) against eager PyTorch; torch.compile is about as fast at bs 1."],
     ["C4", "ok", "better than claimed", "<b>SilverTorch bloom filter: about 0.067 false positives at 1024 bits.</b> We see 0 on arXiv and Goodreads and 0.001 % on PubMed at 1024 bits. The adapted code rechecks bloom hits exactly, so it returns none by design."],
     ["C5", "part", "only at scale", "<b>SilverTorch co-design: 1.79–2.15× faster.</b> Holds at 30 M items with Meta's code (more at bs 64). Below 10 M it is reversed (0.78–0.89×)."],
-    ["C6", "part", "partially", "<b>SilverTorch int8 cannot reach 0.95 recall; selective filters need more probes.</b> The second half holds strongly. 0.95 is reachable with enough clusters and probes on most sets, not on PubMed or LAION 30 M's domain filter."],
+    ["C6", "part", "partially", "<b>SilverTorch int8 cannot reach 0.95 recall; selective filters need more probes.</b> The second half holds strongly. 0.95 is reached on Goodreads, arXiv, LAION tags at 10–30 M and most synthetic filters, not on LAION's domain filter, PubMed or YFCC (where int8 rounding is 9 % of the whole top-100 score spread)."],
     ["C7", "ok", "holds", "<b>Our adaptation keeps Meta's results.</b> Identical ids and scores in all 1,536 gate cells, and 0.12–0.82 of Meta's eager time (median per dataset and filter)."],
   ];
   const box = document.getElementById("claims");

@@ -65,6 +65,19 @@ decisions.
   (`median_ms(bs=16) < 16 × median_ms(bs=1)`) without loosening it; the
   checks and the entries are in
   [validation](validation.md#campaign-v2-phase-v-not-yet-validated) (D1-G).
+- **NUMBERS gate green** (controller ACCEPT, 2026-10-12), on the D1-G
+  model, with the user's rulings: yfcc10m-synth LiNR at k 1000 included
+  and flagged (the fp16 storage shortfall, HB-6); LiNR V2 at bs 256 on
+  PubMed `c3_journal_reverse` / `all5` and YFCC reported as TIMEOUT (no
+  usable result after 3.6-9.8 h at 80 GB); sub-millisecond cells unstable in
+  every run kept and flagged.
+- **LiNR's recall is end-task recall, ours is fidelity to exact search**
+  (user, 2026-10-12): LiNR reports product recall (recall@2000 against its
+  labels) with a protocol not published in enough detail to rebuild, so no
+  LiNR recall claim is called reproduced or not; our numbers are stated
+  under our metric (share of the exact filtered top-k returned), with the
+  Goodreads correlation to end-task recall beside them. The adapted SilverTorch numbers of the NUMBERS legs
+  are citable ([validation](validation.md#numbers-adapted-silvertorch-over-the-study-grid)).
 - **Paper numbers, and the full rerun last** (user, 2026-10-11): the paper
   is written on measurement legs first: SilverTorch on the adapted backend
   over the study grid (roadmap
@@ -436,7 +449,10 @@ now on; the [roadmap](roadmap.md) holds the steps.
   from a quality-only probe, and only if the probe shows the residual is
   fp16 item storage: V1 = V2 = the library's exact torch path on the same
   inputs, and an fp32 item table gives 1.0. The value, the probe and its
-  numbers are recorded in validation.md; @1000 keeps 0.99.
+  numbers are recorded in validation.md. **Extended to k 1000** (user,
+  2026-10-12): the yfcc10m-synth LiNR cells at k 1000 (0.983-0.995) are
+  included and flagged. The harness's `exact_gate` still applies only below
+  k 1000; a rerun at k 1000 needs it extended.
 - **No PCA.** Every dataset runs at its encoder's native width (YFCC 192,
   PubMed 768); each dataset contributes one width, and the dim ablation is
   dropped.
