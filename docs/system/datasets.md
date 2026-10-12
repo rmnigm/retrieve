@@ -608,8 +608,8 @@ gave tied journals different ids, and a different top-5k cut, on every build). T
 builds of the same inputs are byte-identical (`test_attrs_two_builds_are_byte_identical`).
 The staged `/data/pubmed-medcpt` (pod b) predates the tie rule: its journal / language ids are
 one draw of the old order and stay canonical (controller, 2026-10-10), pinned by sha256
-(`item_attrs_narrow.pt` `8a3bce0f…`, `eval_split.parquet` `3a83c6f9…`; `pinkmeme/eval-pubmed` is
-not published). Pods that need it copy it; a rebuild with this code is **not byte-equal** to it.
+(`item_attrs_narrow.pt` `8a3bce0f…`, `eval_split.parquet` `3a83c6f9…`); the dot-product build
+`pubmed-medcpt-dot` copies these files, and `pinkmeme/eval-pubmed@10d48d05` holds them. Pods that need the old one copy it; a rebuild with this code is **not byte-equal** to it.
 
 #### Query sets
 
@@ -1295,8 +1295,10 @@ attrs, tag CSR, `gt_shipped.pt`), but the upstream files are public and
 unauthenticated, so `yfcc download` is the documented fetch path. What may be
 published from each repo: [release and licenses](../../research/paper/release-and-licenses.md).
 
-`pinkmeme/eval-pubmed` is **registered but not published**; the 10 M slice
-is rebuilt with `eval-data pubmed`. `pinkmeme/eval-openalex` likewise. `pinkmeme/eval-kuairand` (private) holds only the
+`pinkmeme/eval-pubmed` (private, revision `10d48d05`, 17.2 GB) holds the dot-product 10 M slice
+(`pubmed-medcpt-dot`, [pubmed](#pubmed)): `content_d768/`, attrs, `eval_split.parquet`, `heldout.parquet`,
+`item_id_map.json` and vocabularies, no titles, abstracts or ETL intermediates (published from a directory of
+hardlinks to exactly those files). `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `pinkmeme/eval-openalex` likewise. `pinkmeme/eval-kuairand` (private) holds only the
 KuaiRand trainer inputs: the eval inputs and the checkpoint are not published
 (user choice, see [kuairand](#kuairand)). `pinkmeme/eval-laion30m` (private) is to hold the
 staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`); not yet published. The old A100
