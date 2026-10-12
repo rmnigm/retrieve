@@ -80,7 +80,8 @@ its arguments to that module's `main(argv)`, so `uv run eval-data arxiv
 that says what a dataset directory must contain, shared by the writers
 here and the readers in `bench/inputs.py`: `load_text_items` /
 `load_text_queries` (the pre-encoded shape, prefix sidecars asserted, fp16
-→ fp32 + L2-normalise), `load_query_attrs` (row count checked against the
+→ fp32, L2-normalised unless the dataset config sets `normalize: false`, in which
+case both sidecars must say `normalization: "none"` or the load raises), `load_query_attrs` (row count checked against the
 full test split), `load_item_attrs` (the legacy pad row dropped, rows
 checked against the items), `apply_users_limit` (one prefix over every
 query-side tensor), `atomic_write`, and `validate_layout(data_dir,
@@ -478,7 +479,14 @@ residual is the fp16 item storage ([validation](../../research/validation.md#dat
 ### pubmed
 
 **Status: the 10 M slice** (`--keep-items 10000000 --seed 0`) under
-`$RETRIEVE_DATA_ROOT/pubmed-medcpt`: `bench check` passes. A rebuild from
+`$RETRIEVE_DATA_ROOT/pubmed-medcpt-dot`, **MedCPT as shipped: items and queries not
+normalised**, scored by dot product as MedCPT is trained (`normalize: false` in
+[`config/pubmed.yaml`](../../evaluation/config/pubmed.yaml); user, 2026-10-13). Its attrs,
+`eval_split.parquet`, `heldout.parquet`, `queries.parquet`, vocabularies and article parquets are
+copies of the canonical `pubmed-medcpt` (vocab order below), its `item_id_map.json` is byte-equal to
+it, and only `content_d768/` was rebuilt. The older `pubmed-medcpt` holds the same vectors
+L2-normalised (cosine); the PubMed numbers measured on it so far stay until the final run.
+`bench check` passes. A rebuild from
 source on a fresh pod (63 min, CPU) gives D1's slice, embeddings included
 (an exact V1 cell bit-equal to `d1/pubmed`'s);
 state in [validation](../../research/validation.md#datasets). The dataset is not on
@@ -534,11 +542,13 @@ mirror:
    chunk JSON into `staging/articles_chunk_{i}.parquet` (`pmid, year,
    has_abstract, mesh, title` — the title stays so `queries` works after
    the JSON is gone), gather the kept rows of the npy in PMID order,
-   L2-normalise, cast to fp16 and `torch.save` them as
+   cast to fp16 (not normalised) and `torch.save` them as
    `content_d768/text_emb_shard_{i:02d}.pt`; append the `{filename,
    start_id, n_rows}` entry to `shard_index.json`; `--delete-raw` the
    JSON and npy. A killed run resumes at the first shard whose `.pt` or
-   parquet is missing.
+   parquet is missing. A shard whose article parquet already exists does not
+   fetch its JSON, so re-folding the vectors into a directory seeded with
+   `staging/` downloads only the npys (110 GB).
 
 The output is the **sharded layout** `layout.load_sharded` already reads
 for the synthetic arXiv catalogs (`shard_index.json` + contiguous
@@ -602,8 +612,8 @@ gave tied journals different ids, and a different top-5k cut, on every build). T
 builds of the same inputs are byte-identical (`test_attrs_two_builds_are_byte_identical`).
 The staged `/data/pubmed-medcpt` (pod b) predates the tie rule: its journal / language ids are
 one draw of the old order and stay canonical (controller, 2026-10-10), pinned by sha256
-(`item_attrs_narrow.pt` `8a3bce0f…`, `eval_split.parquet` `3a83c6f9…`; `pinkmeme/eval-pubmed` is
-not published). Pods that need it copy it; a rebuild with this code is **not byte-equal** to it.
+(`item_attrs_narrow.pt` `8a3bce0f…`, `eval_split.parquet` `3a83c6f9…`); the dot-product build
+`pubmed-medcpt-dot` copies these files, and `pinkmeme/eval-pubmed@10d48d05` holds them. Pods that need the old one copy it; a rebuild with this code is **not byte-equal** to it.
 
 #### Query sets
 
@@ -625,7 +635,7 @@ sources:
   same alignment reason.
 
 `encode_queries` runs `ncbi/MedCPT-Query-Encoder` ([CLS] pooling) and writes
-`content_d768/query_emb.pt`. MedCPT's query and article encoders are
+`content_d768/query_emb.pt`, fp16, not normalised (`normalization: "none"` in the sidecar). MedCPT's query and article encoders are
 *asymmetric* — the same load-bearing property as nomic's prefixes on arxiv — so
 the unfiltered cross-check sweep is meaningful rather than an identity lookup.
 
@@ -1289,8 +1299,10 @@ attrs, tag CSR, `gt_shipped.pt`), but the upstream files are public and
 unauthenticated, so `yfcc download` is the documented fetch path. What may be
 published from each repo: [release and licenses](../../research/paper/release-and-licenses.md).
 
-`pinkmeme/eval-pubmed` is **registered but not published**; the 10 M slice
-is rebuilt with `eval-data pubmed`. `pinkmeme/eval-openalex` likewise. `pinkmeme/eval-kuairand` (private) holds only the
+`pinkmeme/eval-pubmed` (private, revision `10d48d05`, 17.2 GB) holds the dot-product 10 M slice
+(`pubmed-medcpt-dot`, [pubmed](#pubmed)): `content_d768/`, attrs, `eval_split.parquet`, `heldout.parquet`,
+`item_id_map.json` and vocabularies, no titles, abstracts or ETL intermediates (published from a directory of
+hardlinks to exactly those files). `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `pinkmeme/eval-openalex` likewise. `pinkmeme/eval-kuairand` (private) holds only the
 KuaiRand trainer inputs: the eval inputs and the checkpoint are not published
 (user choice, see [kuairand](#kuairand)). `pinkmeme/eval-laion30m` (private) is to hold the
 staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`); not yet published. The old A100

@@ -128,3 +128,33 @@ def test_load_sharded_normalize_equals_whole_matrix_normalize(tmp_path):
     index.write_text(json.dumps({"n_items": 8, "dim": 16, "dtype": "float16", "shards": entries}))
     whole = F.normalize(layout.load_sharded(index, torch.device("cpu")).float(), dim=-1)
     assert torch.equal(layout.load_sharded(index, torch.device("cpu"), normalize=True), whole)
+
+
+def test_load_text_items_and_queries_keep_raw_norms_without_normalize(tmp_path):
+    items, queries = torch.randn(4, 8).half() * 3, torch.randn(2, 8).half() * 3
+    torch.save(items, tmp_path / "text_emb_shard_000.pt")
+    (tmp_path / "shard_index.json").write_text(
+        json.dumps(
+            {
+                "n_items": 4,
+                "dim": 8,
+                "dtype": "float16",
+                "shards": [{"filename": "text_emb_shard_000.pt", "start_id": 0, "n_rows": 4}],
+            }
+        )
+    )
+    torch.save(queries, tmp_path / "query_emb.pt")
+    for name in ("text_emb", "query_emb"):
+        (tmp_path / f"{name}.meta.json").write_text(json.dumps({"prefix": None}))
+    pl.DataFrame({"item_id": [1, 2]}).write_parquet(tmp_path / "heldout.parquet")
+    cpu = torch.device("cpu")
+    with pytest.raises(RuntimeError, match="normalize: false"):
+        layout.load_text_items(tmp_path, cpu, normalize=False)
+    for name in ("text_emb", "query_emb"):
+        meta = {"prefix": None, "normalization": "none"}
+        (tmp_path / f"{name}.meta.json").write_text(json.dumps(meta))
+    raw = layout.load_text_items(tmp_path, cpu, normalize=False)
+    assert raw.dtype == torch.float32 and torch.equal(raw, items.float())
+    assert torch.equal(layout.load_text_items(tmp_path, cpu), F.normalize(items.float(), dim=-1))
+    q, _, _ = layout.load_text_queries(tmp_path, tmp_path, 8, normalize=False)
+    assert torch.equal(q, queries.float())

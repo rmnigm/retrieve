@@ -41,9 +41,9 @@ def load_inputs(ds: Dataset, device: torch.device, *, with_filters: bool = True)
         )
     else:
         assert ds.content_dir is not None
-        item_embs = layout.load_text_items(ds.content_dir, device)
+        item_embs = layout.load_text_items(ds.content_dir, device, normalize=ds.normalize)
         queries, targets, n_targets = layout.load_text_queries(
-            ds.data_dir, ds.content_dir, int(item_embs.shape[1])
+            ds.data_dir, ds.content_dir, int(item_embs.shape[1]), normalize=ds.normalize
         )
     qa = item_attrs = reverse = None
     if with_filters and ds.attrs is not None:

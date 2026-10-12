@@ -4,8 +4,9 @@
 # its gate is green in research/validation.md. Clause layout (docs/system/datasets.md § pubmed):
 # C0 mesh (multi-valued OR, K=4), C1 mesh_cat, C2 year, C3 journal (REVERSE — bloom-
 # incompatible), C4 has_abstract. Pre-encoded text shape: queries from content_d768/query_emb.pt.
-data_dir: data/pubmed-medcpt
+data_dir: data/pubmed-medcpt-dot             # MedCPT as shipped, not normalised
 content_dir: content_d768                 # relative to data_dir
+normalize: false                          # MedCPT scores by dot product (user, 2026-10-13)
 dims: [768]
 users_limit: 10000
 filters:

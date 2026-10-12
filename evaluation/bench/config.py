@@ -46,7 +46,7 @@ BLOOM_PARAMS = frozenset({"m_bits", "k_hash"})  # gridded on silvertorch/bloom: 
 COMPILE_MODES = ("max-autotune",)
 NONE_SWEEP = "full_scan"  # the one sweep of filter_kind ``none``
 _DATASET_KEYS = {"data_dir", "checkpoint", "content_dir", "dims", "encode", "users_limit"}
-_DATASET_KEYS |= {"filters", "exact_gate"}
+_DATASET_KEYS |= {"filters", "exact_gate", "normalize"}
 _FILTER_KEYS = {"attrs", "reverse", "query_attrs", "clause", "bloom"}
 _SUITE_KEYS = {"datasets", "dims", "filter_kinds", "ks", "batch_sizes", "arms", "seeds", "bloom"}
 _SUITE_KEYS |= {"sweeps", "ks_by_sweep", "seeds_by_sweep", "perf", "interleave"}
@@ -77,6 +77,7 @@ class Dataset:
     query_attrs: Path
     clauses: dict[str, dict[str, tuple[int, ...]]]  # filter_kind -> sweep -> active clauses
     exact_gate: float | None = None  # the exact-algo gate below k 1000 (fp16-stored catalogs)
+    normalize: bool = True  # L2-normalise a content_dir's items and queries (false: dot product)
 
     @property
     def gt_dir(self) -> Path:
@@ -223,7 +224,12 @@ def load_dataset(path: Path, dim: int, checkpoint: str | None = None) -> Dataset
     exact_gate = raw.get("exact_gate")
     if exact_gate is not None and not (isinstance(exact_gate, float) and 0 < exact_gate < 1):
         raise ConfigError(f"{where}: exact_gate must be a float in (0, 1) or null")
+    normalize = raw.get("normalize", True)
+    if not isinstance(normalize, bool):
+        raise ConfigError(f"{where}: normalize must be true or false")
     ckpt, content = raw.get("checkpoint"), raw.get("content_dir")
+    if not normalize and content is None:
+        raise ConfigError(f"{where}: normalize applies to a content_dir dataset only")
     if checkpoint is not None:
         if content is not None:
             raise ConfigError(f"{where}: a checkpoint override on a content_dir dataset")
@@ -241,6 +247,7 @@ def load_dataset(path: Path, dim: int, checkpoint: str | None = None) -> Dataset
         query_attrs=query_attrs,
         clauses=clauses,
         exact_gate=exact_gate,
+        normalize=normalize,
     )
 
 
