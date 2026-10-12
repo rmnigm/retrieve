@@ -67,7 +67,3 @@ def upload_checkpoint(
             write_card=write_card,
             dry_run=dry_run,
         )
-
-
-if __name__ == "__main__":
-    upload_checkpoint()

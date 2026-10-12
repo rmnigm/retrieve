@@ -92,9 +92,6 @@ def sample_rare_biased_wide(
         common_idx = int(rng.choice(len(bag), p=w_common))
         common_id = int(bag[common_idx])
         rest = np.array([i for i in range(len(bag)) if i != common_idx])
-        if len(rest) == 0:
-            n_drop_2 += 1
-            continue
         w_rare2 = 1.0 / np.sqrt(np.maximum(freq[rest], 1.0))
         w_rare2 = w_rare2 / w_rare2.sum()
         rare_id = int(bag[rest[int(rng.choice(len(rest), p=w_rare2))]])

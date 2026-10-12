@@ -1627,16 +1627,20 @@ def fig_f4b(c) -> list[Path]:
             )
             for other in rest:
                 probes = sorted({r["_params"]["n_probe"] for r in cond})
+                timed = {
+                    (path_name, n): _timed(
+                        _with(cond, bloom_path=path_name, n_probe=n, **json.loads(other)),
+                        bs,
+                        EXHIBIT_K,
+                    )
+                    for path_name in ("partial", "full")
+                    for n in probes
+                }
                 ratios = []
                 for path_name in ("partial", "full"):
                     pts = []
                     for n in probes:
-                        sub, _ = _timed(
-                            _with(cond, bloom_path=path_name, n_probe=n, **json.loads(other)),
-                            bs,
-                            EXHIBIT_K,
-                        )
-                        t = _lat(sub)
+                        t = _lat(timed[path_name, n][0])
                         if t:
                             pts.append((n, t))
                     if pts:
@@ -1652,16 +1656,7 @@ def fig_f4b(c) -> list[Path]:
                             label=f"{sw} {path_name}",
                         )
                 for n in probes:
-                    full = _timed(
-                        _with(cond, bloom_path="full", n_probe=n, **json.loads(other)),
-                        bs,
-                        EXHIBIT_K,
-                    )
-                    part = _timed(
-                        _with(cond, bloom_path="partial", n_probe=n, **json.loads(other)),
-                        bs,
-                        EXHIBIT_K,
-                    )
+                    full, part = timed["full", n], timed["partial", n]
                     ci, paired = _ratio(full[0], part[0])
                     if ci:
                         ratios.append((n, ci))

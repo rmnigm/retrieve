@@ -116,6 +116,14 @@ def raw_dir(source: str) -> Path:
     return data_root() / "_raw" / source
 
 
+def _require_raw(source: str) -> tuple[str, str]:
+    try:
+        return RAW_REPOS[source]
+    except KeyError as e:
+        avail = ", ".join(sorted(RAW_REPOS)) or "(none)"
+        raise ValueError(f"Unknown raw source {source!r}. Known: {avail}") from e
+
+
 def _require_dataset(dataset: str) -> str:
     try:
         return EVAL_REPOS[dataset]
@@ -197,36 +205,24 @@ def download_raw(
     max_workers: int | None = None,
 ) -> Path:
     """Pull an upstream raw HF dataset into the unified `_raw/<source>/` dir."""
-    try:
-        repo_id, repo_type = RAW_REPOS[source]
-    except KeyError as e:
-        avail = ", ".join(sorted(RAW_REPOS)) or "(none)"
-        raise ValueError(f"Unknown raw source {source!r}. Known: {avail}") from e
-
+    repo_id, repo_type = _require_raw(source)
     local = raw_dir(source).resolve()
     local.mkdir(parents=True, exist_ok=True)
 
     logger.info("snapshot_download {} -> {} (allow={})", repo_id, local, allow_patterns)
-    kwargs: dict = {
-        "repo_id": repo_id,
-        "repo_type": repo_type,
-        "local_dir": str(local),
-        "allow_patterns": allow_patterns,
-    }
-    if max_workers is not None:
-        kwargs["max_workers"] = max_workers
-    snapshot_download(**kwargs)
+    snapshot_download(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        local_dir=str(local),
+        allow_patterns=allow_patterns,
+        **({} if max_workers is None else {"max_workers": max_workers}),
+    )
     return local
 
 
 def download_raw_file(source: str, filename: str) -> Path:
     """Pull a single file from an upstream raw HF dataset. Returns the local path."""
-    try:
-        repo_id, repo_type = RAW_REPOS[source]
-    except KeyError as e:
-        avail = ", ".join(sorted(RAW_REPOS)) or "(none)"
-        raise ValueError(f"Unknown raw source {source!r}. Known: {avail}") from e
-
+    repo_id, repo_type = _require_raw(source)
     local = raw_dir(source).resolve()
     local.mkdir(parents=True, exist_ok=True)
     return Path(

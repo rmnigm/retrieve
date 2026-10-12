@@ -221,8 +221,8 @@ def campaign(
     with open(log_dir / "campaign.log", "a") as summary:
         say = partial(_say, summary)
         say(f"=== campaign {suite} started {dt.datetime.now(dt.timezone.utc):%Y-%m-%dT%H:%M:%SZ}")
+        _, suites_yaml = _paths(config_dir, "_")
         for s in SUITES if suite == "all" else (suite,):
-            _, suites_yaml = _paths(config_dir, "_")
             with open(suites_yaml) as f:
                 listed = yaml.safe_load(f)[s]["datasets"]
             for ds in listed:

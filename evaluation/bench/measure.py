@@ -181,12 +181,12 @@ def official_build(package: str = "silvertorch") -> dict[str, Any] | None:
     if spec is None or not spec.submodule_search_locations:
         return None
     pkg = Path(next(iter(spec.submodule_search_locations)))
-    so = sorted(pkg.glob("_C*.so"))
+    so = next(iter(sorted(pkg.glob("_C*.so"))), None)
     flags = pkg / OFFICIAL_BUILD_FLAGS
     return {
-        "so_path": str(so[0]) if so else None,
-        "so_sha256": hashlib.sha256(so[0].read_bytes()).hexdigest() if so else None,
-        "so_bytes": so[0].stat().st_size if so else None,
+        "so_path": so and str(so),
+        "so_sha256": so and hashlib.sha256(so.read_bytes()).hexdigest(),
+        "so_bytes": so and so.stat().st_size,
         "nvcc_append_flags": (
             json.loads(flags.read_text()).get("nvcc_append_flags") if flags.exists() else None
         ),

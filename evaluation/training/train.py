@@ -405,7 +405,3 @@ def run(config_path: str | None, resume: bool, overrides: tuple[str, ...]) -> No
     fields = dict(_parse_override(o) for o in overrides)
     config = TrainConfig.load(config_path, **fields) if config_path else TrainConfig(**fields)
     train(config, resume=resume)
-
-
-if __name__ == "__main__":
-    run()

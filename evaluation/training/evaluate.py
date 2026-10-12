@@ -151,12 +151,11 @@ def evaluate(
             topk_vals = sel.values
             topk_idx = cat_idx.gather(1, sel.indices)
 
-        topk = topk_idx
-        hits = hits_at(topk, targets)
+        hits = hits_at(topk_idx, targets)
         for k in ks:
             sums[f"ndcg@{k}"] += ndcg_at_k(hits, num_targets, k).double().sum()
             sums[f"recall@{k}"] += recall_at_k(hits, num_targets, k).double().sum()
-            coverage_seen[k].scatter_(0, topk[:, :k].reshape(-1), True)
+            coverage_seen[k].scatter_(0, topk_idx[:, :k].reshape(-1), True)
         n_rows += b
 
     out: dict[str, float] = {key: (v / max(n_rows, 1)).item() for key, v in sums.items()}
