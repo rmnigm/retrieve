@@ -51,10 +51,15 @@ and tags for both trees: [SCHEMA.md](SCHEMA.md). Structural changes:
   [Meta as published vs adapted](paper/meta-published-vs-adapted.md),
   [claims](paper/claims.md),
   [method differences](paper/method-differences.md),
+  [outline](paper/outline.md),
   [results draft](paper/results.md),
   [abstract (submitted)](paper/abstract.md),
   [ECIR criteria](paper/ecir-criteria.md),
-  [release and licenses](paper/release-and-licenses.md)).
+  [release and licenses](paper/release-and-licenses.md);
+  material: [data, intro, literature](paper/material/data-intro-literature.md),
+  [method](paper/material/method.md),
+  [results](paper/material/results.md),
+  [coverage](paper/material/coverage.md): every citable source and claim to its section).
 - [artifacts/](artifacts/): raw scripts behind measured numbers, one
   directory per plan; the raw outputs are on the Hub
   ([hub-index.md](artifacts/hub-index.md)).
