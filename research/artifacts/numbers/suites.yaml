@@ -1359,6 +1359,679 @@ n-bloomwidth:
       k_hash:
       - 3
       - 5
+n-bloom-curve-d128:
+  perf: false
+  datasets:
+  - goodreads
+  - arxiv
+  dims:
+  - 128
+  filter_kinds:
+  - bloom
+  ks:
+  - 100
+  - 1000
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    goodreads:
+    - c0_genre
+    arxiv:
+    - c0_maincat
+    - c3_nversions
+    - all4
+  arms:
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 4096
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+    datasets:
+      goodreads:
+        sweeps:
+        - c0_genre
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 2048
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+    datasets:
+      arxiv:
+        sweeps:
+        - c0_maincat
+        - c3_nversions
+        - all4
+n-bloom-curve-d256:
+  perf: false
+  datasets:
+  - laion1m
+  - laion3m
+  - laion10m
+  - laion30m
+  dims:
+  - 256
+  filter_kinds:
+  - bloom
+  ks:
+  - 100
+  - 1000
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    laion1m:
+    - c0_domain
+    - tags4
+    laion3m:
+    - c0_domain
+    - tags4
+    laion10m:
+    - c0_domain
+    - tags4
+    laion30m:
+    - c0_domain
+    - tags4
+  arms:
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 512
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+    datasets:
+      laion1m:
+        sweeps:
+        - c0_domain
+        - tags4
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 4096
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+    datasets:
+      laion1m:
+        sweeps:
+        - c0_domain
+        - tags4
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 8192
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+    datasets:
+      laion1m:
+        sweeps:
+        - c0_domain
+        - tags4
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 2048
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+    datasets:
+      laion3m:
+        sweeps:
+        - c0_domain
+        - tags4
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 8192
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+    datasets:
+      laion3m:
+        sweeps:
+        - c0_domain
+        - tags4
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 16384
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+    datasets:
+      laion3m:
+        sweeps:
+        - c0_domain
+        - tags4
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 4096
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+    datasets:
+      laion10m:
+        sweeps:
+        - c0_domain
+        - tags4
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 16384
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+    datasets:
+      laion10m:
+        sweeps:
+        - c0_domain
+        - tags4
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 65536
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+      - 8192
+      - 16384
+    datasets:
+      laion10m:
+        sweeps:
+        - c0_domain
+        - tags4
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 4096
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+    datasets:
+      laion30m:
+        sweeps:
+        - c0_domain
+        - tags4
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 16384
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+    datasets:
+      laion30m:
+        sweeps:
+        - c0_domain
+        - tags4
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 65536
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+      - 8192
+      - 16384
+    datasets:
+      laion30m:
+        sweeps:
+        - c0_domain
+        - tags4
+n-bloom-curve-d768:
+  perf: false
+  datasets:
+  - pubmed
+  dims:
+  - 768
+  filter_kinds:
+  - bloom
+  ks:
+  - 100
+  - 1000
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    pubmed:
+    - c0_mesh
+  arms:
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 4096
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 16384
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 65536
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+      - 8192
+      - 16384
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+n-bloom-curve-synth-d128:
+  perf: false
+  datasets:
+  - goodreads-synth
+  - arxiv-synth
+  dims:
+  - 128
+  filter_kinds:
+  - bloom
+  ks:
+  - 100
+  - 1000
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    goodreads-synth:
+    - p0001
+    - p001
+    - p01
+    - p1
+    arxiv-synth:
+    - p0001
+    - p001
+    - p01
+    - p1
+  arms:
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 4096
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+    datasets:
+      goodreads-synth:
+        sweeps:
+        - p0001
+        - p001
+        - p01
+        - p1
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 2048
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+    datasets:
+      arxiv-synth:
+        sweeps:
+        - p0001
+        - p001
+        - p01
+        - p1
+n-bloom-curve-synth-d256:
+  perf: false
+  datasets:
+  - laion1m-synth
+  - laion3m-synth
+  dims:
+  - 256
+  filter_kinds:
+  - bloom
+  ks:
+  - 100
+  - 1000
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    laion1m-synth:
+    - p0001
+    - p001
+    - p01
+    - p1
+    laion3m-synth:
+    - p0001
+    - p001
+    - p01
+    - p1
+  arms:
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 512
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+    datasets:
+      laion1m-synth:
+        sweeps:
+        - p0001
+        - p001
+        - p01
+        - p1
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 2048
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+    datasets:
+      laion3m-synth:
+        sweeps:
+        - p0001
+        - p001
+        - p01
+        - p1
 n-curve-q-all:
   perf: false
   datasets:

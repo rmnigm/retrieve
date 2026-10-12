@@ -28,7 +28,8 @@ decisions.
     (`meta-recsys/silvertorch`, synced to `22c2007`), adapted by us with a
     listed set of improvements (host syncs removed, CUDA-graph capturable,
     one-call search, `m_bits` honoured, an exact recheck of bloom
-    survivors, kernel tuning; each change with its gate). In prose it is
+    survivors as an option that is off in the study, kernel tuning; each
+    change with its gate). In prose it is
     "Meta's official SilverTorch code, adapted", never "a fork". In code it
     is still the `official-fork/` workspace member, package
     `silvertorch_fork`, `backend="official-fork"`, until roadmap
@@ -56,10 +57,21 @@ decisions.
 - **The adapted arm's configuration in the study** (controller and user,
   2026-10-11): the int32 score path (gated bit-exact against Meta's
   published code everywhere); fp16, Meta's default, only as a reported
-  variant where it is cheap. Bloom: the exact recheck of the bloom's
-  survivors is on by default (CHANGES C13: no false positives, a different
-  filter from Meta's bloom); Meta's bloom semantics stay selectable by a
-  flag and are used for the parity gate and C7 only.
+  variant where it is cheap.
+- **Filtering in the study** (user, 2026-10-12; this replaces the earlier
+  record that the C13 recheck was on by default "by controller and user",
+  which the user does not stand behind): SilverTorch is evaluated with its
+  own fast probabilistic filter, the bloom, **with false positives
+  allowed** and **no recheck in timed code** (`OfficialConfig.recheck`
+  off); the question is how much the bloom's false positives cost recall,
+  and recall is graded against the exact filtered oracle, so a false
+  positive in the top-k counts as a miss. LiNR is evaluated with both
+  filters, exact clause and bloom, to show how much the probabilistic
+  filter costs. SilverTorch's exact clause mode is our adaptation (not in
+  Meta's CUDA path) and leaves the head-to-head. The C13 recheck stays in
+  the code as an option, off in the study; the library default changes at
+  RENAME. Reverse (NOT) clauses have no bloom form, so those filters are
+  LiNR-exact only.
 - **D1-G is green for the final pass** (user, 2026-10-11): the user
   accepted the 25 listed, explained failures of the batching check
   (`median_ms(bs=16) < 16 × median_ms(bs=1)`) without loosening it; the
