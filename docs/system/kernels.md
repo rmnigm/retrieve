@@ -1842,7 +1842,7 @@ loads beside the pinned upstream in one process (package `silvertorch_fork`, ops
 `torch.ops.stfork.*`, C++ namespace `st::ops` kept, extensions loaded `RTLD_LOCAL`), Apache-2.0
 with Meta's `LICENSE` and headers and one "Modified by the retrieve authors" line per changed
 file. `CHANGES.md` lists every change; each has its gate row in
-[validation](../../research/validation.md#meta-fork-backendofficial-fork-not-yet-validated).
+[validation](../../research/validation.md#meta-fork-backendofficial-fork).
 `SilverTorch(backend="official-fork")` selects it.
 
 **Forward: one op.** `SilverTorch(backend="official-fork")` runs phase 1 (ours) and then one
