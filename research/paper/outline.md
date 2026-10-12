@@ -44,7 +44,9 @@ early.
 
 Every number in the paper comes from one of three sources, and none is
 citable before its gate in [validation](../validation.md) is green
-(AGENTS.md rule 2):
+(AGENTS.md rule 2). The NUMBERS and META-FORK numbers are citable from
+the merge of `dev/results-draft` into `staging` (`4365f8a` and later;
+controller ruling, 2026-10-12):
 
 | source | what it gives | where |
 |---|---|---|
@@ -202,7 +204,7 @@ SilverTorch.
 | 4.2 | **C2** V3 keeping ~1 % gives ~10 % at near-parity recall (L-6) | V3 against V2 at matched recall, by batch size; recall vs bits per item (our code length is capped at d; LiNR used 512 bits); the pool curve | text + one row group in T2 or a line in F3: `c2_v3.csv`, NUMBERS `numbers/L2-v3pool`, `numbers/L2b-v3pool-laion` |
 | 4.3 | **C3** custom filter kernel ~100× over native masking (L-2) | direction holds, size far below 100×; eager vs compiled torch; at bs 1 compiled torch can win, and why (reduction order, fp16 top-k keys) | text with ranges: `c3_torch.csv`; mechanism: [validation](../validation.md) V1-FUSE row |
 | 4.4 | **C4** Bloom FPR ≈ 0.067 at 1024 bits, memory (S-8…S-10, S-14) | the FPR and memory against width on real attributes; the paper's own two FPR figures disagree (S-9 vs S-10); the transposed layout is not in Meta's released code (OF-1), so that half is a paper-vs-code finding | **F4a** (FPR and memory vs bits): `c4_bloom.csv`, NUMBERS `bloomwidth` |
-| 4.5 | **C5** co-design 1.79-2.15× over full mask then probe (S-3, S-11) | Meta's code as published: holds only at 30 M, reversed below by host work in the partial path; the adapted code: measured on the same cells | **F4b** (full / partial ratio vs N, published vs adapted): `c5_meta.csv`, `c5_adapted.csv`, NUMBERS `codesign` |
+| 4.5 | **C5** co-design 1.79-2.15× over full mask then probe (S-3, S-11) | evaluated on Meta's code as published only (`backend="official"`): holds only at 30 M, reversed below by host work in the partial path. The adapted code has no full path to compare: it refuses `bloom_path="full"` by design (K fix 17 in `official-fork/CHANGES.md`), so its column reads "refused by design (K17)" | **F4b** (full / partial ratio vs N, Meta's code as published): `c5_meta.csv`, NUMBERS `codesign` (published-code cells). `c5_adapted.csv` (`82fafb6`, before K17) is not cited |
 | 4.6 | **C6** int8 IVF: recall ceiling < 0.95, selective filters need more probes (S-6, S-7, S-16) | recall at 24 probes falls with N and selectivity; 0.95 is reachable on ≤ 3 M with more probes / lists, not within the gated probes at 10-30 M; uniform vs cluster-correlated filters; the local pass rate explains per-query recall | **F2** (recall vs pass rate at fixed probes, uniform and correlated, one line per N): `c6_recall.csv`, `c6_ceiling.csv`; NUMBERS `A1-*` quality curves; local pass rate from Hub `artifacts/exhibits/20261009-1057-gls` |
 
 The verdicts are restated in T1 (§2), so §4 does not repeat them in a
@@ -251,14 +253,22 @@ Material: **C3**.
   only intended difference, and they remove false positives.
 - Speed: eager time a fraction of the published code's on the gate grid,
   never slower beyond the A/A floor; the published path is host-bound.
+  No new GPU run feeds this: the numbers are the META-FORK gate grid's.
 - What this cannot say (the published code was not built for our harness;
   its `-O3` build is ours).
 
 **Exhibit T3.** Rows: gate (X, R, S, capture, compile) and speed ranges
-per dataset. Source: [Meta as published vs adapted](meta-published-vs-adapted.md)
-§2-§5; [validation](../validation.md#meta-fork-backendofficial-fork-not-yet-validated);
+per dataset; the co-design row reads "refused by design (K17)" in the
+adapted column (§4.5). Speed rows come from the META-FORK gate grid
+only: the adapted code against Meta's `-O3` build, eager, the 1,536 gate
+cells plus the 30 M cells (review ACCEPT at `1f6fed8`, tag
+`campaign-fork`; the 30 M review item B1 is Hub
+`artifacts/meta-fork/laion30m-b1-32c0d61`). Source:
+[Meta as published vs adapted](meta-published-vs-adapted.md) §2-§5;
+[validation](../validation.md#meta-fork-backendofficial-fork-not-yet-validated);
 Hub `artifacts/meta-fork/pod-b-32c0d61`, `head-82fafb6`,
-`laion30m-82fafb6`; `adaptation.csv`. Material: **C2**.
+`laion30m-82fafb6`, `laion30m-b1-32c0d61`; `adaptation.csv`. Material:
+**C2**.
 
 ## §7 Deviations, difficulties, communication (0.75 p)
 
