@@ -47,12 +47,12 @@ confirmed from code or text is marked **unverified**.
 | | exact clause filter | bloom filter |
 |---|---|---|
 | our name | `ExactAttributeFilter`, `filter_kind: clause`; SilverTorch `filter_mode="exact"` | `filter_kind: bloom` on SilverTorch only (`filter_mode="bloom"`, Meta's bloom) |
-| LiNR's name | attribute-based matching (ABM): clauses, one of them a "reverse matching clause" (§3.1) | none: LiNR has no bloom filter, and LiNR runs with its exact filter only (user, 2026-10-13) |
+| LiNR's name | attribute-based matching (ABM): clauses, one of them a "reverse matching clause" (§3.1) | none: LiNR has no bloom filter |
 | SilverTorch's name | the "forward index", the GPU baseline the paper compares its bloom index against (§4.1, §6.2.2) | the "bloom index" (§4.1) |
 | what a query can say | `C` clauses fixed at index time; per clause one query value; an item passes a clause when any of its values equals it (negated for a reverse clause); AND across clauses ([filtering](../../docs/system/filtering.md#linr-paper-31--fixed-clause-schema-no-dsl)) | the same clauses, forward only: no reverse clause, because NOT over a bloom would drop true matches (`filters.py:50`, `adapter.py:102-110`) |
 | answer | exact: no false positives or negatives | a superset of the exact answer: false positives (hash collisions), no false negatives |
 | what the papers allow | LiNR: the same schema (§3.1). SilverTorch: nested AND / OR / NOT over `feature = value` (§4.3); our schema covers the conjunctive part only ([ST-4](reproduction-deviations.md#3-silvertorch-as-we-run-it--deviations-from-the-paper)) | SilverTorch: the bloom with NOT through its expression stack (§4.3), how a NOT stays exact over a bloom is not said (**unverified**) |
-| reverse sweeps | run | none: goodreads `c1_lang_reverse`, `all4` and PubMed `c3_journal_reverse`, `all5` have no bloom cell (`evaluation/config/goodreads.yaml:14`, `pubmed.yaml`); YFCC runs clause only ([decisions](../decisions.md#datasets)) |
+| reverse sweeps | run | none: goodreads `c1_lang_reverse`, `all4` and PubMed `c3_journal_reverse`, `all5` have no bloom cell (`evaluation/config/goodreads.yaml:14`, `pubmed.yaml`) |
 
 ### 2.2 Where each method's filter runs, and what happens to false positives
 
@@ -117,14 +117,11 @@ speed, not results. It is not in Meta's code or either paper.
 | pass rate (ours) | mean over kept queries of (items passing the **exact** filter) / N | `evaluation/bench/oracle.py:106-109` |
 | synthetic rate `p` | each item draws `u ~ U(0,1)` once; it passes the rate-`p` clause iff `u < p`, so the sets nest and are unrelated to the embeddings; `arxiv-corr-synth` instead passes the items near the query's centroid | [datasets](../../docs/system/datasets.md#synthetic-selectivity-attrs) |
 | local pass rate | the share of a query's **unfiltered** top-100 that passes; what SilverTorch's recall follows (C6) | [results](results.md#claim-verification) |
-| bloom false-positive rate | per query (bloom survivors − exact passes) / (N − exact passes) on SilverTorch's own bloom index, no recheck, mean over queries; the records' `bloom_fp_rate` is the harness's standalone filter module's, not SilverTorch's, and is not reported | `research/artifacts/results-draft/fp_adapted.py`; `run.py:89-102` |
+| bloom false-positive rate | per query (bloom survivors − exact passes) / (N − exact passes) on SilverTorch's own bloom index, no recheck, mean over queries; the records' `bloom_fp_rate` column is not SilverTorch's and is not reported | `research/artifacts/results-draft/fp_adapted.py`; `run.py:89-102` |
 | LiNR's "pass rate" | items passing per query: high-pass set ≈ 1.7 M of 15.5 M on average (two clauses: geo, reverse company); low-pass set adds a title clause, at most 1.2 M, most queries thousands | linr.md §5.3 |
 | SilverTorch's | no pass-rate axis; FPR against bloom bits on 5,000 production filter queries (6 features, ~10 values per item) | silvertorch.md §6.2.2 |
 
-**The records' `bloom_fp_rate` is not SilverTorch's.** On `official` and
-`official-fork` cells the harness builds its standalone filter module on the
-Triton backend (`algos.filter_backend`) and computes the column from it, so
-the column is not reported. SilverTorch's own rate comes from its index
+SilverTorch's bloom false-positive rate comes from its index
 (`fp_adapted.py`, [results](results.md#claim-verification) C4); its effect on
 results is measured on the bloom legs as recall with the recheck off against
 the exact filter's, and as false positives in Meta's results at 30 M
@@ -161,14 +158,14 @@ code) / what we do / why / effect on the reported numbers / source.
 |---|---|---|---|---|---|---|
 | filter | exact clause masks, multiplied into the scores (failing items → 0), then top-k | none | exact clause filter fused into the score write (failing → −∞) | 0 would let failing items outrank passing items with negative scores; −∞ is the exact semantics | exact V1 equals the oracle up to fp16 (§4.4) | linr.md §3.1.1; `linr.py` `LiNRV1`; `functional.masked_topk` |
 | scoring | fp16 embeddings, custom CUDA filter op, separate un-fused ops in TF / PyTorch | none | fp16 items, fp32 accumulate (cuBLAS), Triton filter kernel fused with the score write | the fusion is the point of a GPU library | our V1 is faster than an un-fused one; the V1 / V2 crossover moves ([LN-1](reproduction-deviations.md#4-linr-v1v3--deviations)) | linr.md §3.1.1, §6; [LN-1](reproduction-deviations.md#4-linr-v1v3--deviations) |
-| quality | "no recall drop" (exhaustive) | — | exact search over fp16 items, graded against the fp32 oracle | — | ≥ 0.99 recall@k everywhere except YFCC synth at k 1000 (0.983-0.995, fp16 storage, flagged) | [HB-6](reproduction-deviations.md#6-deviations-of-our-harness-against-the-papers-protocols--and-against-itself) |
+| quality | "no recall drop" (exhaustive) | — | exact search over fp16 items, graded against the fp32 oracle | — | ≥ 0.99 recall@k on every dataset (the harness's exact gate) | [evaluation](../../docs/system/evaluation.md#measurement-protocol) |
 
 ### 3.2 LiNR V2 (explicit pre-filtering)
 
 | aspect | paper | public code | we do | why | effect on numbers | source |
 |---|---|---|---|---|---|---|
 | filter | exact clauses first, slice the passing items | none | `clause_compact`: one fused filter + stream-compaction kernel, ascending item order | slicing in torch copies the matrix; the fused kernel is what makes V2 fast | V2 faster than the paper's at high pass rate | linr.md §3.1.2; [filtering](../../docs/system/filtering.md#caller-patterns) |
-| scoring | matmul + top-k on the slice, each query of a batch run separately | none | one fused gather + dot (fp32 accumulate) + top-k kernel over the batch's candidate lists | batching | V2 at bs 64 / 256 slower than V1 on every real filter; PubMed `c3_journal_reverse` / `all5` and YFCC at bs 256 time out | linr.md §5.3.2; [results](results.md#claim-verification) C1 |
+| scoring | matmul + top-k on the slice, each query of a batch run separately | none | one fused gather + dot (fp32 accumulate) + top-k kernel over the batch's candidate lists | batching | V2 at bs 64 / 256 slower than V1 on every real filter; PubMed `c3_journal_reverse` / `all5` at bs 256 time out | linr.md §5.3.2; [results](results.md#claim-verification) C1 |
 | quality | exact | — | exact | — | as V1 | — |
 
 ### 3.3 LiNR V3 (1-bit Sign-OPORP, then rerank)
@@ -176,7 +173,7 @@ code) / what we do / why / effect on the reported numbers / source.
 | aspect | paper | public code | we do | why | effect on numbers | source |
 |---|---|---|---|---|---|---|
 | filter | pre-filter as V2 | none | pre-filter as V2 (exact clause), then Hamming top-`candidate_pool` among survivors, then exact rescore | as the paper | — | linr.md §3.2, Fig. 3; `linr.py` `LiNRV3` |
-| bits | 512 bits at d128 in the benchmark; "1-bit embedding of the same dimension" in §3.2 | none | at most D bits (`k_bits` = D: 128 at d128, 192 YFCC, 768 / 256 PubMed) | OPORP as defined gives at most D bins | ¼ of LiNR's bit budget at d128: stage-1 recall can only be lower | [LN-8](reproduction-deviations.md#4-linr-v1v3--deviations); [decisions](../decisions.md#goal-and-scheduling) |
+| bits | 512 bits at d128 in the benchmark; "1-bit embedding of the same dimension" in §3.2 | none | at most D bits (`k_bits` = D: 128 at d128, 768 / 256 PubMed) | OPORP as defined gives at most D bins | ¼ of LiNR's bit budget at d128: stage-1 recall can only be lower | [LN-8](reproduction-deviations.md#4-linr-v1v3--deviations); [decisions](../decisions.md#goal-and-scheduling) |
 | pool | keep ~1 % of items (0.5-2.5 % swept) | — | pool as a fraction of the mean pass count (0.5-20 %), at least 2,000 | our catalogues are 1-2 orders smaller | 1 % reaches 0.89 median recall; parity needs 20 % | [evaluation](../../docs/system/evaluation.md#pool-fractions); [results](results.md#claim-verification) C2 |
 
 ### 3.4 SilverTorch
@@ -188,7 +185,7 @@ code) / what we do / why / effect on the reported numbers / source.
 | quantization | int8 items, global min/max scaled to [−128, 127]; dp4a | int8 kernels; fp16 score path (`divisor`) by default | items: one global symmetric scale (abs max / 127); queries: a per-row int8 scale; **int32 score path** | the int32 path is bit-exact with Meta's; per-row query scale because the query is quantized per call | int8 sets a recall ceiling (C6: PubMed 0.92 vs 0.996 at fp16 on the same lists); fp16 is a reported variant only | silvertorch.md §4.2; [ST-5](reproduction-deviations.md#3-silvertorch-as-we-run-it--deviations-from-the-paper); [decisions](../decisions.md#goal-and-scheduling); `indexing/quantize.py:34` |
 | clustering | k-means++ on GPU | none (phase 1 is ours) | Lloyd's k-means, 10 iterations, random init | every record used random init | whether init changes quality is **unverified** | [ST-7](reproduction-deviations.md#3-silvertorch-as-we-run-it--deviations-from-the-paper) |
 | probes / lists | 24 probes in production, 32 / 64 / 256 in the analyses; 9,000 clusters at 81 M | — | lists 1,024-65,536 tuned per size; probes doubled from 8 to a quarter of the lists; 24 kept as a reference row | the tuned point is the fair comparison; 24 gives 0.05-0.89 recall here | the head-to-head is at equal recall, not at 24 probes | [results](results.md#at-the-papers-production-setting-24-probes); [evaluation](../../docs/system/evaluation.md#ivf-tuning) |
-| execution | in a C++ predictor | eager only, host syncs every call ([OF-3, OF-4](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper)) | one search op, no host sync, CUDA-graph replay | without capture the timing is host overhead | the adapted code is 0.12-0.82 of Meta's eager time (median per dataset and filter) with identical ids and scores | [meta-published-vs-adapted](meta-published-vs-adapted.md); results C7 |
+| execution | in a C++ predictor | eager only, host syncs every call ([OF-3, OF-4](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper)) | one search op, no host sync, CUDA-graph replay | without capture the timing is host overhead | the adapted code is 0.15-0.82 of Meta's eager time (median per dataset and filter) with identical ids and scores | [meta-published-vs-adapted](meta-published-vs-adapted.md); results C7 |
 | co-design ablation | probe-then-filter 1.79-2.15× faster than filter-then-probe | both paths | full path refused (K fix 17) | — | C5 is measured on Meta's code as published only | results C5 |
 | what is around it | user tower, OverArch, Value Model, 12-way queries, 2-GPU shard at 80 M | — | none | out of scope | no end-to-end QPS or TCO claim is tested | [ST-12](reproduction-deviations.md#3-silvertorch-as-we-run-it--deviations-from-the-paper) |
 
@@ -224,9 +221,9 @@ Sources: [evaluation](../../docs/system/evaluation.md#measurement-protocol),
 | | LiNR paper | SilverTorch paper | ours |
 |---|---|---|---|
 | GPU | A100 for the stretch test; the GPU of Tables 3-4 is not stated | A100 40 GB | one A100-SXM4-80GB, timings compared only within one box ([decisions](../decisions.md#harness)) |
-| catalogue | 15.5 M LinkedIn jobs, 25 k queries (internal) | 10 M / 20 M / 40 M / 80 M production items, 5,000 replayed requests (internal) | Goodreads 0.8 M, arXiv 3 M, PubMed 10 M, YFCC 10 M, LAION 1 / 3 / 10 / 30 M |
-| dimension | 128, fp16 | 128 | 128 (Goodreads, arXiv), 192 (YFCC), 256 (LAION), 768 (PubMed); native widths, no PCA |
-| encoders | two-tower member / item model | User Tower (HSTU-style) | Goodreads: our sequential encoder (gSASRec body); arXiv, LAION: nomic-embed-text-v1.5; PubMed: MedCPT; YFCC: the Big-ANN CLIP descriptors ([provenance §7](provenance-and-disclosure.md#7-data-provenance)) |
+| catalogue | 15.5 M LinkedIn jobs, 25 k queries (internal) | 10 M / 20 M / 40 M / 80 M production items, 5,000 replayed requests (internal) | Goodreads 0.8 M, arXiv 3 M, PubMed 10 M, LAION 1 / 3 / 10 / 30 M |
+| dimension | 128, fp16 | 128 | 128 (Goodreads, arXiv), 256 (LAION), 768 (PubMed); native widths, no PCA |
+| encoders | two-tower member / item model | User Tower (HSTU-style) | Goodreads: our sequential encoder (gSASRec body); arXiv, LAION: nomic-embed-text-v1.5; PubMed: MedCPT ([provenance §7](provenance-and-disclosure.md#7-data-provenance)) |
 | filters | geo, reverse company, job title; one attribute per item and clause | 6 features, ~7 conditions per query, AND / OR / NOT | real attributes (genre, language, category, MeSH, journal, tags, domain …), up to 4 values per item and clause; query values taken from the held-out target's attributes (`evaluation/eval_datasets/common.py:16`); plus synthetic rates 0.001-1 |
 | baselines | TF vs PyTorch implementations | Faiss CPU / GPU, HNSW, inverted and forward index | each other, plus generic torch (dense matmul, top-k, then filter) and torch eager / compiled; no Faiss ([decisions](../decisions.md#harness)) |
 
@@ -234,7 +231,7 @@ Sources: [evaluation](../../docs/system/evaluation.md#measurement-protocol),
 
 | method | items stored | scored in | against an fp32 oracle |
 |---|---|---|---|
-| LiNR V1 / V2 | fp16 (as the paper) | fp32 accumulate | equal up to fp16 rounding; visible only on YFCC's narrow cone ([HB-6](reproduction-deviations.md#6-deviations-of-our-harness-against-the-papers-protocols--and-against-itself)) |
+| LiNR V1 / V2 | fp16 (as the paper) | fp32 accumulate | equal up to fp16 rounding; every exact cell clears the 0.99 gate |
 | LiNR V3 | 1-bit codes, then fp16 rescore | Hamming, then fp32 | pool size decides |
 | SilverTorch | int8 codes, global scale | int32 dot, fp32 epilogue | int8 and the probed lists decide |
-| oracle | fp32 | fp32, exact filter, ties to the lowest id | — (checked against YFCC's shipped ground truth: 100,000 / 100,000 queries id-exact, [HB-2](reproduction-deviations.md#6-deviations-of-our-harness-against-the-papers-protocols--and-against-itself)) |
+| oracle | fp32 | fp32, exact filter, ties to the lowest id | — (checked by the exact LiNR arms, ≥ 0.99 against it in every cell, [HB-2](reproduction-deviations.md#6-deviations-of-our-harness-against-the-papers-protocols--and-against-itself)) |

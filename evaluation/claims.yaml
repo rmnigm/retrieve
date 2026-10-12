@@ -66,12 +66,12 @@ claims:
     original: "FPR ~0.067% at 1024 bits; 291-523x faster than an inverted index"
     source: "SilverTorch, arXiv 2511.14881, section: planner"
     ours:
-      - label: "bloom FPR, Goodreads c0_genre, m_bits 1024, k_hash 5 (triton; official has no m_bits)"
-        metric: field:bloom_fp_rate
-        where: {dataset: goodreads, suite: bloomwidth, sweep: c0_genre, algo: silvertorch, backend: triton, params: {m_bits: 1024, k_hash: 5}}
-      - label: "bloom FPR, PubMed c0_mesh, m_bits 1024, k_hash 5 (triton; official has no m_bits)"
-        metric: field:bloom_fp_rate
-        where: {dataset: pubmed, suite: bloomwidth, sweep: c0_mesh, algo: silvertorch, backend: triton, params: {m_bits: 1024, k_hash: 5}}
+      - label: "bloom recall, Goodreads c0_genre, k_hash 5 (Meta's code as published)"
+        metric: recall
+        where: {dataset: goodreads, suite: bloomwidth, sweep: c0_genre, algo: silvertorch, backend: official, params: {m_bits: 1024, k_hash: 5}}
+      - label: "bloom recall, PubMed c0_mesh, k_hash 5 (Meta's code as published)"
+        metric: recall
+        where: {dataset: pubmed, suite: bloomwidth, sweep: c0_mesh, algo: silvertorch, backend: official, params: {m_bits: 1024, k_hash: 5}}
     verdict: null
 
   - id: C5
@@ -91,26 +91,26 @@ claims:
     original: "80M items, 24 probes, 1210 QPS on 2 A100; 10M items, 3802 QPS on 1 A100; latency budget at most 200 ms"
     source: "SilverTorch, arXiv 2511.14881, sec. 6.2"
     ours:
-      - label: "SilverTorch triton recall, YFCC-10M tags_and, n_probe 24"
+      - label: "SilverTorch (published) bloom recall, PubMed c0_mesh, n_probe 24"
         metric: recall
-        where: {dataset: yfcc10m, suite: filter, sweep: tags_and, filter_kind: clause, algo: silvertorch, backend: triton, params: {n_probe: 24}}
-      - label: "SilverTorch triton latency at recall 0.95, arXiv deep c0_maincat, n_lists 1664, B=1"
+        where: {dataset: pubmed, suite: filter, sweep: c0_mesh, filter_kind: bloom, algo: silvertorch, backend: official, params: {n_probe: 24}}
+      - label: "SilverTorch (published) bloom latency at recall 0.95, arXiv deep c0_maincat, n_lists 2048, B=1"
         metric: "matched:0.95"
         bs: 1
-        where: {dataset: arxiv, suite: deep, sweep: c0_maincat, filter_kind: clause, algo: silvertorch, backend: triton, params: {n_lists: 1664}}
+        where: {dataset: arxiv, suite: deep, sweep: c0_maincat, filter_kind: bloom, algo: silvertorch, backend: official, params: {n_lists: 2048}}
     verdict: null
 
   - id: C7
-    claim: "an independent Triton reimplementation matches official int32 results bit-exactly and is faster end to end, while Meta's scorer kernel is faster in isolation"
+    claim: "Meta's code as published by score path: fp16 (its default) against int32 (the bit-exact parity path); the adapted code's comparison is NUMBERS' h2h"
     original: "ours (no original number)"
     source: "this work; h2h suite"
     ours:
-      - label: "official fp16 / triton latency, Goodreads bloom, B=16"
+      - label: "official fp16 / int32 latency, Goodreads bloom, B=16"
         metric: latency
         bs: 16
         where: {dataset: goodreads, suite: h2h, filter_kind: bloom, backend: official, params: {score_path: fp16}}
-        vs: {dataset: goodreads, suite: h2h, filter_kind: bloom, backend: triton}
-      - label: "official int32 jaccard@100 against triton, Goodreads bloom"
+        vs: {dataset: goodreads, suite: h2h, filter_kind: bloom, backend: official, params: {score_path: int32}}
+      - label: "official int32 jaccard@100 against fp16, Goodreads bloom"
         metric: "field:quality_jaccard_vs_first@100"
         where: {dataset: goodreads, suite: h2h, filter_kind: bloom, backend: official, params: {score_path: int32}}
     verdict: null

@@ -985,7 +985,7 @@ def test_t1_fills_ours_from_the_selectors_and_never_a_verdict(campaign):
     assert f"${0.4 / 1.1:.2f}\\times\\,[{0.4 / 1.1:.2f}, {0.4 / 1.1:.2f}]$" in c1
     assert "^{u}" not in c1
     c7 = next(ln for ln in t1.splitlines() if ln.strip().startswith("C7 &"))
-    assert "official fp16 / triton latency" in c7 and "$1.50\\times" in c7
+    assert "official fp16 / int32 latency" in c7 and "$0.75\\times" in c7
     for ln in t1.splitlines():
         if re.match(r"\s*C\d &", ln):
             assert ln.rstrip().endswith("& --- \\\\"), "a verdict was generated"

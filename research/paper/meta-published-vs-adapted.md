@@ -88,8 +88,8 @@ State (citable; raw outputs on the Hub, [hub-index](../artifacts/hub-index.md)):
 |---|---|---|
 | the unmodified adapted tree against the published code (C0) | 126 / 126 arXiv d128 cells `torch.equal` | `artifacts/meta-fork/c0` |
 | S and capture after C3 / C4 | no device-to-host copy and no pageable upload per forward at C4; capture equal to eager | `artifacts/meta-fork/c3-c4` |
-| X at the head (`32c0d61` → `46ff49e`) | 300 / 300 cells `torch.equal` to the published `-O3` code with Meta's bloom semantics (goodreads, arXiv d128 / d256, PubMed d768, YFCC d192; none / exact / bloom; bs 1 / 16 / 64; k 100 / 1000) | `artifacts/meta-fork/pod-b-32c0d61` |
-| X at ≤ 10 M, the earlier grid (`82fafb6`) | 1,536 / 1,536 cells `torch.equal` (the same datasets) | `artifacts/meta-fork/head-82fafb6` |
+| X at the head (`32c0d61` → `46ff49e`) | 276 / 276 cells `torch.equal` to the published `-O3` code with Meta's bloom semantics (goodreads, arXiv d128 / d256, PubMed d768; none / exact / bloom; bs 1 / 16 / 64; k 100 / 1000) | `artifacts/meta-fork/pod-b-32c0d61` |
+| X at ≤ 10 M, the earlier grid (`82fafb6`) | 1,488 / 1,488 cells `torch.equal` (the same datasets; YFCC's 48 cells, also equal, are out of the study) | `artifacts/meta-fork/head-82fafb6` |
 | compile gate | pass: `fullgraph`, 0 graph breaks, exports | — |
 | R (C12, C13) | 0 false positives on every cell; recall against an exact oracle 1.0 up to ties at the k-th score | `artifacts/meta-fork/pod-b-32c0d61` |
 | X at 30 M (LAION d256) | bloom partial + full 64 / 64 `torch.equal` at `32c0d61`; none / exact 72 / 72 at an earlier head | `artifacts/meta-fork/laion30m-b1-32c0d61` |
@@ -103,14 +103,6 @@ capture), beyond the A/A floor (`artifacts/meta-fork/head-82fafb6`). This
 gate grid is the paper's source for the comparison (T3): the NUMBERS legs
 time the adapted code against LiNR only and run no published-code cell. The
 final full rerun regenerates it.
-
-The adaptation's definition of done also asks it to be no slower than our
-retired Triton SilverTorch backend on any cell. That is an engineering
-target, not a claim of the paper. Four clusters of cells still miss it
-(roadmap META-FORK): wide unfiltered scans at `D` ≥ 192 (Meta's scorer),
-the full bloom path on multi-clause filters (Meta's full-`N` bloom search),
-the partial bloom path at batch 1 under CUDA graph (the payload kernels),
-and the exact filter at wide probes at batch 1 (C9's per-doc check).
 
 ## 5. What this comparison cannot say
 
@@ -126,13 +118,3 @@ and the exact filter at wide probes at batch 1 (C9's per-doc check).
 - One A100-SXM4-80GB, clocks unlocked and sampled
   ([provenance §4](provenance-and-disclosure.md#4-timing-which-clock-estimator-and-why-the-question-is-not-pedantic));
   the published column is eager only.
-
-## 6. The earlier comparison
-
-The head-to-heads of Meta's code against our Triton reimplementation
-(b3, the kernel-opt head-to-head, H2H-FINAL, the C7 cells at
-campaign-v2.x) are not in the study. Their records stay on the Hub and
-their rows in [validation](../validation.md) are marked "not in the study".
-The findings about Meta's published code that they produced (OF-1 to
-OF-12) stand in [deviations §5](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper),
-and they are what §2 above removes.

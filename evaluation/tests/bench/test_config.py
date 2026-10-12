@@ -365,88 +365,62 @@ def test_arm_errors_are_named(tmp_path, arms, match):
 # ----- the real grid (campaign-v2, user decisions 2026-10-08) ---------------------------
 
 GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; change it deliberately
-    ("filter", "goodreads"): (63, 90),
-    ("filter", "arxiv"): (99, 144),
-    ("filter", "yfcc10m"): (15, 21),
-    ("filter", "pubmed"): (69, 111),
-    ("deep", "goodreads"): (5, 40),
-    ("deep", "arxiv"): (9, 63),
-    ("deep", "yfcc10m"): (1, 8),
-    ("deep", "pubmed"): (11, 21),
-    ("synth", "goodreads-synth"): (70, 128),
-    ("synth", "arxiv-synth"): (31, 58),
-    ("synth", "arxiv-corr-synth"): (15, 36),
-    ("synth", "yfcc10m-synth"): (27, 45),  # 9 rates x (V1, V2, SilverTorch at 3 n_probe)
+    ("filter", "goodreads"): (39, 51),
+    ("filter", "arxiv"): (45, 63),
+    ("filter", "pubmed"): (39, 54),
+    ("deep", "goodreads"): (1, 8),
+    ("deep", "arxiv"): (3, 21),
+    ("synth", "goodreads-synth"): (40, 54),
+    ("synth", "arxiv-synth"): (20, 20),
+    ("synth", "arxiv-corr-synth"): (6, 12),
     ("c3", "goodreads-synth"): (18, 18),
     ("c3", "arxiv-synth"): (12, 12),
-    ("c3", "yfcc10m-synth"): (6, 6),
     ("c3", "laion30m-synth"): (6, 6),
     ("c3-real", "goodreads"): (6, 6),
     ("c3-real", "arxiv"): (6, 6),
-    ("c3-real", "yfcc10m"): (2, 2),
     ("c3-real", "pubmed"): (6, 6),
-    ("codesign", "arxiv"): (12, 36),  # official + triton (C5-OURS)
-    ("codesign", "goodreads"): (4, 12),
-    ("codesign-pubmed", "pubmed"): (2, 4),
-    ("h2h", "goodreads"): (6, 6),
-    ("h2h", "arxiv"): (6, 6),
-    ("bloomwidth", "goodreads"): (14, 14),
-    ("bloomwidth", "arxiv"): (42, 42),
-    ("bloomwidth", "pubmed"): (14, 14),
-    ("bloomwidth-timed", "goodreads"): (7, 7),
-    ("bloomwidth-timed", "arxiv"): (21, 21),
-    ("bloomwidth-timed", "pubmed"): (7, 7),
-    ("v3bits", "goodreads-synth"): (28, 56),
-    ("v3bits", "goodreads"): (8, 16),
+    ("codesign", "arxiv"): (6, 18),
+    ("codesign", "goodreads"): (2, 6),
+    ("h2h", "goodreads"): (4, 4),
+    ("h2h", "arxiv"): (4, 4),
+    ("bloomwidth", "goodreads"): (2, 2),
+    ("bloomwidth", "arxiv"): (6, 6),
+    ("bloomwidth", "pubmed"): (2, 2),
+    ("bloomwidth-timed", "goodreads"): (1, 1),
+    ("bloomwidth-timed", "arxiv"): (3, 3),
+    ("bloomwidth-timed", "pubmed"): (1, 1),
+    ("v3bits", "goodreads-synth"): (14, 28),
+    ("v3bits", "goodreads"): (6, 12),
     ("v3bits", "pubmed"): (6, 12),
-    ("laion30m", "laion30m"): (6, 14),
-    ("laion30m-bs1", "laion30m"): (2, 10),
-    ("laion30m-synth", "laion30m-synth"): (22, 30),  # V1 + V2 at nine rates, SilverTorch at four
-    ("codesign-laion30m", "laion30m"): (8, 16),  # C5 at 30 M: 2 sweeps x 2 backends x 2 paths
-    ("laion30m-x", "laion30m"): (6, 6),
-    ("c7-scorepath", "laion30m"): (6, 12),
-    ("nsweep-synth", "laion1m-synth"): (22, 30),
-    ("nsweep-synth", "laion3m-synth"): (22, 30),
-    ("nsweep-synth", "laion10m-synth"): (22, 30),
-    ("nsweep-synth", "laion30m-synth"): (22, 30),
-    ("nsweep-synth", "arxiv-synth"): (22, 30),
-    ("nsweep", "laion1m"): (6, 12),
-    ("nsweep", "laion3m"): (6, 12),
-    ("nsweep", "laion10m"): (6, 12),
-    ("nsweep", "laion30m"): (6, 12),
-    ("nsweep-codesign", "laion1m"): (8, 16),
-    ("nsweep-codesign", "laion3m"): (8, 16),
-    ("nsweep-codesign", "laion10m"): (8, 16),
-    ("nsweep-codesign", "laion30m"): (8, 16),
+    ("laion30m", "laion30m"): (4, 4),
+    ("laion30m-synth", "laion30m-synth"): (18, 18),
+    ("codesign-laion30m", "laion30m"): (4, 8),
+    ("laion30m-x", "laion30m"): (4, 4),
+    ("c7-scorepath", "laion30m"): (4, 8),
+    ("nsweep-synth", "laion1m-synth"): (18, 18),
+    ("nsweep-synth", "laion3m-synth"): (18, 18),
+    ("nsweep-synth", "laion10m-synth"): (18, 18),
+    ("nsweep-synth", "laion30m-synth"): (18, 18),
+    ("nsweep-synth", "arxiv-synth"): (18, 18),
+    ("nsweep", "laion1m"): (4, 4),
+    ("nsweep", "laion3m"): (4, 4),
+    ("nsweep", "laion10m"): (4, 4),
+    ("nsweep", "laion30m"): (4, 4),
+    ("nsweep-codesign", "laion1m"): (4, 8),
+    ("nsweep-codesign", "laion3m"): (4, 8),
+    ("nsweep-codesign", "laion10m"): (4, 8),
+    ("nsweep-codesign", "laion30m"): (4, 8),
     ("seeds-c1", "arxiv-synth"): (12, 12),
-    ("seeds-c1", "yfcc10m-synth"): (12, 12),
     ("seeds-c1-laion30m", "laion30m-synth"): (12, 12),
-    ("seeds-c7", "laion30m"): (18, 36),
-    ("tune-q", "goodreads"): (28, 196),
-    ("tune-q", "goodreads-synth"): (42, 294),
-    ("tune-q", "arxiv"): (42, 294),
-    ("tune-q", "arxiv-synth"): (42, 294),
-    ("tune-q", "arxiv-corr-synth"): (42, 294),
-    ("tune-q", "yfcc10m"): (4, 34),
-    ("tune-q", "yfcc10m-synth"): (24, 204),
-    ("tune-q", "pubmed"): (16, 136),
-    ("tune-timed", "goodreads"): (28, 100),
-    ("tune-timed", "goodreads-synth"): (42, 146),
-    ("tune-timed", "arxiv"): (42, 142),
-    ("tune-timed", "arxiv-synth"): (42, 144),
-    ("tune-timed", "arxiv-corr-synth"): (42, 150),
-    ("tune-timed", "yfcc10m"): (4, 8),
-    ("tune-timed", "yfcc10m-synth"): (24, 43),
-    ("tune-timed", "pubmed"): (16, 35),
+    ("seeds-c7", "laion30m"): (12, 24),
 }
 KEPT = {
     "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
     "arxiv": {"c3_nversions", "c0_maincat", "all4"},
     "pubmed": {"c0_mesh", "c3_journal_reverse", "all5"},
-    "yfcc10m": {"tags_and"},
 }
 SYNTH_N = {"goodreads-synth": 797_084, "arxiv-synth": 2_988_996, "arxiv-corr-synth": 2_988_996,
-           "yfcc10m-synth": 10_000_000, "laion30m-synth": 30_000_000}  # fmt: skip
+           "laion30m-synth": 30_000_000}  # fmt: skip
 RATE = {"p0001": 0.001, "p0003": 0.003, "p001": 0.01, "p003": 0.03, "p005": 0.05, "p01": 0.1,
         "p02": 0.2, "p03": 0.3, "p05": 0.5, "p1": 1.0,
         "c001": 0.01, "c003": 0.03, "c01": 0.1}  # fmt: skip
@@ -491,17 +465,17 @@ def test_grid_counts_and_invariants(suite, dataset):
         if j.algo == "silvertorch" and "n_probe" in p:
             assert p["n_probe"] <= p.get("n_lists", 1024) // 4, (j.sweep, p)
     assert not any(j.narrowed for j in jobs)
-    if suite in ("filter", "deep", "c3-real") and dataset in KEPT:
+    if suite in ("filter", "c3-real") and dataset in KEPT:
         assert {j.sweep for j in jobs} == KEPT[dataset]
     st_torch = {j.algo for j in jobs if j.backend == "torch" and j.algo == "silvertorch"}
     assert not st_torch  # C3 runs on V1 / V2 (`c3`, `c3-real`, synth's V2 arms)
     if suite in (
         "synth",
         "laion30m-synth",
-    ):  # k 1000 where N * p >= 4 * 1000; YFCC / LAION synth at k 100
+    ):  # k 1000 where N * p >= 4 * 1000; LAION synth at k 100
         for j in jobs:
             big_enough = SYNTH_N[dataset] * RATE[j.sweep] >= 4 * 1000
-            k100_only = dataset in ("yfcc10m-synth", "laion30m-synth")
+            k100_only = dataset == "laion30m-synth"
             assert (1000 in j.ks) == (big_enough and not k100_only), j.sweep
     if suite == "synth":
         torch_arms = {(j.algo, json.dumps(j.build)) for j in jobs if j.backend == "torch"}
@@ -527,13 +501,11 @@ def test_grid_counts_and_invariants(suite, dataset):
         st = {(j.backend, j.filter_kind): tuple(q["n_probe"] for q in j.query)
               for j in jobs if j.algo == "silvertorch"}  # fmt: skip
         assert st == {
-            "goodreads-synth": {("triton", "clause"): (24, 64, 256, 1024)},
-            "arxiv-synth": {("triton", "clause"): (24, 64, 256, 512), ("triton", "bloom"): (24,),
-                            ("official", "bloom"): (24,)},
-            "arxiv-corr-synth": {("triton", "clause"): (24, 64, 256, 512)},
-            "yfcc10m-synth": {("triton", "clause"): (24, 256, 1024)},
+            "goodreads-synth": {},
+            "arxiv-synth": {("official", "bloom"): (24,)},
+            "arxiv-corr-synth": {},
         }[dataset]  # fmt: skip
-        if dataset in ("arxiv-synth", "yfcc10m-synth"):  # C1's nine rates
+        if dataset == "arxiv-synth":  # C1's nine rates
             assert {j.sweep for j in jobs if j.algo == "linr_v2"} == {
                 "p0001", "p0003", "p001", "p003", "p005", "p01", "p02", "p05", "p1"
             }  # fmt: skip
@@ -547,12 +519,11 @@ def test_filter_suite_arms():
     arms = {
         (j.algo, j.backend, j.filter_kind, json.dumps(j.build), json.dumps(j.query)) for j in jobs
     }
-    want = set()
-    for fk in ("clause", "bloom"):
-        for a in ("linr_v1_filter_mask", "linr_v2", "linr_v3"):
-            want.add((a, "triton", fk, "{}", json.dumps(({},))))
-        want.add(("silvertorch", "triton", fk, '{"n_lists": 2048}', json.dumps(IVF_ARXIV)))
-        want.add(("postfilter", "torch", fk, "{}", json.dumps(({"alpha": 1}, {"alpha": 8}))))
+    want = {
+        (a, "triton", "clause", "{}", json.dumps(({},)))
+        for a in ("linr_v1_filter_mask", "linr_v2", "linr_v3")
+    }
+    want.add(("postfilter", "torch", "clause", "{}", json.dumps(({"alpha": 1}, {"alpha": 8}))))
     want.add(("silvertorch", "official", "bloom", '{"n_lists": 2048}', json.dumps(IVF_ARXIV)))
     assert arms == want
     ds = jobs[0].data
@@ -561,14 +532,13 @@ def test_filter_suite_arms():
 
 
 def test_deep_suite_is_silvertorch_at_the_tuned_n_lists():
-    """F3: SilverTorch triton along n_probe at the tune's n_lists, up to the n_lists / 4 cap."""
-    want = {"goodreads": (4096, 1024), "arxiv": (2048, 512), "yfcc10m": (4096, 1024)}
+    """F3: Meta's published bloom along n_probe at the tune's n_lists, up to the n_lists / 4 cap."""
+    want = {"goodreads": (4096, 1024), "arxiv": (2048, 512)}
     for dataset, (n_lists, top) in want.items():
         jobs = _real("deep", dataset)
-        # F3's official curve (YFCC has no bloom block)
-        official = {("silvertorch", "official")} if dataset != "yfcc10m" else set()
-        assert {(j.algo, j.backend) for j in jobs} == {("silvertorch", "triton")} | official
-        assert all(j.filter_kind == "bloom" for j in jobs if j.backend == "official")
+        assert {(j.algo, j.backend, j.filter_kind) for j in jobs} == {
+            ("silvertorch", "official", "bloom")
+        }
         assert {j.build["n_lists"] for j in jobs} == {n_lists}
         probes = tuple(n for n in (8, 16, 32, 64, 128, 256, 512, 1024) if n <= top)
         assert all(j.query == tuple({"n_probe": n} for n in probes) for j in jobs)
@@ -580,20 +550,10 @@ def test_codesign_and_bloomwidth_suites():
     assert {(j.backend, j.build["n_lists"], j.build["bloom_path"]) for j in cd} == {
         ("official", 1024, "partial"),
         ("official", 1024, "full"),
-        ("triton", 1024, "partial"),
-        ("triton", 1024, "full"),
     }
     assert {(j.ks, j.batch_sizes) for j in cd} == {((100,), (1, 16))}
     bw = _real("bloomwidth", "pubmed", seeds=[0])
-    assert {j.sweep for j in bw} == {"c0_mesh"} and {j.backend for j in bw} == {
-        "triton",
-        "official",
-    }
-    tri = [j for j in bw if j.backend == "triton"]
-    assert sorted({(j.bloom["m_bits"], j.bloom["k_hash"]) for j in tri}) == [
-        (m, k) for m in (64, 128, 256, 512, 1024, 2048) for k in (3, 5)
-    ]
-    assert all(j.bloom == j.build and j.query == ({},) for j in tri)
+    assert {j.sweep for j in bw} == {"c0_mesh"} and {j.backend for j in bw} == {"official"}
     # official's width is OfficialConfig.b_multiplier, not m_bits: only k_hash is gridded
     assert sorted(j.build["k_hash"] for j in bw if j.backend == "official") == [3, 5]
     assert not any("m_bits" in j.build for j in bw if j.backend == "official")
@@ -605,7 +565,7 @@ def test_codesign_and_bloomwidth_suites():
 # G-key: resume keys of cells that exist before and after the redesign, as today's code
 # (b96e1f2) computed them. Old records must keep matching (docs/system/evaluation.md § Resume).
 OLD_KEYS = [
-    ("filter", "arxiv", '{"algo":"linr_v3","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"bloom","inputs":"content_d128","params":{},"seed":1,"suite":"filter","sweep":"all4"}'),  # noqa: E501
+    ("filter", "arxiv", '{"algo":"linr_v3","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"clause","inputs":"content_d128","params":{},"seed":1,"suite":"filter","sweep":"all4"}'),  # noqa: E501
     ("filter", "goodreads", '{"algo":"postfilter","backend":"torch","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{"alpha":8},"seed":0,"suite":"filter","sweep":"c1_lang_reverse"}'),  # noqa: E501
     ("filter", "goodreads", '{"algo":"linr_v1_filter_mask","backend":"triton","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{},"seed":2,"suite":"filter","sweep":"all4"}'),  # noqa: E501
     ("filter", "pubmed", '{"algo":"linr_v2","backend":"triton","code_version":"CV","dataset":"pubmed","dim":768,"filter_kind":"clause","inputs":"content_d768","params":{},"seed":0,"suite":"filter","sweep":"all5"}'),  # noqa: E501
@@ -648,23 +608,22 @@ def test_every_shipped_config_parses(dataset_yaml, suite):
 
 
 def test_interleave_groups_of_the_real_suites():
-    """The comparison groups ``--interleave`` times round-robin: h2h's three arms per (filter
-    kind, seed), codesign's partial / full, filter's V1 / V2 and triton / official bloom; a
-    group is per seed, and every arm keeps the key it has without ``--interleave``."""
+    """The comparison groups ``--interleave`` times round-robin: h2h's two score paths per
+    (filter kind, seed), codesign's partial / full, filter's V1 / V2; a group is per seed, and
+    every arm keeps the key it has without ``--interleave``."""
     units = interleave_units(_real("h2h", "goodreads"))
     groups = [m for by, m in units if by]
     assert len(groups) == len(units) == 2  # none + bloom, seed 0
     for m in groups:
         assert [(j.backend, j.build.get("score_path")) for j in m] == [
-            ("triton", None), ("official", "fp16"), ("official", "int32")
+            ("official", "fp16"), ("official", "int32")
         ]  # fmt: skip
         assert len({j.seed for j in m}) == 1 and all(j.query == ({"n_probe": 24},) for j in m)
     assert [run.group_label(j, ("backend", "score_path")) for j in groups[0]] == [
-        "silvertorch/triton", "silvertorch/official/score_path=fp16",
-        "silvertorch/official/score_path=int32",
+        "silvertorch/official/score_path=fp16", "silvertorch/official/score_path=int32",
     ]  # fmt: skip
     cd = [m for by, m in interleave_units(_real("codesign", "arxiv")) if by]
-    assert len(cd) == 6 and all(
+    assert len(cd) == 3 and all(
         [j.build["bloom_path"] for j in m] == ["partial", "full"]
         and len({j.backend for j in m}) == 1
         for m in cd
@@ -672,16 +631,14 @@ def test_interleave_groups_of_the_real_suites():
     fil = [m for by, m in interleave_units(_real("filter", "arxiv")) if by]
     assert sorted({tuple(f"{j.algo}/{j.backend}" for j in m) for m in fil}) == [
         ("linr_v1_filter_mask/triton", "linr_v2/triton"),
-        ("silvertorch/triton", "silvertorch/official"),
     ]
-    assert not any(j.backend == "torch" for m in fil for j in m)  # values: [triton, official]
     assert cli._children(_real("filter", "arxiv"), True) == [
         ("arxiv", 128, ("linr_v1_filter_mask", "linr_v2"), ("triton",)),
         ("arxiv", 128, ("linr_v3",), ("triton",)),
-        ("arxiv", 128, ("silvertorch",), ("triton", "official")),
+        ("arxiv", 128, ("silvertorch",), ("official",)),
         ("arxiv", 128, ("postfilter",), ("torch",)),
     ]
-    assert len(cli._children(_real("filter", "arxiv"), False)) == 6  # one per Job.group
+    assert len(cli._children(_real("filter", "arxiv"), False)) == 5  # one per Job.group
 
 
 @pytest.mark.parametrize(
@@ -733,16 +690,14 @@ def test_score_path_is_an_official_build_param():
 IVF = {
     "goodreads": (4096, 64),
     "arxiv": (2048, 256),
-    "yfcc10m": (4096, 1024),
     "pubmed": (4096, 1024),
 }
 
 
 @pytest.mark.parametrize("dataset", list(IVF))
 def test_filter_silvertorch_runs_at_the_tuned_ivf(dataset):
-    """`filter` runs SilverTorch at {24, n95} on the tuned n_lists; PubMed (0.95 out of reach) at
-    24, c0_mesh's tuned 512 and the cap 1024, plus all5 / c3_journal_reverse at their own tuned
-    points (v2.11 timed fronts)."""
+    """`filter` runs Meta's published bloom at {24, n95} on the tuned n_lists; PubMed (0.95 out
+    of reach) at 24, c0_mesh's tuned 512 and the cap 1024."""
     n_lists, n95 = IVF[dataset]
     st = [j for j in _real("filter", dataset, seeds=[0]) if j.algo == "silvertorch"]
     main = [j for j in st if j.build.get("n_lists") == n_lists]
@@ -753,11 +708,10 @@ def test_filter_silvertorch_runs_at_the_tuned_ivf(dataset):
         for j in st
         if j not in main
     }
-    tuned = {("all5", 16384, (2048,)), ("c3_journal_reverse", 65536, (1024,))}
-    assert extra == (tuned if dataset == "pubmed" else set())
+    assert extra == set()
 
 
-@pytest.mark.parametrize("dataset", ["goodreads", "arxiv", "yfcc10m"])
+@pytest.mark.parametrize("dataset", ["arxiv"])
 def test_synth_silvertorch_runs_on_the_real_datasets_ivf(dataset):
     st = [j for j in _real("synth", f"{dataset}-synth", seeds=[0]) if j.algo == "silvertorch"]
     assert st and {j.build["n_lists"] for j in st} == {IVF[dataset][0]}
@@ -790,31 +744,13 @@ def _ds_dim(f: Path) -> int:
     return yaml.safe_load(f.read_text())["dims"][0]
 
 
-def test_deep_pubmed_is_its_timed_pareto_fronts():
-    """F3 / C6 at 10 M: PubMed `deep` = SilverTorch triton clause at the points of its v2.11
-    timed fronts."""
-    pm = _real("deep", "pubmed")
-    assert {(j.algo, j.backend, j.filter_kind) for j in pm} == {("silvertorch", "triton", "clause")}
-    got = {(j.sweep, j.build["n_lists"], q["n_probe"]) for j in pm for q in j.query}
-    assert len(got) == 21 and {sw for sw, _, _ in got} == KEPT["pubmed"]
-    assert {
-        ("c0_mesh", 4096, 512),
-        ("c3_journal_reverse", 65536, 1024),
-        ("all5", 16384, 2048),
-    } <= got
-
-
-def test_nsweep_scales_n_lists_to_the_30m_list_size():
-    """The fixed-d N-sweep: n_lists ~ N / 1,831 (30 M's 16384 lists) to a power of two, and the
-    probes at 30 M's scan fractions (synth {24, L/64, L/16}; real {24, L/64, L/16, L/4})."""
+def test_nsweep_codesign_scales_n_lists_to_the_30m_list_size():
+    """The fixed-d N-sweep of C5: n_lists ~ N / 1,831 (30 M's 16384 lists) to a power of two, on
+    Meta's code as published, partial and full masks."""
     n_lists = {"laion1m": 512, "laion3m": 2048, "laion10m": 4096, "laion30m": 16384}
     for ds, nl in n_lists.items():
-        st = [j for j in _real("nsweep", ds) if j.algo == "silvertorch"]
-        assert {j.build["n_lists"] for j in st} == {nl}
-        assert {q["n_probe"] for j in st for q in j.query} == {24, nl // 64, nl // 16, nl // 4}
-        syn = [j for j in _real("nsweep-synth", f"{ds}-synth") if j.algo == "silvertorch"]
-        assert {q["n_probe"] for j in syn for q in j.query} == {24, nl // 64, nl // 16}
+        assert not any(j.algo == "silvertorch" for j in _real("nsweep", ds))
         cd = _real("nsweep-codesign", ds)
         assert {(j.backend, j.build["bloom_path"], j.build["n_lists"]) for j in cd} == {
-            (b, p, nl) for b in ("official", "triton") for p in ("partial", "full")
+            ("official", p, nl) for p in ("partial", "full")
         }

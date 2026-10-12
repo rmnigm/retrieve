@@ -306,6 +306,12 @@ non-null item's bucket is unchanged.
 
 ### yfcc10m
 
+YFCC-10M is out of the study ([decisions](../../research/decisions.md#datasets)): its
+CLIP descriptors are not trained for inner product, so their inner-product
+geometry is not a real retrieval distribution (point 1 below). It and
+`yfcc10m-synth` are in no suite; the ETL, the GT check, the configs and the
+Hub copy stay.
+
 `download` → `convert` → `prep` → `attrs`, or
 `uv run eval-data yfcc all --output-dir data/yfcc10m`.
 
@@ -445,18 +451,16 @@ drift; the last two are diagnostics and always exit 0.
 **Running it.** [`config/yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml)
 is the dataset file (one dim, 192; one clause sweep `tags_and`
 = clauses `[0, 1]`; no bloom block, because a bloom's false positives would
-make the cross-check against the shipped GT meaningless), and the
-dataset is listed in the `filter` suite of
-[`config/suites.yaml`](../../evaluation/config/suites.yaml) with 192 added
-to the suite's dims. So
+make the cross-check against the shipped GT meaningless), and it is in no suite of
+[`config/suites.yaml`](../../evaluation/config/suites.yaml). Staging and the
+layout check are
 
 ```bash
 uv run eval-data yfcc all --output-dir $RETRIEVE_DATA_ROOT/yfcc10m   # 12.5 GB with the raw
 uv run bench check --dataset yfcc10m                       # yfcc10m d192: ok
-uv run bench run --dataset yfcc10m --suite filter          # every filter cell
 ```
 
-is the whole path. Three things to keep in mind when reading its records:
+and a run needs a suite that lists it. Three things to keep in mind when reading its records:
 the suite's `ks` (100 / 500 / 1000) are deeper than the shipped GT's
 k = 10, which is fine because recall is measured against the harness's own
 cosine oracle over the capped attrs (deviations 1 and 3 above); the
@@ -1162,9 +1166,9 @@ writes four files into the dataset's `data_dir`:
 
 All ten columns are always written, and the harness refuses attrs whose `synth_filter.json` names another rate list (`layout.check_synth_rates`: the YAMLs index columns, so attrs built before SYNTH-TRIM's ten rates must be rebuilt). The YAMLs name every column (`p0001` … `p1`, `p005` = 0.05, `p02` = 0.2, `p05` = 0.5); the `synth` suite picks the rates per dataset:
 [`goodreads-synth.yaml`](../../evaluation/config/goodreads-synth.yaml),
-[`arxiv-synth.yaml`](../../evaluation/config/arxiv-synth.yaml) and
-[`yfcc10m-synth.yaml`](../../evaluation/config/yfcc10m-synth.yaml) (the suite runs nine:
-0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.5, 1.0, at k 100); [`laion30m-synth.yaml`](../../evaluation/config/laion30m-synth.yaml) runs nine (0.001 … 1.0 without 0.3, C1's points; SilverTorch at 0.1 / 0.2 / 0.5 / 1;
+[`arxiv-synth.yaml`](../../evaluation/config/arxiv-synth.yaml) (the suite runs nine:
+0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.5, 1.0) and
+[`yfcc10m-synth.yaml`](../../evaluation/config/yfcc10m-synth.yaml) (out of the study, in no suite); [`laion30m-synth.yaml`](../../evaluation/config/laion30m-synth.yaml) runs nine (0.001 … 1.0 without 0.3, C1's points; SilverTorch at 0.1 / 0.2 / 0.5 / 1;
 clause only) in its own `laion30m-synth` suite. Each keeps the parent's `data_dir`, encoder and `users_limit`, so
 it shares the parent's encode cache. Its sweeps are named `p0001` … `p1`,
 so they cannot collide with the parent's names in the shared `gt_d{dim}`,

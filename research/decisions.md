@@ -85,9 +85,8 @@ decisions.
   checks and the entries are in
   [validation](validation.md#campaign-v2-phase-v) (D1-G).
 - **NUMBERS gate green** (controller ACCEPT, 2026-10-12), on the D1-G
-  model, with the user's rulings: yfcc10m-synth LiNR at k 1000 included
-  and flagged (the fp16 storage shortfall, HB-6); LiNR V2 at bs 256 on
-  PubMed `c3_journal_reverse` / `all5` and YFCC reported as TIMEOUT (no
+  model, with the user's rulings: LiNR V2 at bs 256 on
+  PubMed `c3_journal_reverse` / `all5` reported as TIMEOUT (no
   usable result after 3.6-9.8 h at 80 GB); sub-millisecond cells unstable in
   every run kept and flagged.
 - **LiNR's recall is end-task recall, ours is fidelity to exact search**
@@ -165,7 +164,7 @@ now on; the [roadmap](roadmap.md) holds the steps.
 
 - **Grid and code changes after the pilot** (user, 2026-10-08): `synth`
   sweeps SilverTorch clause n_probe {24, 64, 128, 256, 512, 1024} on
-  goodreads and arXiv and {24, 256, 1024} on YFCC (capped at the dataset's
+  goodreads and arXiv (capped at the dataset's
   `n_lists`; bloom arms {24, 256}), replacing synth's n95 slots, so matched
   recall exists at low p; V2's batch-16 floor is profiled before arXiv
   synth (V2-PROF). Declined: V3 `k_bits` > D (LN-8 stays a stated
@@ -204,8 +203,9 @@ now on; the [roadmap](roadmap.md) holds the steps.
   or dropped from the exhibit. The manifest names, per (dataset, suite,
   algo, backend), the accepted code_version and Hub subtree for quality and
   for perf; `bench report` reads the manifest, not "the latest record".
-- **Four datasets**: goodreads (E1c, 0.8M, d128), arXiv (3M, d128),
-  YFCC-10M (10M, d192), PubMed (10M, d768). **OpenAlex is dropped** (same
+- **Datasets**: goodreads (E1c, 0.8M, d128), arXiv (3M, d128),
+  PubMed (10M, d768); YFCC-10M left the study on 2026-10-13
+  ([Datasets](#datasets)). **OpenAlex is dropped** (same
   N, width and domain family as PubMed; the leg was E5;
   [backlog](backlog.md#datasets-not-in-the-study)). No point above 10M
   before submission; the chunked oracle is still built.
@@ -215,17 +215,17 @@ now on; the [roadmap](roadmap.md) holds the steps.
   rate, one low, one conjunctive or reverse): goodreads `c0_genre`,
   `c1_lang_reverse`, `all4`; arXiv `c3_nversions` (0.444), `c0_maincat`
   (0.136), `all4` (0.0094); PubMed `c0_mesh` (0.0002),
-  `c3_journal_reverse` (0.9993), `all5` (0.018); YFCC `tags_and`. arXiv
+  `c3_journal_reverse` (0.9993), `all5` (0.018). arXiv
   records already run on the other sweeps are kept, not extended.
 - **A synthetic selectivity suite** (`synth`): one nested, per-item uniform
   pass flag (`u_i < p`, generator seed 20261008) at
-  p ∈ {0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0} on goodreads, arXiv and
-  YFCC (YFCC at {0.001, 0.01, 0.03, 0.1, 1.0}), on the real embeddings,
+  p ∈ {0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0} on goodreads and arXiv,
+  on the real embeddings,
   as sibling dataset configs that never touch the real attrs. It is IVF's
   worst case (the filter is independent of the embedding), and p = 1.0 is
   the unfiltered point. *Contested:* the roadmap's SYNTH-TRIM (user,
   2026-10-10) sets ten rates and a smaller grid (arXiv {0.001, 0.01, 0.05,
-  0.1, 0.2, 0.5, 1.0}, YFCC {0.01, 0.1, 0.2, 0.5, 1.0}, seed 0 with seeds
+  0.1, 0.2, 0.5, 1.0}, seed 0 with seeds
   0-2 at p 0.01 and 0.2, clause `n_probe` {24, 64, 256, 1024}).
   A cluster-correlated variant (arXiv, 3 points) runs
   only if arXiv's uniform sweep shows the IVF recall collapse at low p.
@@ -265,19 +265,19 @@ now on; the [roadmap](roadmap.md) holds the steps.
   `recall_oracle@100` ≥ 0.95, then the one scanning the fewest items
   (`n_probe` · N / `n_lists` + `n_lists`), ties to the smaller `n_lists`. From the two, a size rule
   (`n_lists` as a multiple of √N, `n_probe` as a fraction of `n_lists`)
-  sets arXiv (3 M) and YFCC (10 M). The `filter` and `synth` SilverTorch
+  sets arXiv (3 M). The `filter` and `synth` SilverTorch
   arms of each dataset run at its `n_lists` with `n_probe` {24, n95}.
   **Cap** (user, 2026-10-09): tuning stops at `n_probe` = `n_lists`/4
   (25 % scanned); if 0.95 is not reached by then, the record says so with
   the recall reached, and the slot takes `n_lists`/4. n95 follows the
   filter's pass rate more than N (goodreads at pass 0.33: 1/64 of the
   lists; PubMed at 0.018: not reached at 1/16), so the size rule sets only
-  `n_lists` (≈ 4√N to a power of two: goodreads 4096, arXiv 8192, YFCC
-  and PubMed 16384); arXiv's and YFCC's n95 come from a **quick check**
+  `n_lists` (≈ 4√N to a power of two: goodreads 4096, arXiv 8192,
+  PubMed 16384); arXiv's n95 comes from a **quick check**
   (user): that one `n_lists`, quality-only `n_probe` doubling on the
   median sweep, seed 0, same cap. Measured picks: goodreads 4096 / 64, arXiv 2048 / 256
-  (2048-8192 all reach 0.95 at ≈ 12.7 % scanned), YFCC and PubMed 4096 /
-  1024 = the cap, 0.95 not reached (0.72, 0.873): at k 1000 the probe
+  (2048-8192 all reach 0.95 at ≈ 12.7 % scanned), PubMed 4096 /
+  1024 = the cap, 0.95 not reached (0.873): at k 1000 the probe
   scorers run `n_probe` ≤ 1024, which makes 4096 the largest `n_lists` whose
   25 % cap runs. These picks hold for the final pass's records; for the
   adapted backend at 10-30 M the `n_lists` sweep under the operating
@@ -403,7 +403,7 @@ now on; the [roadmap](roadmap.md) holds the steps.
   synth pass rates), not as a backend matrix. The final pass's
   `silvertorch` `triton` and `torch` arms are records, not results.
 - **No unfiltered `quality` suite.** The synth suite's p = 1.0 point is
-  the unfiltered cell on goodreads, arXiv and YFCC.
+  the unfiltered cell on goodreads and arXiv (and LAION at 1-30 M).
 - **Modes: `eager` everywhere, `graph` on every capturable arm** (LiNR
   `triton`, the adapted SilverTorch backend); graph is the headline
   (Campaign v2 above). Graph-only was rejected: Meta's ops as published
@@ -437,8 +437,21 @@ now on; the [roadmap](roadmap.md) holds the steps.
 ## Datasets
 
 - **The study's datasets: semantic search on text plus one recsys
-  dataset** (user): arXiv, YFCC-10M, PubMed + MedCPT, and Goodreads. Each
-  has real filters and an open or local query encoder.
+  dataset** (user): arXiv, PubMed + MedCPT, and Goodreads, plus Re-LAION
+  at 1-30 M (below). Each has real filters and an open or local query
+  encoder.
+- **YFCC-10M is dropped, with no substitute** (user, 2026-10-13). Its
+  vectors are the Big-ANN filtered track's uint8 CLIP image descriptors,
+  whose shipped ground truth is squared L2; they are not trained for inner
+  product, and under inner product their distribution is not a real one
+  (after L2 normalisation a random pair's cosine is 0.97). Every YFCC
+  result is unusable: yfcc10m and yfcc10m-synth recall, SilverTorch
+  curves, timed cells, the int8 ceiling split, the fp16-storage gate
+  allowance (HB-6), the precision analysis, the LiNR timeouts. The oracle
+  check against its shipped GT (HB-2) and its four lines of the META-FORK
+  parity grid go too: the paper never names YFCC. The 10 M point is
+  PubMed and LAION 10 M, real and synthetic. Its ETL, configs and Hub copy
+  stay; it is in no suite. A PubMed synthetic-filter leg joins FULL-RERUN.
 - **Dropped**: OpenAlex and Semantic Scholar SPECTER2 (user, 2026-10-08;
   [backlog](backlog.md#datasets-not-in-the-study)); Amazon Reviews 2023; Cohere Wikipedia (scale without
   meaningful filters, closed query encoder); yambda-500m and yambda-5b
@@ -461,26 +474,13 @@ now on; the [roadmap](roadmap.md) holds the steps.
   exact V2 at bs 1 and collapses onto IVF at p ≈ 1; its two bs-16 passes are
   within 2 % of the front (Hub `campaign-v2.5/pubmed-router`). The harness arm
   is deleted (ROUTER-DROP); its records stay on the Hub.
-- **YFCC exact gate: an fp16-storage allowance at k 100** (user, 2026-10-10).
-  The §2.4 gate (`recall_oracle@k_max ≥ 0.99` for V1 / V2) stays as is
-  everywhere else. For the fp16-stored 10 M YFCC catalogs (`yfcc10m`,
-  `yfcc10m-synth`) at `k_max` 100, the threshold is a per-dataset value set
-  from a quality-only probe, and only if the probe shows the residual is
-  fp16 item storage: V1 = V2 = the library's exact torch path on the same
-  inputs, and an fp32 item table gives 1.0. The value, the probe and its
-  numbers are recorded in validation.md. **Extended to k 1000** (user,
-  2026-10-12): the yfcc10m-synth LiNR cells at k 1000 (0.983-0.995) are
-  included and flagged. The harness's `exact_gate` still applies only below
-  k 1000; a rerun at k 1000 needs it extended.
-- **No PCA.** Every dataset runs at its encoder's native width (YFCC 192,
-  PubMed 768); each dataset contributes one width, and the dim ablation is
+- **No PCA.** Every dataset runs at its encoder's native width (PubMed
+  768, LAION 256); each dataset contributes one width, and the dim ablation is
   dropped.
 - **PubMed runs as a 10M slice**, not the full ~36M: the harness holds
   items fp32 on the device (110 GB for the full catalog), while at 10M the
   items, codes and attributes fit in about 40 GB, and 10M matches the
-  papers' pool and YFCC's size.
-- **YFCC runs clause filters only**, no bloom, so bloom false positives
-  cannot spoil the cross-check against the shipped ground truth.
+  papers' pool size.
 
 ## Sequential encoder
 

@@ -29,12 +29,11 @@ both, commit `fc70420`), except the C4 attribution in
 gates are green ([validation](../../validation.md#numbers-adapted-silvertorch-over-the-study-grid)),
 so their numbers are **citable**, with these exclusions, each listed and
 never quoted as measured:
-- the yfcc10m-synth LiNR cells at k 1000 (HB-6), included and flagged;
-- LiNR V2 at bs 256 on PubMed `c3_journal_reverse` / `all5` and on YFCC: a
+- LiNR V2 at bs 256 on PubMed `c3_journal_reverse` / `all5`: a
   TIMEOUT;
 - the cells unstable in every run, kept and flagged.
 
-No Triton SilverTorch record is a source (controller c3 rulings). All
+All
 numbers are seed 0 unless stated; no table carries a confidence interval:
 seeds and error bars come with roadmap FULL-RERUN (user, 2026-10-11;
 results.md "Uncertainty").
@@ -46,12 +45,12 @@ condition given with it.
 
 | claim | verdict | condition | alternative wording (survey pattern 6) |
 |---|---|---|---|
-| C1 (L-3…L-5) | **reproduced in shape at bs 1, not in location; weak at bs 16; reversed at bs ≥ 64** (final wording: outline open item 3) | a V1 / V2 crossover in pass rate exists at bs 1 at every N and d, at p 0.79-0.97. LiNR's own high-pass setting (p ≈ 0.11) has V1 faster by 3.0×; ours has V2 faster there (fused V2, LN-1 / L-12) | "partially confirmed: the crossover exists, at a far higher pass rate than in the original" |
+| C1 (L-3…L-5) | **reproduced in shape at bs 1, not in location; weak at bs 16; reversed at bs ≥ 64** (final wording: outline open item 3) | a V1 / V2 crossover in pass rate exists at bs 1 at every N and d, at p 0.85-0.97. LiNR's own high-pass setting (p ≈ 0.11) has V1 faster by 3.0×; ours has V2 faster there (fused V2, LN-1 / L-12) | "partially confirmed: the crossover exists, at a far higher pass rate than in the original" |
 | C2 (L-6) | **not comparable as stated** (end-task recall, unpublished protocol); under our metric **holds in direction, not in size, at bs 16 only** | 1 % pool: V3 at 0.83 of V2 at bs 16, recall 0.89 (median); slower at bs 1 (1.08). Goodreads end-task bridge below | "cannot be fully assessed due to the recall definition; on our metric, the gain appears only at bs 16" |
 | C3 (L-2) | **holds in direction, not in size** | eager torch 1.4-2.0× (bs 1), 5.8-6.8× (bs 16), never near 100×; `torch.compile` is mostly faster at bs 1 | "the gap is significantly narrower than in the original" |
 | C4 (S-8…S-10, S-14) | **FPR: far below the paper's at 1024 bits, on SilverTorch's own bloom** (no recheck: 0 on arXiv / Goodreads, 4.3e-8 on PubMed at 1024 bits / k_hash 5); **memory: reproduced as arithmetic** (N · m_bits / 8); no false negatives; the transposed layout is **not in the released code** (OF-1) | `fp_adapted.py` on the adapted index; NUMBERS A4; final-pass `bloomwidth` on Meta's code as published | "confirmed within the original evaluation scope (FPR, memory); the layout claim cannot be assessed on the released code" |
 | C5 (S-3, S-11) | **Meta as published: reproduced at 30 M (and 10 M bs 64), mixed at 3 M bs 64 and 10 M bs 16, reversed at 0.8-3 M.** The adapted column reads "refused by design (K17)" | N and batch size decide it; the reversal is host work in the published partial path (OF-9) | "holds at the original's scale, reverses at smaller N" |
-| C6 (S-6, S-7, S-16) | **reproduced in shape** (recall falls with selectivity and N at fixed probes); the **0.95 ceiling is dataset-dependent**: reached on Goodreads, arXiv, LAION `tags4` at 10 / 30 M and 18 of 31 synthetic sweeps, not on LAION `c0_domain`, PubMed or YFCC; **int8 is the limit on YFCC and PubMed `c3_journal_reverse`, the IVF partition on LAION 1 / 3 M** | adapted code, probe curves up to `n_lists` / 4; ceiling split on adapted indexes | "partially confirmed: holds on PubMed, YFCC and LAION `c0_domain`, not on Goodreads and arXiv" |
+| C6 (S-6, S-7, S-16) | **reproduced in shape** (recall falls with selectivity and N at fixed probes); the **0.95 ceiling is dataset-dependent**: reached on Goodreads, arXiv, LAION `tags4` at 10 / 30 M and 18 of 27 synthetic sweeps, not on LAION `c0_domain` or PubMed; **int8 is the limit on PubMed (`c3_journal_reverse`, `c0_mesh`), the IVF partition on LAION 1 / 3 M** | adapted code, probe curves up to `n_lists` / 4; ceiling split on adapted indexes | "partially confirmed: holds on PubMed and LAION `c0_domain`, not on Goodreads and arXiv" |
 | C7 (ours) | **holds**: bit-exact to Meta's code as published, faster end to end | gate grid ≤ 10 M, the head's 300 cells, the 30 M bloom cells | — |
 
 ## §4 claim by claim
@@ -71,27 +70,27 @@ L-3 / L-5):
 
 | fact | value | source |
 |---|---|---|
-| bs 1 crossover p | 0.79 (yfcc10m-synth d192) to 0.97 (arxiv-synth d256) at every N and d | `c1_crossover` bs 1 `crossover_p` |
+| bs 1 crossover p | 0.85 (laion10m-synth d256) to 0.97 (arxiv-synth d256) at every N and d | `c1_crossover` bs 1 `crossover_p` |
 | bs 1, V2 / V1 at p ≈ 0.001 | 0.195 (laion30m) to 0.643 (goodreads): V2 1.6-5.1× faster | `c1_crossover` `v2_over_v1_lowest_p` |
 | bs 1, V2 / V1 at p ≈ 0.1 (LiNR's high-pass point) | 0.29-0.68 (V2 faster); LiNR: 3.0 (V1 faster) | `c1_curves` p 0.08-0.12; C3-derived |
-| bs 16 crossover p | 0.017 (arxiv d128) to 0.024 (laion30m); 0.065 on arxiv-synth d256; **none** on laion1m-synth or yfcc10m-synth | `c1_crossover` bs 16 |
+| bs 16 crossover p | 0.017 (arxiv d128) to 0.024 (laion30m); 0.065 on arxiv-synth d256; **none** on laion1m-synth | `c1_crossover` bs 16 |
 | bs 16, V2's largest edge | V2 / V1 0.75 (arxiv d256; 25 %); 0.87-0.96 on the other sets with a crossover | `c1_crossover` bs 16 `v2_over_v1_lowest_p` |
 | bs 16 at p 1 | V2 / V1 2.6-6.8 | `c1_crossover` `v2_over_v1_p1` |
 | bs 16, V2 / V1 at p ≈ 0.1 | 1.12-1.58 | `c1_curves`; C3-derived |
 | real filters, bs 1 | V2 faster on every sweep except PubMed `c3_journal_reverse` (p 0.999, 1.07) | `c1_real` |
 | real filters, bs 16 | V1 faster everywhere except PubMed `c0_mesh` (p 0.00019): V2 / V1 0.53 | `c1_real` |
 | bs 64 | V2 1.3-35× slower on every real filter; LAION 2.0-2.2 | `c1_real`, `linr_numbers` (L1, L1b) |
-| bs 256 | V2 3.9-55× slower where it finished; TIMEOUT on PubMed `c3_journal_reverse` / `all5` and YFCC `tags_and` | `linr_numbers` `V2_status` |
+| bs 256 | V2 3.9-55× slower where it finished; TIMEOUT on PubMed `c3_journal_reverse` / `all5` | `linr_numbers` `V2_status` |
 | correlated (arxiv-corr-synth, p 0.010-0.107) | bs 1: 0.35-0.41 (k 100), 0.37-0.43 (k 1000); bs 16: 0.92-1.26 | `linr_numbers` (L3) |
 | k 2048 | bs 1: V2 / V1 0.08-0.77; bs 16: V2 wins only on PubMed `c0_mesh` (0.52); arXiv 1.34, Goodreads 1.61 | `linr_numbers` (L4) |
-| seeds 0-2 | at the bs 16 cells beside the crossover (arxiv-synth p 0.02 / 0.05, laion30m-synth p 0.01 / 0.02, yfcc10m-synth p 0.01 / 0.02; k 100 and 1000), V2 / V1 differs across seeds by ≤ 0.011; 0 / 48 records unstable | `campaign-final/merged-4016`, suites `seeds-c1`, `seeds-c1-laion30m`; C3-derived |
+| seeds 0-2 | at the bs 16 cells beside the crossover (arxiv-synth p 0.02 / 0.05, laion30m-synth p 0.01 / 0.02; k 100 and 1000), V2 / V1 differs across seeds by ≤ 0.006; 0 / 36 records unstable | `campaign-final/merged-4016`, suites `seeds-c1`, `seeds-c1-laion30m`; C3-derived |
 | V1 scaling in N (bs 1, d256, LAION) | 0.51 / 1.23 / 3.57 / 10.8 ms at 1 / 3 / 10 / 30 M; V2 at p ≈ 0.0095 (`c0_domain`) 0.20 / 0.30 / 0.70 / 1.92 ms | `linr_vs_n.csv` |
 | V1 effective bandwidth | 30 M × 256 × 2 B / 10.8 ms ≈ 1.42 TB/s, the same at 10 M (1.43); 70 % of the A100-SXM4-80GB's 2.04 TB/s. LiNR's 4.8 ms for 15.5 M × 128 fp16 ≈ 0.83 TB/s | arithmetic on `linr_vs_n.csv`; C3-derived (not a measured bandwidth) |
 
 **Mechanism.** Our V2 is a fused compaction plus scoring kernel (LN-1).
 LiNR §6 says its numbers are un-fused and predicts that fusing changes the
 V1 / V2 picture (L-12). This explains why the bs 1 crossover moves from
-below 11 % to 0.79-0.97. Batching favours V1: V2 gathers per query, V1
+below 11 % to 0.85-0.97. Batching favours V1: V2 gathers per query, V1
 scores one shared matrix at memory bandwidth.
 
 ### C2: V3 keeping ~1 % gives ~10 % at near-parity recall (L-6)
@@ -101,7 +100,7 @@ rescoring, gives about 10 % further latency gain at "nearly parity"
 recall@2000. That recall is end-task; Figure 7 sweeps filter size 0.5-2.5 %.
 
 **Ours** (`c2_v3.csv`, suite `n-v3pool` = NUMBERS `L2-v3pool`; real
-filters on arXiv, Goodreads, PubMed, YFCC; 10 filter rows per pool):
+filters on arXiv, Goodreads, PubMed; 10 filter rows per pool):
 
 | pool | median recall@100 | V3 / V2 bs 16 (median) | V3 / V2 bs 1 (median) |
 |---|---|---|---|
@@ -146,15 +145,15 @@ filters on arXiv, Goodreads, PubMed, YFCC; 10 filter rows per pool):
 in latency.
 
 **Ours** (`c3_torch.csv`; suite `c3`: synthetic p 0.01 / 0.1 / 1 on
-arxiv-synth d128 / d256, goodreads-synth d128 / d256, laion30m-synth,
-yfcc10m-synth; suite `c3-real`: 10 real filters):
+arxiv-synth d128 / d256, goodreads-synth d128 / d256, laion30m-synth;
+suite `c3-real`: 9 real filters):
 
 | arm against Triton | bs 1 | bs 16 |
 |---|---|---|
 | eager torch (eager mode) | 1.37-2.01, median 1.76 | 5.78-6.76, median 6.26 |
 | eager torch (graph mode) | 1.39-1.58 | 1.68-1.86 |
-| `torch.compile` max-autotune, synthetic | 0.50-0.96, median 0.85 | 1.49-2.33 |
-| `torch.compile` max-autotune, real | 0.56-1.06, median 0.96 | 1.96-4.82, median 2.21 |
+| `torch.compile` max-autotune, synthetic | 0.50-0.96, median 0.84 | 1.49-2.20 |
+| `torch.compile` max-autotune, real | 0.56-1.05, median 0.96 | 1.96-2.71, median 2.21 |
 
 **Mechanism** ([validation](../../validation.md#library-gates) V1-FUSE row,
 citable through D1-G): `torch.compile(max-autotune)` V1's bs 1 win comes
@@ -179,8 +178,7 @@ exact passes) / (N − exact passes) over the whole index, 10,000 queries,
 m_bits 64-2048 × k_hash 3 / 5 on Goodreads `c0_genre`, arXiv `all4` /
 `c0_maincat` / `c3_nversions`, PubMed `c0_mesh`; recall and `index_mib` from
 NUMBERS `A4-bloomwidth` (`c4_bloom.csv`). The records' `bloom_fp_rate` column
-is the harness's standalone filter module's, not SilverTorch's, and is not
-used.
+is not SilverTorch's and is not used.
 
 | what | value | source / status |
 |---|---|---|
@@ -239,8 +237,8 @@ from the timed legs).
 At 24 probes (`at24`, bs 16, k 100, recall@100):
 - goodreads-synth, 4096 lists: 0.930 / 0.775 / 0.365 / 0.047 at p 1 / 0.1 /
   0.01 / 0.001.
-- Real filters: Goodreads 0.42-0.89, arXiv 0.68-0.85, PubMed 0.39-0.81, YFCC
-  0.44, LAION 0.33-0.57.
+- Real filters: Goodreads 0.42-0.89, arXiv 0.68-0.85, PubMed 0.39-0.81,
+  LAION 0.33-0.57.
 
 Highest recall@100 on the probe curve, with the smallest
 (`n_lists` / `n_probe`) reaching 0.90 / 0.95 (k 100):
@@ -258,15 +256,14 @@ Highest recall@100 on the probe curve, with the smallest
 | PubMed 10 M | `c0_mesh` (0.00019) | 0.9495 | 4096/512 | — |
 | | `c3_journal_reverse` (0.999) | 0.922 | 4096/256 | — |
 | | `all5` (0.018) | 0.898 | — | — |
-| YFCC 10 M | `tags_and` (0.018) | 0.718 | — | — |
 | LAION 10 M | `c0_domain` / `tags4` | 0.897 / 0.951 | — / 4096/1024 | — / 65536/16384 |
 | LAION 30 M | `c0_domain` / `tags4` | 0.908 / 0.961 | 16384/4096 / 4096/1024 | — / 16384/4096 |
 
-- **Synthetic filters.** 0.95 is reached on 18 of 31 synthetic sweeps
+- **Synthetic filters.** 0.95 is reached on 18 of 27 synthetic sweeps
   (7 uniform sets × 4 pass rates + 3 correlated), including all three
   arxiv-corr-synth sweeps. Not reached: p 0.001 at 0.8-10 M; laion3m-synth
   p 0.01; any laion1m-synth sweep (only 512 lists, probes ≤ 128: a short
-  curve); any yfcc10m-synth sweep (max 0.55-0.81). At 30 M p 0.001, 0.95
+  curve). At 30 M p 0.001, 0.95
   needs 65536 / 16384.
 - **Uniform vs correlated** (arXiv, 2048 lists). Correlated p 0.01-0.1
   reaches 0.90 at 64 probes and 0.95 at 256. Uniform p 0.01 needs 256 /
@@ -282,8 +279,6 @@ Highest recall@100 on the probe curve, with the smallest
 
 | cell | shipped | per-row | fp16 | limit |
 |---|---|---|---|---|
-| yfcc10m-synth p 1 (4096 / 256) | 0.526 | 0.753 | 0.972 | int8 |
-| yfcc10m-synth p 0.01 (4096 / 256) | 0.750 | 0.874 | 0.976 | int8 |
 | PubMed `c3_journal_reverse` | 0.922 | 0.938 | 0.996 | int8 |
 | PubMed `c0_mesh` / `all5` | 0.946 / 0.887 | 0.953 / 0.891 | 0.976 / 0.903 | mixed |
 | arXiv real and synth | 0.952-0.963 | 0.967-0.973 | 0.989-0.998 | int8, small (+0.03-0.04) |
@@ -293,15 +288,11 @@ Highest recall@100 on the probe curve, with the smallest
 | laion30m-synth p 0.01-1 | 0.962-0.963 | 0.970-0.973 | 0.983-0.991 | small |
 
   A fifth column, "global" (plain torch, the same arithmetic as shipped),
-  is within 0.0005 of shipped except on YFCC (0.011-0.018). Per-row and
-  fp16 match the earlier Triton-index check within 0.0005.
-- **Mechanism, YFCC** (`score_gaps_yfcc_pubmed.json`,
-  `score_gaps_laion_arxiv.json`, 500 queries per dataset): the items sit
-  in a narrow cone (a random pair's cosine is 0.97; PubMed 0.67, arXiv
-  0.64, LAION 10 M 0.52); the top-100 spans 0.0022 in score (others
-  0.076-0.155) and the gap from rank 100 to 101 is 3.9e-6 (others 7.8e-5
-  to 1.6e-4); fp16 storage moves a score by 1.5e-5, per-row int8 by
-  1.9e-4, 9 % of the top-100 span (others 0.4-0.7 %).
+  is within 0.0005 of shipped.
+- **No mechanism on record for PubMed's int8 loss** (`score_gaps_yfcc_pubmed.json`,
+  500 queries): its geometry is ordinary (a random pair's cosine is 0.67,
+  arXiv 0.64, LAION 10 M 0.52; the top-100 spans 0.136 in score, per-row
+  int8 noise is 0.4-0.7 % of that span, as elsewhere).
 - **Local pass rate** (`c6_local_pass.csv`, Hub `20261012-adapted`,
   `gls_adapted.py`): l_q = |unfiltered top-100 ∩ filtered top-100| / 100
   from the oracle blobs, recall@100 from A1-small's per-query sidecars
@@ -327,7 +318,7 @@ Highest recall@100 on the probe curve, with the smallest
   recall, st_ms`.
 - **LiNR V1 / V2:** the same rows, columns `V1`, `V2` (ms, interleaved in
   the same process), with `linr_best` / `linr_ms` / `st_over_linr` /
-  `winner` and the `flagged` and `leg` columns. 1,677 rows; 30 flagged
+  `winner` and the `flagged` and `leg` columns. 1,641 rows; 30 flagged
   (`summary.json`).
 - **V3 pool curve:** `c2_v3.csv` (recall and V3 / V2; V3 ms = V3 / V2 ×
   the V2 point), LAION from `n-v3pool-laion` there too.
@@ -358,16 +349,16 @@ V1 / V2. Clause filters, k 100:
 | | `c0_domain` | 0.42 / 0.40 / 0.71 | not reached |
 
 Not reached at 0.90 within a 25 % scan (no SilverTorch point): LAION 1 M (both filters),
-LAION 3 M / 10 M `c0_domain`, PubMed `all5`, YFCC `tags_and`.
+LAION 3 M / 10 M `c0_domain`, PubMed `all5`.
 
 **Counts** (clause; reached / cells, then SilverTorch wins):
 
 | k | target | bs 1 | bs 16 | bs 64 |
 |---|---|---|---|---|
-| 100 | 0.90 | 35/49, 35 | 35/49, 35 | 35/49, 33 |
-| 100 | 0.95 | 26/49, 26 | 26/49, 25 | 26/49, 23 |
-| 1000 | 0.90 | 24/45, 24 | 24/45, 24 | 24/45, 21 |
-| 1000 | 0.95 | 17/45, 17 | 17/45, 16 | 17/45, 10 |
+| 100 | 0.90 | 35/44, 35 | 35/44, 35 | 35/44, 33 |
+| 100 | 0.95 | 26/44, 26 | 26/44, 25 | 26/44, 23 |
+| 1000 | 0.90 | 24/44, 24 | 24/44, 24 | 24/44, 21 |
+| 1000 | 0.95 | 17/44, 17 | 17/44, 16 | 17/44, 10 |
 
 - Median ratio of reached cells, k 1000, bs 1, 0.90: 0.42.
 - **Bloom filters** (reached cells): k 100 8 / 12 at 0.90 and 5 / 12 at
@@ -385,8 +376,7 @@ LAION 3 M / 10 M `c0_domain`, PubMed `all5`, YFCC `tags_and`.
   - At p 0.001, SilverTorch reaches 0.90 (bs 16, k 100) on arxiv-synth
     (0.35 of LiNR), laion10m-synth (0.45, 4096 / 1024) and laion30m-synth
     (0.25, 65536 / 8192), not on goodreads-synth (max 0.835), laion1m-synth
-    (0.681, a 512-list curve), laion3m-synth (0.829) or yfcc10m-synth
-    (0.811). C3-derived from `tuned.csv`.
+    (0.681, a 512-list curve), or laion3m-synth (0.829). C3-derived from `tuned.csv`.
   - At p ≥ 0.01, it wins wherever it reaches the target (0.03-0.94), except
     LAION 1 M synth at bs 64 and p ≥ 0.1 (1.11-1.29).
   - Real filters at p < 0.01 that SilverTorch does not reach at 0.90:
@@ -394,7 +384,7 @@ LAION 3 M / 10 M `c0_domain`, PubMed `all5`, YFCC `tags_and`.
     PubMed `c0_mesh` at p 0.00019 does reach 0.90.
   - The binding variable is the recall the curve can reach, not the pass
     rate alone.
-- **N.** 0.95 is not reached within the probe cap on PubMed, YFCC or LAION
+- **N.** 0.95 is not reached within the probe cap on PubMed or LAION
   `c0_domain` at 10-30 M. LAION `tags4` reaches it at 10 M and 30 M only
   with 16384-65536 lists. Where reached, the tuned bs 1 ratio falls with N:
   0.51-0.58 (Goodreads), 0.27-0.46 (arXiv), 0.26 (LAION 10 M `tags4`),
@@ -414,7 +404,6 @@ Source: `memory.csv` (adapted index and LiNR's), `linr_mem_n.csv`.
 |---|---|---|---|---|
 | Goodreads | 209 MiB | 292 MiB | 0.72 | 1.8 s |
 | arXiv | 776 MiB | 1,095 MiB | 0.71 | 3.7 s |
-| YFCC | 6,870 MiB | 8,545 MiB | 0.80 | 28.9 s |
 | PubMed | 9,015 MiB (8.8 GiB) | 16,174 MiB (15.8 GiB) | 0.56 | 85 s (4096 lists) |
 | LAION 10 M | 3,056 MiB (4096 lists) | 5,341 MiB | 0.57 | 34.5 s |
 
@@ -454,14 +443,14 @@ from the META-FORK gate grid.
 
 | row | value |
 |---|---|
-| X gate, ≤ 10 M | 1,536 / 1,536 cells `torch.equal` (ids and scores), 18 groups by dataset × d × filter kind |
-| X gate, head `32c0d61` | 300 / 300 (Meta's bloom semantics, none and exact) |
+| X gate, ≤ 10 M | 1,488 / 1,488 cells `torch.equal` (ids and scores), 16 groups by dataset × d × filter kind |
+| X gate, head `32c0d61` | 276 / 276 (Meta's bloom semantics, none and exact) |
 | X gate, 30 M LAION | bloom partial + full 64 / 64 at `32c0d61`; 168 / 168 at `82fafb6`; none / exact last at `8ff11e0` (72 / 72) |
-| eager time, adapted / Meta | per-group medians 0.120 (YFCC clause) to 0.817 (PubMed none); min 0.009; max 1.030 (arXiv d256 none) |
-| head speed | 300 X cells median 0.230 (max 0.764); 36 R cells median 0.287 (max 0.788) |
+| eager time, adapted / Meta | per-group medians 0.154 (Goodreads clause) to 0.817 (PubMed none); min 0.024; max 1.030 (arXiv d256 none) |
+| head speed | 276 X cells median 0.230 (max 0.764); 36 R cells median 0.287 (max 0.788) |
 | A/A floor | 1.001-1.035 |
 | 30 M speed | median 0.279, min 0.059, max 0.467 (64 records) |
-| eager vs graph ids, NUMBERS adapted cells | 2,151 / 2,151 equal |
+| eager vs graph ids, NUMBERS adapted cells | 2,115 / 2,115 equal |
 | S / capture / compile gates | 0 syncs, 9-10 kernels a forward (published: 3-6 syncs, 50 kernels); 1 graph launch a replay; 35 compile tests pass |
 
 Per-dataset ranges for T3 (median of adapted / Meta by filter kind):
@@ -472,7 +461,6 @@ Per-dataset ranges for T3 (median of adapted / Meta by filter kind):
 | arXiv d256 | 0.67 | 0.17 | 0.39 |
 | Goodreads | 0.26 | 0.15 | 0.22 |
 | PubMed | 0.82 | 0.22 | 0.32 |
-| YFCC | 0.63 | 0.12 | — |
 | arxiv-synth / goodreads-synth | — | 0.28 / 0.19 | 0.24 / 0.19 |
 
 ## §4 / §7: failures, negatives, cost
@@ -483,14 +471,12 @@ D1-G row, the leg parquets):
 
 | case | what | rerun? | paper must say |
 |---|---|---|---|
-| LiNR V2 bs 256 on PubMed `c3_journal_reverse` / `all5`, YFCC `tags_and` | TIMEOUT after 3.6-9.8 h with 80 GB full (`c3_journal_reverse` finished at 2.55 s a batch after 11 h); YFCC V1 bs 256 did not run (same process) | no | listed as TIMEOUT, not measured |
-| yfcc10m-synth LiNR k 1000 | V1 recall 0.983-0.995 < 0.99 exact gate (fp16 storage, HB-6); p01 / p1 k 1000 did not run | no; included and flagged (user) | flagged; SilverTorch on YFCC synth at k 100 only |
-| A2-yfcc | 72 of 168 rows `partial` (k 100 entries only; 1 failed = p01 V1 gate miss) | no | YFCC synth at k 100 |
+| LiNR V2 bs 256 on PubMed `c3_journal_reverse` / `all5` | TIMEOUT after 3.6-9.8 h with 80 GB full (`c3_journal_reverse` finished at 2.55 s a batch after 11 h) | no | listed as TIMEOUT, not measured |
 | L1-linr-bs64 | 12 of 148 rows `partial` (the bs 256 gaps above); 6 failed records (PubMed OOM) superseded by `ok` | yes | — |
 | A2-laion30m-real / L1b | 3 / 4 failed, superseded by `ok` reruns | yes | — |
 | unstable | A2-small 69 → 0 after rerun; A2b 15 → 7 (5 SilverTorch at ~0.2 ms on LAION 1 M, 2 LiNR V2); A2-pubmed 2, A3 1 not rerun; 6 tuned points rest on a flagged cell | partly | flagged cells named |
 | pilot pass rate (V-PILOT, goodreads-synth) | 0.000990 at target 0.001: 1.01 % low (789 of 797,084), inside binomial noise at N·p 797 | no | achieved pass rates are reported, not targets |
-| `bs16 < 16 × bs1` (D1-G) | 25 entries: 24 YFCC `tags_and` V2 / V3 (≈ 18×), explained by the per-query spread (against the same queries, bs 16 is 8-18 % cheaper than 16 bs 1 calls); 1 `torch.compile` V2 at k 1000 (1.58, an autotune pick) | no | one line in §3 or §8 |
+| `bs16 < 16 × bs1` (D1-G) | 1 entry: `torch.compile` V2 at k 1000 (1.58, an autotune pick) | no | one line in §3 or §8 |
 | probe cap | curves stop at `n_lists` / 4; laion1m-synth only at 512 lists (≤ 128 probes) | — | "not reached within the probe cap" |
 | 0.99 | not reached by any timed SilverTorch point | — | stated |
 
@@ -499,8 +485,7 @@ D1-G row, the leg parquets):
   slower than exact V2 at bs 1 and collapses onto IVF at p ≈ 1; its bs 16
   passes are within 2 % of the front
   ([decisions](../../decisions.md#campaign-v2-user-2026-10-08), Hub
-  `campaign-v2.5/pubmed-router`). Its records are pre-final (v2.5) and
-  partly Triton SilverTorch: a sentence, no numbers.
+  `campaign-v2.5/pubmed-router`). Its records are pre-final (v2.5): a sentence, no numbers.
 - **Our int8 LiNR V4:** removed from the library (LN-2). Not in the study.
 
 **GPU-hours** ([provenance §1](../provenance-and-disclosure.md#1-hardware),
@@ -518,13 +503,12 @@ labelled approximate, controller c3 ruling 8):
 
 | id | effect on a verdict |
 |---|---|
-| LN-1 / L-12 (fused V2) | moves C1's bs 1 crossover from below 11 % (LiNR) to 0.79-0.97: "reproduced in shape", not in location |
+| LN-1 / L-12 (fused V2) | moves C1's bs 1 crossover from below 11 % (LiNR) to 0.85-0.97: "reproduced in shape", not in location |
 | LN-5, HB-2 (recall@k against the exact oracle; LiNR used end-task recall@2000) | makes C2 "not comparable as stated"; any recall-based verdict (C2, C6) is on our metric; the Goodreads bridge links the two |
 | LN-3 (pool as a fraction of passing items, min 2,000) | C2's "1 %" is a different absolute pool; the LAION curve is flat below 5 % |
 | LN-8 (V3 bits capped at d; LiNR 512) | C2's recall at a 1 % pool is lower at d ≤ 256; near parity only at 768 bits (PubMed) |
-| LN-6 (eager vs compiled torch as the "native" baseline) | C3's size depends on the baseline: eager 1.4-6.8×, compiled 0.5-4.8× |
+| LN-6 (eager vs compiled torch as the "native" baseline) | C3's size depends on the baseline: eager 1.4-6.8×, compiled 0.5-2.7× |
 | OF-9 (host-bound partial path in Meta's code) | C5 as published reverses below 30 M |
 | OF-10 (Meta's bloom ignores `m_bits`), OF-1 (no transposed layout) | the width curve exists only on the adapted code; S-14 not testable |
 | OF-12 (Meta's bloom admits non-matching items) | recorded at 30 M; also costs 0.015 recall@100 on PubMed `c0_mesh` at 10 M (`c4_bloom`); the adapted bloom has 0 false positives (C13) |
-| HB-6 (fp16 item storage vs fp32 oracle) | YFCC LiNR k 1000 flagged; does not move a verdict |
-| HB-4 (seed 0) | every ratio is unreplicated except the C1 seed cells (≤ 0.011 spread); no CI on T2 |
+| HB-4 (seed 0) | every ratio is unreplicated except the C1 seed cells (≤ 0.006 spread); no CI on T2 |

@@ -50,9 +50,13 @@ n-timed-d128:
   - algo: linr_v1_filter_mask
     backends:
     - triton
+    filter_kinds:
+    - clause
   - algo: linr_v2
     backends:
     - triton
+    filter_kinds:
+    - clause
   - algo: silvertorch
     backends:
     - official-fork
@@ -486,122 +490,6 @@ n-st-k2048-d128:
           - 128
           - 256
           - 1024
-n-timed-d192:
-  datasets:
-  - yfcc10m
-  - yfcc10m-synth
-  dims:
-  - 192
-  filter_kinds:
-  - clause
-  ks:
-  - 100
-  - 1000
-  batch_sizes:
-  - 1
-  - 16
-  - 64
-  seeds:
-  - 0
-  sweeps:
-    yfcc10m:
-    - tags_and
-    yfcc10m-synth:
-    - p0001
-    - p001
-    - p01
-    - p1
-  interleave:
-  - by:
-    - algo
-    - n_lists
-  arms:
-  - algo: linr_v1_filter_mask
-    backends:
-    - triton
-  - algo: linr_v2
-    backends:
-    - triton
-  - algo: silvertorch
-    backends:
-    - official-fork
-    filter_kinds:
-    - clause
-    build:
-      n_lists:
-      - 4096
-    datasets:
-      yfcc10m:
-        sweeps:
-        - tags_and
-        query:
-          n_probe:
-          - 24
-          - 1024
-  - algo: silvertorch
-    backends:
-    - official-fork
-    filter_kinds:
-    - clause
-    build:
-      n_lists:
-      - 4096
-    datasets:
-      yfcc10m-synth:
-        sweeps:
-        - p0001
-        query:
-          n_probe:
-          - 24
-          - 1024
-  - algo: silvertorch
-    backends:
-    - official-fork
-    filter_kinds:
-    - clause
-    build:
-      n_lists:
-      - 4096
-    datasets:
-      yfcc10m-synth:
-        sweeps:
-        - p001
-        query:
-          n_probe:
-          - 24
-          - 1024
-  - algo: silvertorch
-    backends:
-    - official-fork
-    filter_kinds:
-    - clause
-    build:
-      n_lists:
-      - 4096
-    datasets:
-      yfcc10m-synth:
-        sweeps:
-        - p01
-        query:
-          n_probe:
-          - 24
-          - 1024
-  - algo: silvertorch
-    backends:
-    - official-fork
-    filter_kinds:
-    - clause
-    build:
-      n_lists:
-      - 4096
-    datasets:
-      yfcc10m-synth:
-        sweeps:
-        - p1
-        query:
-          n_probe:
-          - 24
-          - 1024
 n-timed-d256:
   datasets:
   - arxiv
@@ -689,9 +577,13 @@ n-timed-d256:
   - algo: linr_v1_filter_mask
     backends:
     - triton
+    filter_kinds:
+    - clause
   - algo: linr_v2
     backends:
     - triton
+    filter_kinds:
+    - clause
   - algo: silvertorch
     backends:
     - official-fork
@@ -2306,9 +2198,13 @@ n-timed-d768:
   - algo: linr_v1_filter_mask
     backends:
     - triton
+    filter_kinds:
+    - clause
   - algo: linr_v2
     backends:
     - triton
+    filter_kinds:
+    - clause
   - algo: silvertorch
     backends:
     - official-fork
