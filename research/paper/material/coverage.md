@@ -40,7 +40,7 @@ the outline did not yet use are marked **add**.
 | `numbers/A2-laion30m-real` | timed, LAION 30 M real | §5 |
 | `numbers/A2-laion30m-synth` | timed, laion30m-synth | §5 |
 | `numbers/A3-st-k2048` | timed SilverTorch vs LiNR at k 2048 | §5 (k 2048 rows) |
-| `numbers/A4-bloomwidth` | adapted bloom width grid, quality only | §4.4 F4a: recall per width, index memory per width; its `bloom_fp_rate` column is the harness's standalone filter's, not used (SilverTorch's own rate: `artifacts/results-draft/20261013-bloom-fp`) |
+| `numbers/A4-bloomwidth` | adapted bloom width grid, quality only | §4.4 F4a: recall per width, index memory per width; its `bloom_fp_rate` column is not SilverTorch's and is not used (SilverTorch's own rate: `artifacts/results-draft/20261013-bloom-fp`) |
 | `numbers/L1-linr-bs64` | LiNR bs 64 / 256 | §4.1 (V2 slower at bs 64, TIMEOUTs at 256) |
 | `numbers/L1b-linr-bs64-laion` | LiNR bs 64, LAION | §4.1 (LAION 2.0-2.2) |
 | `numbers/L2-v3pool` | LiNR V3 pool 0.5-20 % | §4.2, F3 V3 curve |
@@ -58,8 +58,8 @@ the outline did not yet use are marked **add**.
 | `campaign-final/{laion1m,laion3m,laion10m}-nsweep`, `laion30m-nsweep-p1` | LiNR V1 / V2 against N on LAION (`linr_vs_n`, `linr_mem_n`): §4.1 V1 scaling, §5 memory; **add** the V1-bandwidth line (outline candidate 10) |
 | `campaign-final/{laion1m,…,laion30m,arxiv}-synth-nsweep-synth` | C1 crossover against N (`c1_crossover`, F1) |
 | `campaign-final/{laion1m,…,laion30m}-nsweep-codesign` | C5 against N on Meta's code as published (`c5_meta`, F4b) |
-| `campaign-final/{arxiv,pubmed}-filter-d1-st`, `goodreads-synth-synth-d1-st` | restored SilverTorch records of three d-run legs; their SilverTorch is Triton (out); the official bloom records in them feed `c4_bloom`'s "as published" rows only where `merged-4016` reads them |
-| `campaign-final/ceiling-int8-{goodreads,arxiv,yfcc10m,pubmed,laion30m}` | Triton-index ceiling checks: **not cited** (controller c3 ruling 2); replaced by `artifacts/results-draft/20261012-adapted` |
+| `campaign-final/{arxiv,pubmed}-filter-d1-st`, `goodreads-synth-synth-d1-st` | restored records of three d-run legs; only the official bloom records in them feed `c4_bloom`'s "as published" rows only where `merged-4016` reads them |
+| `campaign-final/ceiling-int8-{goodreads,arxiv,yfcc10m,pubmed,laion30m}` | earlier ceiling checks, not on a study arm: **not cited** (controller c3 ruling 2); replaced by `artifacts/results-draft/20261012-adapted` |
 | `campaign-final/{goodreads,arxiv}-synth-c3-d256` | C3 at d256 (`c3_torch`): §4.3 |
 | `artifacts/exhibits/20261011-final` | T1 fragment from the final pass (LiNR verdict wording): §2 T1 |
 | `artifacts/d1g-green/batch-vs-sum-20261011` | the 25 `bs16 < 16 × bs1` entries explained: §3 or §8, one line |
@@ -99,7 +99,6 @@ the outline did not yet use are marked **add**.
 | NUMBERS: provenance (two A100 builds in one table) | §3 protocol, one clause |
 | Campaign v2: EXHIBITS, D1-G | §3 (the final pass as one table, eager / graph ids 5,942 equal / 0 differ), §2 T1 |
 | Datasets: YFCC GT check 100,000 / 100,000 | not used: YFCC is out of the study (user, 2026-10-13) |
-| Official against our Triton reimplementation (citable, contested; not in the study) | not used: Triton SilverTorch is out of the paper |
 
 ## 6. Claims C1-C7
 
@@ -112,7 +111,7 @@ the outline did not yet use are marked **add**.
 | C5 | §4.5 | F4b, T1 |
 | C6 | §4.6 | F2, T1 |
 | C7 | §6 | T3 |
-| the head-to-head (no claim) | §5 | F3, T2, T4, F5 |
+| the head-to-head (no claim) | §5 | F3, T2 |
 | untestable L-/S- rows (L-7…L-11, S-1, S-2, S-4, S-5, S-15) | §2 | T1 rows "not testable" with the reason |
 
 ## 7. Deviations
@@ -124,11 +123,11 @@ the outline did not yet use are marked **add**.
 | OF-1, OF-9, OF-10, OF-12 | §7, §4.4, §4.5 | they move C4 and C5; OF-12 also at 10 M on PubMed (`c4_bloom`, outline candidate 8) |
 | OF-3, OF-4, OF-5, OF-6, OF-11 | §6 (what the adaptation removed), §7 (upstream issues) | timing magnitudes are pre-final: mechanism only |
 | OF-2, OF-7, OF-8 | §6, one clause (bit order handled in the adapter; fp16 path 3.1e-4 recall; int32 bit-exact) | OF-8 is the parity gate's basis |
-| ST-1…ST-12 | §2 SilverTorch paragraph (ST-1, ST-2, ST-5, ST-9, ST-10), §3 arms (ST-3 exact mode is ours, ST-4 filter schema, ST-7 k-means, ST-6 / ST-8 kernel facts), §2 T1 untestable (ST-11, ST-12) | ST-3 changes with the user's bloom directive: the study runs Meta's bloom without our recheck |
+| ST-2…ST-8, ST-10…ST-12 | §2 SilverTorch paragraph (ST-2, ST-5, ST-10), §3 arms (ST-3 exact mode is ours, ST-4 filter schema, ST-7 k-means, ST-6 / ST-8 kernel facts), §2 T1 untestable (ST-11, ST-12) | ST-3 changes with the user's bloom directive: the study runs Meta's bloom without our recheck |
 | HB-1…HB-5 | §3 (HB-1 synthesised predicates, HB-2 oracle, HB-3 clocks, HB-4 seeds), §8 (HB-5 thesis tables not used) | — |
 | D-1, D-2, D-3, D-6, D-9 | §7 "defects reproducing found in our own code" | all fixed |
 | D-4, D-5, D-7, D-8 | not in the paper: engineering defects of our harness / compile path with no bearing on a number (D-8's fix is the timed-region rule in §3) | — |
-| R-1, R-2, R-3, R-4 | §7: "no unexplained residual on the study's arms"; R-1 (V4) and R-2 (Triton SilverTorch) concern arms outside it, R-3 is OF-7, R-4 a golden-cell residual on LiNR V2 / V3 at 4.5e-4 / 1.7e-5 | R-4 is on a study arm; **add** one clause to §7 that it is a golden-baseline residual below any reported precision |
+| R-1, R-2, R-3, R-4 | §7: "no unexplained residual on the study's arms"; R-1 (V4) and R-2 (a golden cell) are not on study arms, R-3 is OF-7, R-4 a golden-cell residual on LiNR V2 / V3 at 4.5e-4 / 1.7e-5 | R-4 is on a study arm; **add** one clause to §7 that it is a golden-baseline residual below any reported precision |
 
 ## 8. Citable but not yet used: proposals
 

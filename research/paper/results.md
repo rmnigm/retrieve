@@ -45,7 +45,7 @@ LiNR V1 to V3, which we implemented from the paper.
   widths (C4, NUMBERS A4) from the adapted code. C4's "as published" column and
   C5 come from Meta's code as published in the final pass (C5 only there: the
   adapted code refuses the full-mask path), and C7 from the adaptation's gate
-  grid. No Triton SilverTorch record is a source.
+  grid.
 - **The script:** [`build_results.py`](../artifacts/results-draft/build_results.py)
   writes every table and figure to Hub `artifacts/results-draft/20261013`
   ([hub-index](../artifacts/hub-index.md)).

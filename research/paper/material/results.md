@@ -33,7 +33,7 @@ never quoted as measured:
   TIMEOUT;
 - the cells unstable in every run, kept and flagged.
 
-No Triton SilverTorch record is a source (controller c3 rulings). All
+All
 numbers are seed 0 unless stated; no table carries a confidence interval:
 seeds and error bars come with roadmap FULL-RERUN (user, 2026-10-11;
 results.md "Uncertainty").
@@ -178,8 +178,7 @@ exact passes) / (N − exact passes) over the whole index, 10,000 queries,
 m_bits 64-2048 × k_hash 3 / 5 on Goodreads `c0_genre`, arXiv `all4` /
 `c0_maincat` / `c3_nversions`, PubMed `c0_mesh`; recall and `index_mib` from
 NUMBERS `A4-bloomwidth` (`c4_bloom.csv`). The records' `bloom_fp_rate` column
-is the harness's standalone filter module's, not SilverTorch's, and is not
-used.
+is not SilverTorch's and is not used.
 
 | what | value | source / status |
 |---|---|---|
@@ -289,8 +288,7 @@ Highest recall@100 on the probe curve, with the smallest
 | laion30m-synth p 0.01-1 | 0.962-0.963 | 0.970-0.973 | 0.983-0.991 | small |
 
   A fifth column, "global" (plain torch, the same arithmetic as shipped),
-  is within 0.0005 of shipped. Per-row and
-  fp16 match the earlier Triton-index check within 0.0005.
+  is within 0.0005 of shipped.
 - **No mechanism on record for PubMed's int8 loss** (`score_gaps_yfcc_pubmed.json`,
   500 queries): its geometry is ordinary (a random pair's cosine is 0.67,
   arXiv 0.64, LAION 10 M 0.52; the top-100 spans 0.136 in score, per-row
@@ -487,8 +485,7 @@ D1-G row, the leg parquets):
   slower than exact V2 at bs 1 and collapses onto IVF at p ≈ 1; its bs 16
   passes are within 2 % of the front
   ([decisions](../../decisions.md#campaign-v2-user-2026-10-08), Hub
-  `campaign-v2.5/pubmed-router`). Its records are pre-final (v2.5) and
-  partly Triton SilverTorch: a sentence, no numbers.
+  `campaign-v2.5/pubmed-router`). Its records are pre-final (v2.5): a sentence, no numbers.
 - **Our int8 LiNR V4:** removed from the library (LN-2). Not in the study.
 
 **GPU-hours** ([provenance §1](../provenance-and-disclosure.md#1-hardware),

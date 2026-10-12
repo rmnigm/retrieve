@@ -47,7 +47,7 @@ confirmed from code or text is marked **unverified**.
 | | exact clause filter | bloom filter |
 |---|---|---|
 | our name | `ExactAttributeFilter`, `filter_kind: clause`; SilverTorch `filter_mode="exact"` | `filter_kind: bloom` on SilverTorch only (`filter_mode="bloom"`, Meta's bloom) |
-| LiNR's name | attribute-based matching (ABM): clauses, one of them a "reverse matching clause" (§3.1) | none: LiNR has no bloom filter, and LiNR runs with its exact filter only (user, 2026-10-13) |
+| LiNR's name | attribute-based matching (ABM): clauses, one of them a "reverse matching clause" (§3.1) | none: LiNR has no bloom filter |
 | SilverTorch's name | the "forward index", the GPU baseline the paper compares its bloom index against (§4.1, §6.2.2) | the "bloom index" (§4.1) |
 | what a query can say | `C` clauses fixed at index time; per clause one query value; an item passes a clause when any of its values equals it (negated for a reverse clause); AND across clauses ([filtering](../../docs/system/filtering.md#linr-paper-31--fixed-clause-schema-no-dsl)) | the same clauses, forward only: no reverse clause, because NOT over a bloom would drop true matches (`filters.py:50`, `adapter.py:102-110`) |
 | answer | exact: no false positives or negatives | a superset of the exact answer: false positives (hash collisions), no false negatives |
@@ -117,14 +117,11 @@ speed, not results. It is not in Meta's code or either paper.
 | pass rate (ours) | mean over kept queries of (items passing the **exact** filter) / N | `evaluation/bench/oracle.py:106-109` |
 | synthetic rate `p` | each item draws `u ~ U(0,1)` once; it passes the rate-`p` clause iff `u < p`, so the sets nest and are unrelated to the embeddings; `arxiv-corr-synth` instead passes the items near the query's centroid | [datasets](../../docs/system/datasets.md#synthetic-selectivity-attrs) |
 | local pass rate | the share of a query's **unfiltered** top-100 that passes; what SilverTorch's recall follows (C6) | [results](results.md#claim-verification) |
-| bloom false-positive rate | per query (bloom survivors − exact passes) / (N − exact passes) on SilverTorch's own bloom index, no recheck, mean over queries; the records' `bloom_fp_rate` is the harness's standalone filter module's, not SilverTorch's, and is not reported | `research/artifacts/results-draft/fp_adapted.py`; `run.py:89-102` |
+| bloom false-positive rate | per query (bloom survivors − exact passes) / (N − exact passes) on SilverTorch's own bloom index, no recheck, mean over queries; the records' `bloom_fp_rate` column is not SilverTorch's and is not reported | `research/artifacts/results-draft/fp_adapted.py`; `run.py:89-102` |
 | LiNR's "pass rate" | items passing per query: high-pass set ≈ 1.7 M of 15.5 M on average (two clauses: geo, reverse company); low-pass set adds a title clause, at most 1.2 M, most queries thousands | linr.md §5.3 |
 | SilverTorch's | no pass-rate axis; FPR against bloom bits on 5,000 production filter queries (6 features, ~10 values per item) | silvertorch.md §6.2.2 |
 
-**The records' `bloom_fp_rate` is not SilverTorch's.** On `official` and
-`official-fork` cells the harness builds its standalone filter module on the
-Triton backend (`algos.filter_backend`) and computes the column from it, so
-the column is not reported. SilverTorch's own rate comes from its index
+SilverTorch's bloom false-positive rate comes from its index
 (`fp_adapted.py`, [results](results.md#claim-verification) C4); its effect on
 results is measured on the bloom legs as recall with the recheck off against
 the exact filter's, and as false positives in Meta's results at 30 M

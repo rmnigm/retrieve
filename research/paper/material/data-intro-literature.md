@@ -58,8 +58,7 @@ Goodreads encoder: [checkpoints](../../../docs/system/checkpoints.md#what-the-ha
 runs `linr_v1_filter_mask`, `linr_v2`, `linr_v3`, `postfilter`, `silvertorch`;
 the LAION N-sweep subsets (1 / 3 / 10 M) run V1, V2 and SilverTorch only; the
 `-synth` datasets run V1 / V2 (plus V3 and the postfilter on goodreads-synth). The
-`silvertorch` records of the final pass are the Triton reimplementation
-(out of the study); the study's SilverTorch numbers come from the NUMBERS legs
+study's SilverTorch numbers come from the NUMBERS legs, not the final pass
 ([outline](../outline.md#numbers-and-citability)).
 
 ### 1.2 Real filters: the sweeps in the final pass

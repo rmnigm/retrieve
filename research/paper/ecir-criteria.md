@@ -13,8 +13,7 @@ Roadmap F-CRIT. Each review question of the ECIR reproducibility track,
 mapped to what answers it in our work, its state, and the step that closes
 the gap. F5 writes the paper against this page
 ([decisions](../decisions.md#goal-and-scheduling)). The study: Meta's
-official SilverTorch code, adapted by us, against LiNR V1-V3; our Triton
-SilverTorch reimplementation is not in it.
+official SilverTorch code, adapted by us, against LiNR V1-V3.
 
 **Where the questions come from.** The ECIR 2026 call
 ([call](https://ecir2026.dryfta.com/calls/call-for-reproducibility-papers)),
@@ -46,9 +45,8 @@ Claims C1-C7 and the exhibits (T1-T3, F1-F4) are defined in
 [claims](claims.md), re-stated there for this study (keep / change /
 drop per claim). The verdicts below come from the final pass's EXHIBITS
 row of [validation](../validation.md#campaign-v2-phase-v);
-the SilverTorch halves of C4-C7 were measured on Meta's code as published
-and on our Triton reimplementation, so they are re-decided by the
-adapted-official rerun:
+the SilverTorch halves of C4-C7 are re-decided by the adapted-official
+rerun:
 
 | claim | verdict so far |
 |---|---|

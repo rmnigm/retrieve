@@ -22,9 +22,7 @@ outline's sections.
 
 **The study**, in the paper's words: Meta's official SilverTorch code,
 adapted (improvements listed in CHANGES), against LiNR V1-V3, implemented
-from the paper. Never "a fork" in prose; our Triton SilverTorch
-reimplementation is not in the paper and no Triton SilverTorch record is a
-source. Meta's code as published appears as the parity reference, the "as
+from the paper. Never "a fork" in prose. Meta's code as published appears as the parity reference, the "as
 published" column of T3, and the arm of C5 (the adapted code has no
 full-mask path).
 
@@ -49,8 +47,8 @@ need a decision or an action only the user (or the controller) can take:
    faster and ours has V2 faster (0.29-0.68 of V1). The mechanism is our
    fused V2 (LN-1), which LiNR §6 itself predicts (L-12).
 4. **C4's false-positive rates** — *resolved* (controller and user,
-   2026-10-13): the harness's `bloom_fp_rate` is its standalone filter
-   module's, not SilverTorch's, and is not used. C4 reports SilverTorch's
+   2026-10-13): the records' `bloom_fp_rate` column is not SilverTorch's
+   and is not used. C4 reports SilverTorch's
    own bloom, measured on the adapted index with no recheck
    (`fp_adapted.py`, Hub `artifacts/results-draft/20261013-bloom-fp`); what
    its false positives cost in recall comes from the bloom legs.

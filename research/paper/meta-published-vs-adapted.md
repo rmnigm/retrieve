@@ -104,14 +104,6 @@ gate grid is the paper's source for the comparison (T3): the NUMBERS legs
 time the adapted code against LiNR only and run no published-code cell. The
 final full rerun regenerates it.
 
-The adaptation's definition of done also asks it to be no slower than our
-retired Triton SilverTorch backend on any cell. That is an engineering
-target, not a claim of the paper. Four clusters of cells still miss it
-(roadmap META-FORK): wide unfiltered scans at `D` ≥ 192 (Meta's scorer),
-the full bloom path on multi-clause filters (Meta's full-`N` bloom search),
-the partial bloom path at batch 1 under CUDA graph (the payload kernels),
-and the exact filter at wide probes at batch 1 (C9's per-doc check).
-
 ## 5. What this comparison cannot say
 
 - It is not a comparison with Meta's production system: the end-to-end
@@ -126,13 +118,3 @@ and the exact filter at wide probes at batch 1 (C9's per-doc check).
 - One A100-SXM4-80GB, clocks unlocked and sampled
   ([provenance §4](provenance-and-disclosure.md#4-timing-which-clock-estimator-and-why-the-question-is-not-pedantic));
   the published column is eager only.
-
-## 6. The earlier comparison
-
-The head-to-heads of Meta's code against our Triton reimplementation
-(b3, the kernel-opt head-to-head, H2H-FINAL, the C7 cells at
-campaign-v2.x) are not in the study. Their records stay on the Hub and
-their rows in [validation](../validation.md) are marked "not in the study".
-The findings about Meta's published code that they produced (OF-1 to
-OF-12) stand in [deviations §5](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper),
-and they are what §2 above removes.
