@@ -43,8 +43,8 @@ need a decision or an action only the user (or the controller) can take:
    goodreads checkpoints, Re-LAION vectors, PubMed slice, the public result
    repos, `eval-results` shape, GitHub visibility. §8's availability
    paragraph depends on them.
-3. **C1 verdict wording.** Proposed: "reproduced in shape, not in
-   location": a V1 / V2 crossover exists at bs 1 at every N and d, but at
+3. **C1 verdict wording** — *ruled* (user, 2026-10-13): "reproduced in
+   shape, not in location": a V1 / V2 crossover exists at bs 1 at every N and d, but at
    pass rate 0.79-0.97, where LiNR's high-pass point (≈ 0.11) has V1 3.0×
    faster and ours has V2 faster (0.29-0.68 of V1). The mechanism is our
    fused V2 (LN-1), which LiNR §6 itself predicts (L-12).
@@ -125,7 +125,8 @@ Nothing goes to an appendix (appendices count toward the 12).
   modes: adapting released code and implementing from text.
 - What we do: test every testable quantitative claim on five public
   datasets (0.8-30 M items, d 128-768) with real and synthetic filters on
-  one A100, and compare the two systems at matched recall.
+  one A100, and compare SilverTorch at recall 0.90 / 0.95 with exact LiNR,
+  and with LiNR V3 at the same recall (the matched-recall row).
 - Contributions, as a numbered list (survey pattern): (1) claim verdicts
   for both papers; (2) the first head-to-head, as a regime map over pass
   rate, N and batch size; (3) Meta's code adapted, held bit-exact to the
@@ -215,7 +216,8 @@ C1-C7 matrix); verdicts from [results](results.md#claim-verification) and
   contains (kernels only; query preparation outside, reported apart).
 - **Tuning.** IVF `n_lists` per dataset size (4096, 16384, 65536 from
   10 M) and the probe curve (`n_probe` doubling from 8 to `n_lists` / 4);
-  results at matched recall 0.90 / 0.95, and at the papers' operating
+  SilverTorch at recall targets 0.90 / 0.95 (against exact LiNR, and against
+  LiNR V3 at the same recall), and at the papers' operating
   point (24 probes) as a reference row; k 100 and 1000, k 2048 on a subset
   (the papers' own k); bs 1 / 16 / 64 (256 for LiNR where it fits); seed 0,
   seeds 0-2 on the C1 crossover cells.
@@ -261,13 +263,18 @@ Neither paper ran this comparison; it is the study's own result and the
 novelty the call asks for. Kept apart from §4 (survey pattern 2).
 
 **Claims.**
-- Where SilverTorch reaches the target on a real filter, it is faster than
-  the best exact LiNR at every size from 0.8 M to 30 M: 0.045-0.71 of
+- Where SilverTorch reaches recall 0.90 on a real filter, it is faster than
+  the best exact LiNR at every size from 0.8 M to 30 M (not matched recall:
+  LiNR's recall is ≈ 1.0): 0.045-0.71 of
   LiNR's latency at 0.90, every batch size; at 0.95 its lead shrinks at
   bs 64 (up to 0.98).
-- Where it cannot reach the target, exact LiNR wins by default: a recall
-  ceiling, not a speed loss (LAION `c0_domain` up to 10 M, LAION 1 M,
-  YFCC, PubMed `all5`, 0.95 on PubMed). 0.99 is reached nowhere.
+- Where it does not reach the target within a 25 % scan (`n_probe` ≤
+  `n_lists` / 4) there is no SilverTorch point (LAION `c0_domain` up to
+  10 M, LAION 1 M, YFCC, PubMed `all5`, 0.95 on PubMed). 0.99 is reached
+  nowhere.
+- **Matched recall (pending, after the bloom legs):** LiNR V3 (approximate)
+  at 0.90 / 0.95, timed and interleaved with SilverTorch's bloom at the same
+  points (user, 2026-10-13).
 - At its production setting (24 probes) SilverTorch is faster in all 363
   cells (0.016-0.99 of LiNR at bs 1) but its recall there is far from
   exact: a reference row, not a comparison at equal quality.
@@ -299,7 +306,8 @@ novelty the call asks for. Kept apart from §4 (survey pattern 2).
   panel per dataset size, bs 16. Source: `h2h.csv` (graph, interleaved
   with LiNR V1 / V2, 1,677 rows, 30 flagged), `c2_v3.csv` for V3; figures
   `fig_h2h_synth`, `fig_tuned_vs_n` as drafts.
-- **T2** matched-recall winner table (dataset × filter × bs → winner and
+- **T2** winner table, SilverTorch at 0.90 / 0.95 against exact LiNR, with
+  the LiNR V3 matched-recall row (dataset × filter × bs → winner and
   ratio), point ratios without CIs (seed 0; CIs come with FULL-RERUN).
   Source: `tuned.csv`, `by_size.csv`; memory from `memory.csv`.
 
@@ -381,8 +389,8 @@ The strongest results the material supports, ranked by what they add to
 the paper, each with its source. All seed 0, citable. Items marked *new*
 are not yet carried by the sections above or by the results draft.
 
-1. **SilverTorch wins wherever it reaches the target; it loses only to its
-   own recall ceiling.** Real filters, k 100: 35 of 49 cells reach 0.90,
+1. **At recall 0.90, SilverTorch is faster than exact LiNR wherever it
+   reaches the target within a 25 % scan.** Real filters, k 100: 35 of 49 cells reach 0.90,
    and SilverTorch is faster in all 35 at bs 1 (0.045-0.71 of the best
    exact LiNR); 0.99 is reached nowhere. Its edge grows with N where it
    reaches the target: tuned bs 1 ratio 0.51-0.58 on Goodreads 0.8 M,

@@ -11,7 +11,7 @@
   <h2>Give SilverTorch the probes it needs, and it still wins wherever it can get there</h2>
   <div class="controls" id="ctl-size"></div>
   <div class="chart"><svg id="c-size" viewBox="0 0 700 600" role="img" aria-label="Speed-up of SilverTorch at its tuned point over the best exact LiNR variant, per real filter, ordered by index size"></svg></div>
-  <p class="note"><b>How to read it:</b> each row is a real filter, smallest index at the top. A dot is how many times faster SilverTorch is than the faster of LiNR V1 and V2 at the fastest setting that reaches the recall target, at one query (hollow), 16 and 64. Hatched rows never reach the target, even at a quarter of the clusters probed, so exact LiNR wins by default. That is a recall ceiling, not a speed loss.</p>
+  <p class="note"><b>How to read it:</b> each row is a real filter, smallest index at the top. A dot is how many times faster SilverTorch is than the faster of LiNR V1 and V2 at the fastest setting that reaches the recall target, at one query (hollow), 16 and 64. Hatched rows do not reach the target within a 25 % scan of the clusters, so there is no SilverTorch point to compare. This is SilverTorch at recall 0.90 / 0.95 against exact LiNR, not matched recall; the matched-recall row with LiNR V3 is pending.</p>
 </section>
 
 <section>
@@ -30,11 +30,11 @@
 </section>
 
 <section>
-  <span class="eyebrow">4 · Every cell at matched recall</span>
-  <h2>Who is faster at equal recall, filter by filter</h2>
+  <span class="eyebrow">4 · Every cell, SilverTorch at 0.90 / 0.95 against exact LiNR</span>
+  <h2>Who is faster, filter by filter, with SilverTorch held to a recall target</h2>
   <div class="controls" id="ctl-map"></div>
   <div class="chart"><table class="map" id="c-map"></table></div>
-  <p class="note"><b>How to read it:</b> a number is SilverTorch's time as a fraction of the best LiNR's at the tuned point (0.30 = 3.3× faster). <span style="background:repeating-linear-gradient(135deg,var(--linr-soft) 0 5px,transparent 5px 8px);padding:0 4px">Hatched</span>: SilverTorch never reaches the target, so LiNR wins by default. Solid orange: SilverTorch reaches it but LiNR is faster.</p>
+  <p class="note"><b>How to read it:</b> a number is SilverTorch's time as a fraction of the best LiNR's at the tuned point (0.30 = 3.3× faster). <span style="background:repeating-linear-gradient(135deg,var(--linr-soft) 0 5px,transparent 5px 8px);padding:0 4px">Hatched</span>: SilverTorch does not reach the target within a 25 % scan. Solid orange: SilverTorch reaches it but LiNR is faster.</p>
 </section>
 
 <section>

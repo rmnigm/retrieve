@@ -336,7 +336,7 @@ Highest recall@100 on the probe curve, with the smallest
 - Draft figures in the same artifact: `fig_h2h_synth`, `fig_tuned_vs_n`,
   `fig_c1_v2_over_v1` (PDF and PNG).
 
-### T2: matched-recall winners
+### T2: SilverTorch at 0.90 / 0.95 against exact LiNR
 
 Source: `tuned.csv` (1,089 rows), `by_size.csv`. A cell = dataset × filter
 × bs × k × target. Winner and ratio = SilverTorch over the faster of LiNR
@@ -357,7 +357,7 @@ V1 / V2. Clause filters, k 100:
 | LAION 30 M | `tags4` | 0.15 / 0.20 / 0.33 | 0.22 / 0.38 / 0.63 |
 | | `c0_domain` | 0.42 / 0.40 / 0.71 | not reached |
 
-Not reached at 0.90, so LiNR wins by default: LAION 1 M (both filters),
+Not reached at 0.90 within a 25 % scan (no SilverTorch point): LAION 1 M (both filters),
 LAION 3 M / 10 M `c0_domain`, PubMed `all5`, YFCC `tags_and`.
 
 **Counts** (clause; reached / cells, then SilverTorch wins):
