@@ -163,16 +163,22 @@ def bloom_curve_arms(spec):
     ]
 
 
-def bloom_curve_suite(spec):
-    return suite(
-        list(spec),
-        bloom_curve_arms(spec),
-        [100, 1000],
-        [16],
-        kinds=("bloom",),
-        perf=False,
-        sw={d: s for d, (_, s) in spec.items()},
-    )
+def bloom_curve_suites(spec, name):
+    """One suite per dim (a dataset config may list several dims; each dataset runs its own)."""
+    out = {}
+    for dim in sorted({BENCH[d][0] for d in spec}):
+        sub = {d: v for d, v in spec.items() if BENCH[d][0] == dim}
+        s = suite(
+            list(sub),
+            bloom_curve_arms(sub),
+            [100, 1000],
+            [16],
+            kinds=("bloom",),
+            perf=False,
+            sw={d: sw for d, (_, sw) in sub.items()},
+        )
+        out[f"{name}-d{dim}"] = {**s, "dims": [dim]}
+    return out
 
 
 ALL = list(BENCH)
@@ -357,8 +363,8 @@ blocks = {
         },
     ),
     # B1 (controller bloom plan): bloom curves, recheck off. Priority 1 = real filters, every size; 1b = the small synth sets
-    "n-bloom-curve": bloom_curve_suite(BLOOM),
-    "n-bloom-curve-synth": bloom_curve_suite(BLOOM_SYNTH),
+    **bloom_curve_suites(BLOOM, "n-bloom-curve"),
+    **bloom_curve_suites(BLOOM_SYNTH, "n-bloom-curve-synth"),
     "n-curve-q-all": suite(
         WIDE,
         curve_arms(WIDE, wide=None),

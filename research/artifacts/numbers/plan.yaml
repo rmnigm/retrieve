@@ -211,8 +211,12 @@ legs:
     tree: fork + harness `recheck` param (dev/numbers-bloom)
     depends_on: []
     cmds:
-      - "RUN --suite n-bloom-curve --dataset {ds}   # in this order: goodreads, arxiv, laion1m, laion3m, pubmed, laion10m, laion30m"
-      - "RUN --suite n-bloom-curve-synth --dataset {ds}   # goodreads-synth, arxiv-synth, laion1m-synth, laion3m-synth"
+      - "RUN --suite n-bloom-curve-d128 --dataset {ds}   # goodreads, arxiv"
+      - "RUN --suite n-bloom-curve-d256 --dataset {ds}   # laion1m, laion3m"
+      - "RUN --suite n-bloom-curve-d768 --dataset pubmed"
+      - "RUN --suite n-bloom-curve-d256 --dataset {ds}   # laion10m, laion30m"
+      - "RUN --suite n-bloom-curve-synth-d128 --dataset {ds}   # goodreads-synth, arxiv-synth"
+      - "RUN --suite n-bloom-curve-synth-d256 --dataset {ds}   # laion1m-synth, laion3m-synth"
     upload: numbers/A1-bloom
     est_gpu_h: 4.5
   - id: A2-bloom

@@ -1359,20 +1359,13 @@ n-bloomwidth:
       k_hash:
       - 3
       - 5
-n-bloom-curve:
+n-bloom-curve-d128:
   perf: false
   datasets:
   - goodreads
   - arxiv
-  - laion1m
-  - laion3m
-  - pubmed
-  - laion10m
-  - laion30m
   dims:
   - 128
-  - 256
-  - 768
   filter_kinds:
   - bloom
   ks:
@@ -1389,20 +1382,6 @@ n-bloom-curve:
     - c0_maincat
     - c3_nversions
     - all4
-    laion1m:
-    - c0_domain
-    - tags4
-    laion3m:
-    - c0_domain
-    - tags4
-    pubmed:
-    - c0_mesh
-    laion10m:
-    - c0_domain
-    - tags4
-    laion30m:
-    - c0_domain
-    - tags4
   arms:
   - algo: silvertorch
     backends:
@@ -1453,6 +1432,38 @@ n-bloom-curve:
         - c0_maincat
         - c3_nversions
         - all4
+n-bloom-curve-d256:
+  perf: false
+  datasets:
+  - laion1m
+  - laion3m
+  - laion10m
+  - laion30m
+  dims:
+  - 256
+  filter_kinds:
+  - bloom
+  ks:
+  - 100
+  - 1000
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    laion1m:
+    - c0_domain
+    - tags4
+    laion3m:
+    - c0_domain
+    - tags4
+    laion10m:
+    - c0_domain
+    - tags4
+    laion30m:
+    - c0_domain
+    - tags4
+  arms:
   - algo: silvertorch
     backends:
     - official-fork
@@ -1624,84 +1635,6 @@ n-bloom-curve:
       - 512
       - 1024
     datasets:
-      pubmed:
-        sweeps:
-        - c0_mesh
-  - algo: silvertorch
-    backends:
-    - official-fork
-    filter_kinds:
-    - bloom
-    build:
-      n_lists:
-      - 16384
-      recheck:
-      - false
-    query:
-      n_probe:
-      - 8
-      - 16
-      - 32
-      - 64
-      - 128
-      - 256
-      - 512
-      - 1024
-      - 2048
-      - 4096
-    datasets:
-      pubmed:
-        sweeps:
-        - c0_mesh
-  - algo: silvertorch
-    backends:
-    - official-fork
-    filter_kinds:
-    - bloom
-    build:
-      n_lists:
-      - 65536
-      recheck:
-      - false
-    query:
-      n_probe:
-      - 8
-      - 16
-      - 32
-      - 64
-      - 128
-      - 256
-      - 512
-      - 1024
-      - 2048
-      - 4096
-      - 8192
-      - 16384
-    datasets:
-      pubmed:
-        sweeps:
-        - c0_mesh
-  - algo: silvertorch
-    backends:
-    - official-fork
-    filter_kinds:
-    - bloom
-    build:
-      n_lists:
-      - 4096
-      recheck:
-      - false
-    query:
-      n_probe:
-      - 8
-      - 16
-      - 32
-      - 64
-      - 128
-      - 256
-      - 512
-      - 1024
-    datasets:
       laion10m:
         sweeps:
         - c0_domain
@@ -1843,16 +1776,110 @@ n-bloom-curve:
         sweeps:
         - c0_domain
         - tags4
-n-bloom-curve-synth:
+n-bloom-curve-d768:
+  perf: false
+  datasets:
+  - pubmed
+  dims:
+  - 768
+  filter_kinds:
+  - bloom
+  ks:
+  - 100
+  - 1000
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    pubmed:
+    - c0_mesh
+  arms:
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 4096
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 16384
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 65536
+      recheck:
+      - false
+    query:
+      n_probe:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+      - 256
+      - 512
+      - 1024
+      - 2048
+      - 4096
+      - 8192
+      - 16384
+    datasets:
+      pubmed:
+        sweeps:
+        - c0_mesh
+n-bloom-curve-synth-d128:
   perf: false
   datasets:
   - goodreads-synth
   - arxiv-synth
-  - laion1m-synth
-  - laion3m-synth
   dims:
   - 128
-  - 256
   filter_kinds:
   - bloom
   ks:
@@ -1869,16 +1896,6 @@ n-bloom-curve-synth:
     - p01
     - p1
     arxiv-synth:
-    - p0001
-    - p001
-    - p01
-    - p1
-    laion1m-synth:
-    - p0001
-    - p001
-    - p01
-    - p1
-    laion3m-synth:
     - p0001
     - p001
     - p01
@@ -1937,6 +1954,34 @@ n-bloom-curve-synth:
         - p001
         - p01
         - p1
+n-bloom-curve-synth-d256:
+  perf: false
+  datasets:
+  - laion1m-synth
+  - laion3m-synth
+  dims:
+  - 256
+  filter_kinds:
+  - bloom
+  ks:
+  - 100
+  - 1000
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    laion1m-synth:
+    - p0001
+    - p001
+    - p01
+    - p1
+    laion3m-synth:
+    - p0001
+    - p001
+    - p01
+    - p1
+  arms:
   - algo: silvertorch
     backends:
     - official-fork
