@@ -55,7 +55,7 @@ rerun:
 | C3 | does not hold (custom vs native 1.4-12×, not ~100×) |
 | C4 | holds in part |
 | C5 | in Meta's code as published: reversed below 30 M (host work in the partial path), holds at 30 M; the adapted code is re-measured in the rerun |
-| C6 | holds (re-measured on the adapted code; the int32 path is bit-exact with the published one) |
+| C6 | partially (re-measured on the adapted code, Meta's default fp16 score path) |
 | C7 | re-stated as Meta as published vs adapted: X gate passing at ≤ 10 M, review pending |
 | new: local pass rate l_q governs IVF recall | holds on goodreads and arXiv |
 | new: l_q router | dropped: not on the recall-latency Pareto front on PubMed 10 M (decisions); one line in the paper as a tried idea at most |

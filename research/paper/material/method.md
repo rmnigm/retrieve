@@ -86,7 +86,7 @@ Naming: "Meta's official SilverTorch code, adapted (CHANGES)" = code name
 | builds not byte-reproducible | each pod's `_C.so` differs (four sha256 in the final pass's recipe; pod b's rebuild differs from pod 1's) | `research/artifacts/campaign-final/recipe.yaml` `official_so_sha256`; validation NUMBERS "Provenance" | citable |
 | coexistence | fork installs as `silvertorch-fork`, ops `torch.ops.stfork.*`, beside upstream `torch.ops.st.*` in one process (parity and interleaved timing in one process) | CHANGES "Coexistence" | citable |
 | phase 1 | k-means (Lloyd, 10 iters, random init), global int8 codes, top-`n_probe` probe selection, query prep: ours, shared by both columns | [meta-published-vs-adapted §1](../meta-published-vs-adapted.md#1-what-the-studys-silvertorch-is), [deviations ST-5, ST-7](../reproduction-deviations.md#3-silvertorch-as-we-run-it--deviations-from-the-paper) | citable (design) |
-| study configuration | int32 score path; bloom = configured width (C12), recheck (C13) **off** (user, 2026-10-12: no recheck in timed code; false positives cost recall at grading); Meta's bloom semantics for the parity gate and the "as published" column; fp16 a reported variant; LiNR exact filter only (user, 2026-10-13) | [decisions → goal](../../decisions.md#goal-and-scheduling) | citable (decision) |
+| study configuration | Meta's default fp16 score path (user, 2026-10-13; int32 only for the C7 parity gate); bloom = configured width (C12), recheck (C13) **off** (user, 2026-10-12: no recheck in timed code; false positives cost recall at grading); Meta's bloom semantics for the parity gate and the "as published" column; LiNR exact filter only (user, 2026-10-13) | [decisions → goal](../../decisions.md#goal-and-scheduling) | citable (decision) |
 
 ### Q5. Every change in `official-fork/CHANGES.md`, by kind
 
@@ -154,7 +154,7 @@ State, all from [validation META-FORK](../../validation.md#meta-fork-backendoffi
 | OF-4 | host overhead: 19 launches + 3 syncs per `fused_kmean_ann`, bloom ≈ 32 launches ≥ 5 syncs | yes (C3, C5, C6, C8, K fix 1): 9-10 kernels, no sync | yes |
 | OF-5 | expression parse 58.7 µs / call at B 16 and per-call host plan decode + pageable upload | yes (C4); parse stays query prep | — |
 | OF-6 | README's `pytest silvertorch/` fails at collection (3 files mangled); 2 registered ops not built | yes (F8) | yes |
-| OF-7 | fp16 score path vs arXiv's score distribution: 3.1e-4 recall@100 (95.3 % of arXiv queries' rank-100/101 gap inside one fp16 ulp) | n/a (int32 path in the study) | — |
+| OF-7 | fp16 score path vs arXiv's score distribution: 3.1e-4 recall@100 (95.3 % of arXiv queries' rank-100/101 gap inside one fp16 ulp) | applies: the study runs the fp16 path | — |
 | OF-8 | int32 path bit-exactly reproducible; fp16 costs fp16 rounding only | n/a (a positive finding) | — |
 | OF-9 | partial (co-designed) path 14-22 % slower than full at 0.8-3 M, 1.70-3.69× faster at 30 M | removed by C8 / K fix 17 on the fork | yes |
 | OF-10 | `m_bits` ignored | yes (C12) | yes |

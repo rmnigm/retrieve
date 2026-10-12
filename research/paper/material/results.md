@@ -29,8 +29,7 @@ both, commit `fc70420`), except the C4 attribution in
 gates are green ([validation](../../validation.md#numbers-adapted-silvertorch-over-the-study-grid)),
 so their numbers are **citable**, with these exclusions, each listed and
 never quoted as measured:
-- LiNR V2 at bs 256 on PubMed `c3_journal_reverse` / `all5`: a
-  TIMEOUT;
+- LiNR V2 at bs 256 on PubMed `all5`: a TIMEOUT;
 - the cells unstable in every run, kept and flagged.
 
 All
@@ -80,7 +79,7 @@ L-3 / L-5):
 | real filters, bs 1 | V2 faster on every sweep except PubMed `c3_journal_reverse` (p 0.999, 1.07) | `c1_real` |
 | real filters, bs 16 | V1 faster everywhere except PubMed `c0_mesh` (p 0.00019): V2 / V1 0.53 | `c1_real` |
 | bs 64 | V2 1.3-35× slower on every real filter; LAION 2.0-2.2 | `c1_real`, `linr_numbers` (L1, L1b) |
-| bs 256 | V2 3.9-55× slower where it finished; TIMEOUT on PubMed `c3_journal_reverse` / `all5` | `linr_numbers` `V2_status` |
+| bs 256 | V2 2.2-55× slower where it finished (55× on PubMed `c3_journal_reverse`, 2.55 s a batch); TIMEOUT on PubMed `all5` | `linr_numbers` `V2_status` |
 | correlated (arxiv-corr-synth, p 0.010-0.107) | bs 1: 0.35-0.41 (k 100), 0.37-0.43 (k 1000); bs 16: 0.92-1.26 | `linr_numbers` (L3) |
 | k 2048 | bs 1: V2 / V1 0.08-0.77; bs 16: V2 wins only on PubMed `c0_mesh` (0.52); arXiv 1.34, Goodreads 1.61 | `linr_numbers` (L4) |
 | seeds 0-2 | at the bs 16 cells beside the crossover (arxiv-synth p 0.02 / 0.05, laion30m-synth p 0.01 / 0.02; k 100 and 1000), V2 / V1 differs across seeds by ≤ 0.006; 0 / 36 records unstable | `campaign-final/merged-4016`, suites `seeds-c1`, `seeds-c1-laion30m`; C3-derived |
@@ -361,9 +360,9 @@ LAION 3 M / 10 M `c0_domain`, PubMed `all5`.
 | 1000 | 0.95 | 17/44, 17 | 17/44, 16 | 17/44, 10 |
 
 - Median ratio of reached cells, k 1000, bs 1, 0.90: 0.42.
-- **Bloom filters** (reached cells): k 100 8 / 12 at 0.90 and 5 / 12 at
-  0.95; k 1000 4 / 12 and 2 / 12. SilverTorch wins all of them, ratio
-  0.09-0.85.
+- **Bloom filters:** pending the bloom legs (SilverTorch's own bloom, no
+  recheck); the bloom cells timed so far ran with the recheck on and are
+  not reported.
 - **k 2048** (A3 + L4): arXiv `c0_maincat` 0.23-0.72 and Goodreads
   `c0_genre` 0.30-0.81 at 0.90 / 0.95. PubMed `c0_mesh` tops out at 0.856,
   so LiNR wins.
@@ -393,8 +392,8 @@ LAION 3 M / 10 M `c0_domain`, PubMed `all5`.
   are at p ≥ 0.1 and bs ≥ 16: 15 at bs 64 and 2 at bs 16 (laion3m-synth
   p 1 at 0.95, k 100 and k 1000); the worst: laion3m-synth p 1, bs 64,
   0.95: 2.74 (k 100) and 2.70 (k 1000).
-- **At 24 probes** (`at24.csv`): SilverTorch is faster in every one of
-  363 cells. bs 1: 0.016-0.986. bs 16: 0.017-0.395.
+- **At 24 probes** (`at24.csv`): SilverTorch (exact clause filter) is faster in
+  all 273 cells, k 100 and 1000. bs 1: 0.016-0.986. bs 16: 0.017-0.395.
 
 ### Index memory and build time
 
@@ -471,7 +470,7 @@ D1-G row, the leg parquets):
 
 | case | what | rerun? | paper must say |
 |---|---|---|---|
-| LiNR V2 bs 256 on PubMed `c3_journal_reverse` / `all5` | TIMEOUT after 3.6-9.8 h with 80 GB full (`c3_journal_reverse` finished at 2.55 s a batch after 11 h) | no | listed as TIMEOUT, not measured |
+| LiNR V2 bs 256 on PubMed `all5` | TIMEOUT: no result with 80 GB full (`c3_journal_reverse` finished at 2.55 s a batch after 11 h and is reported) | no | listed as TIMEOUT, not measured |
 | L1-linr-bs64 | 12 of 148 rows `partial` (the bs 256 gaps above); 6 failed records (PubMed OOM) superseded by `ok` | yes | — |
 | A2-laion30m-real / L1b | 3 / 4 failed, superseded by `ok` reruns | yes | — |
 | unstable | A2-small 69 → 0 after rerun; A2b 15 → 7 (5 SilverTorch at ~0.2 ms on LAION 1 M, 2 LiNR V2); A2-pubmed 2, A3 1 not rerun; 6 tuned points rest on a flagged cell | partly | flagged cells named |

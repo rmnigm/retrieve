@@ -54,10 +54,12 @@ decisions.
   adapted" table ([paper](paper/meta-published-vs-adapted.md)) reports
   what the adaptation changed. Meta's code as published is not a separate
   arm of the study.
-- **The adapted arm's configuration in the study** (controller and user,
-  2026-10-11): the int32 score path (gated bit-exact against Meta's
-  published code everywhere); fp16, Meta's default, only as a reported
-  variant where it is cheap.
+- **The adapted arm's score path is Meta's default, fp16** (user,
+  2026-10-13; the earlier "int32 score path" record, the controller's, is
+  withdrawn): every study number of the adapted code (curves, timed legs,
+  bloom legs, ceiling split) ran the fp16 path, the library default, and is
+  reported as such; no reruns. The int32 path stays only as the C7 parity
+  ablation (bit-exact against Meta's published code).
 - **Filtering in the study** (user, 2026-10-12; this replaces the earlier
   record that the C13 recheck was on by default "by controller and user",
   which the user does not stand behind): SilverTorch is evaluated with its
@@ -86,8 +88,7 @@ decisions.
   [validation](validation.md#campaign-v2-phase-v) (D1-G).
 - **NUMBERS gate green** (controller ACCEPT, 2026-10-12), on the D1-G
   model, with the user's rulings: LiNR V2 at bs 256 on
-  PubMed `c3_journal_reverse` / `all5` reported as TIMEOUT (no
-  usable result after 3.6-9.8 h at 80 GB); sub-millisecond cells unstable in
+  PubMed `all5` reported as TIMEOUT (no result at 80 GB; `c3_journal_reverse` finished at 2.55 s a batch and is reported); sub-millisecond cells unstable in
   every run kept and flagged.
 - **LiNR's recall is end-task recall, ours is fidelity to exact search**
   (user, 2026-10-12): LiNR reports product recall (recall@2000 against its
