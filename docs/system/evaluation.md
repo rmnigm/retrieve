@@ -778,7 +778,8 @@ histories). On such a dataset every **filter** cell is self-excluded (`Job.self_
 - the timed path is untouched: `perf` sets `module.k = k` per entry as before.
 
 `sweep_assets` logs, per sweep, the share of kept rows with a reachable target whose oracle top-1
-is the own item (about 1.0 when the flag is right) and the record carries it as
+is the own item (near 1.0 when the flag is right; a near-duplicate document can outrank it, and `drop_self`
+removes the own item wherever it ranks) and the record carries it as
 `quality.self_top1_share`, next to `quality.self_excluded: true`. The key block gains
 `self_excluded: true` on these cells only (`Job.key`, `records.key_block`), so their resume and
 quality-cache keys, sidecar names and parity spills differ from every record written before the
