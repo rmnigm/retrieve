@@ -30,7 +30,15 @@ from typing import Any
 import yaml
 from loguru import logger
 
-from bench.algos import ALGOS, BACKENDS, FILTER_KINDS, PATHS, is_valid_combo, official_config
+from bench.algos import (
+    ALGOS,
+    BACKENDS,
+    BLOOM_DEFAULTS,
+    FILTER_KINDS,
+    PATHS,
+    is_valid_combo,
+    official_config,
+)
 
 # set_query_params, no rebuild; candidate_pool_frac is resolved per sweep to candidate_pool (run.py)
 QUERY_PARAMS = frozenset({"n_probe", "candidate_pool", "candidate_pool_frac", "alpha"})
@@ -44,7 +52,6 @@ _SUITE_KEYS = {"datasets", "dims", "filter_kinds", "ks", "batch_sizes", "arms", 
 _SUITE_KEYS |= {"sweeps", "ks_by_sweep", "seeds_by_sweep", "perf", "interleave"}
 _ARM_KEYS = {"algo", "backends", "filter_kinds", "sweeps", "build", "query", "datasets"}
 _ENCODE = {"batch_size": 512, "num_workers": 8, "max_seq_length": 200}
-_BLOOM = {"m_bits": 1024, "k_hash": 5}
 
 
 class ConfigError(ValueError):
@@ -431,7 +438,7 @@ def load_matrix(
     seed_list = s.get("seeds", [0])
     if not isinstance(seed_list, list) or not all(isinstance(x, int) and x >= 0 for x in seed_list):
         raise ConfigError(f"{where}: seeds must be a list of ints >= 0, got {seed_list!r}")
-    bloom = {**_BLOOM, **(suites.get("bloom") or {}), **(s.get("bloom") or {})}
+    bloom = {**BLOOM_DEFAULTS, **(suites.get("bloom") or {}), **(s.get("bloom") or {})}
     groups = _interleave(where, s.get("interleave"))
     timed = s.get("perf", True)
     if not isinstance(timed, bool):

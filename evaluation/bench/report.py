@@ -145,16 +145,8 @@ def select(
 
 
 def _samples(results_dir: Path) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for path in sorted(Path(results_dir).glob("*/*.samples.jsonl")):
-        lines = [ln for ln in path.read_text().splitlines() if ln.strip()]
-        for i, line in enumerate(lines):
-            try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError:
-                if i != len(lines) - 1:
-                    raise
-    return out
+    paths = sorted(Path(results_dir).glob("*/*.samples.jsonl"))
+    return [r for p in paths for r in records.read_records(p)]
 
 
 # ----- provenance and citability ----------------------------------------------
@@ -726,10 +718,8 @@ def matched(curve: dict[str, Any], bs: int, k: int, target: float) -> dict[str, 
 
 
 def _curve_label(cv: dict[str, Any], tex: bool = True) -> str:
-    be = "" if cv["algo"] in FIXED_BACKEND else f" [{cv['backend']}]"
-    return (
-        f"{_arm(cv['algo'], cv['rest'], tex)}{be} along {_esc(cv['axis']) if tex else cv['axis']}"
-    )
+    axis = _esc(cv["axis"]) if tex else cv["axis"]
+    return f"{_arm_be(cv['algo'], cv['backend'], cv['rest'], tex)} along {axis}"
 
 
 def tab_matched(c) -> list[Path]:
@@ -785,7 +775,6 @@ def tab_matched(c) -> list[Path]:
 
 BAND_MIN_QUERIES = 20  # a band with fewer of a cell's queries is left blank
 BAND_TARGET = 0.95
-EXACT_ARMS = ("linr_v1_filter_mask", "linr_v2")
 
 
 def _band_edges(bands: tuple[float, ...]) -> list[tuple[float, float]]:
@@ -856,7 +845,7 @@ def tab_matched_bands(c) -> list[Path]:
             dump.append({"dataset": cv["dataset"], "sweep": cv["sweep"], "algo": cv["algo"],
                          "backend": cv["backend"], "params": json.loads(cv["rest"]), "bs": bs,
                          "bands": bands})  # fmt: skip
-    exact = [r for r in c.rows if r["algo"] in EXACT_ARMS and r.get("filter_kind") != "none"]
+    exact = [r for r in c.rows if r["algo"] in run.EXACT_ALGOS and r.get("filter_kind") != "none"]
     for key in sorted({(r["dataset"], r["dim"], r["suite"], r["filter_kind"], r["sweep"], r["algo"],
                         r["backend"]) for r in exact}):  # fmt: skip
         ds, dim, suite, fk, sw, algo, be = key
@@ -1816,7 +1805,7 @@ def tab_t1(c) -> list[Path]:
 def methodology(c) -> list[Path]:
     """The measurement-methodology itemize, its constants read out of the code that produced
     the records, so text and code cannot drift apart."""
-    lat = inspect.signature(measure.latency).parameters
+    lat = inspect.signature(measure.latency_group).parameters
     pool = inspect.signature(inputs.query_pool).parameters["n_pool"].default
     recs = c.recs
     env = recs[0]["env"] if recs else {}
