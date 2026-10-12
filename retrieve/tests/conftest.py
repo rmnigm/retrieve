@@ -36,9 +36,10 @@ def pytest_collection_modifyitems(config, items):
                 it.add_marker(skip)
 
 
-def require_official() -> None:
+def require_official(backend: str = "official") -> None:
     """Gate the calling test on Meta's official SilverTorch ops (``torch.ops.st.*``,
-    the ``official`` extra). Two ways it can be absent, and the split is the point:
+    the ``official`` extra), or on our fork of them (``backend="official-fork"``,
+    ``torch.ops.stfork.*``). Two ways it can be absent, and the split is the point:
 
     - **Not runnable here** (``silvertorch`` not installed, or no CUDA device) →
       ``skip``. The suite is expected to run on boxes without the extra.
@@ -51,12 +52,12 @@ def require_official() -> None:
     from retrieve.ops.official import OfficialMissing, ensure_loaded
 
     try:
-        ensure_loaded()
+        ensure_loaded(backend)
     except OfficialMissing as e:
         pytest.skip(f"official SilverTorch backend unavailable: {e}")
     except ImportError as e:
         pytest.fail(
-            f"silvertorch is installed but the official ops failed to load — this is a "
+            f"{backend}: the package is installed but its ops failed to load — this is a "
             f"real failure, not a skip:\n{e}",
             pytrace=False,
         )

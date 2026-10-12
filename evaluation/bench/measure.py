@@ -171,12 +171,13 @@ def official_commit() -> str | None:
 OFFICIAL_BUILD_FLAGS = "_build_flags.json"
 
 
-def official_build() -> dict[str, Any] | None:
-    """The ``silvertorch`` extension the official backend would load, found without importing it:
-    ``so_path``, ``so_sha256`` and ``so_bytes`` (the build's identity), and ``nvcc_append_flags``
-    from a ``_build_flags.json`` beside the ``.so`` (written by the build recipe; ``None`` = Meta's
-    ``setup.py`` defaults, host code at gcc ``-O0``, OF-11). ``None`` when silvertorch is absent."""
-    spec = importlib.util.find_spec("silvertorch")
+def official_build(package: str = "silvertorch") -> dict[str, Any] | None:
+    """The extension an official backend would load (``silvertorch``, or our fork
+    ``silvertorch_fork``), found without importing it: ``so_path``, ``so_sha256`` and ``so_bytes``
+    (the build's identity), and ``nvcc_append_flags`` from a ``_build_flags.json`` beside the
+    ``.so`` (written by the build recipe; ``None`` = the package's ``setup.py`` flags: host code at
+    gcc ``-O0`` upstream, OF-11; ``-O3`` in the fork). ``None`` when the package is absent."""
+    spec = importlib.util.find_spec(package)
     if spec is None or not spec.submodule_search_locations:
         return None
     pkg = Path(next(iter(spec.submodule_search_locations)))
@@ -198,7 +199,8 @@ def provenance() -> dict[str, Any]:
     ``repo_dirty`` the informational whole-tree one; ``code_version`` follows ``dirty`` (a
     kernel edit, committed or not, invalidates a campaign; doc churn never does).
     ``official_commit`` is the installed ``silvertorch`` build's git commit, ``official_build``
-    the extension that loads and its build flags."""
+    the extension that loads and its build flags, ``official_fork_build`` the same for our fork
+    (whose sources are outside ``LIB``, so its ``so_sha256`` is what identifies a fork build)."""
     driver = _nvidia_smi("driver_version")
     return {
         "gpu": torch.cuda.get_device_name() if torch.cuda.is_available() else "cpu",
@@ -208,6 +210,7 @@ def provenance() -> dict[str, Any]:
         "triton": triton.__version__,
         "official_commit": official_commit(),
         "official_build": official_build(),
+        "official_fork_build": official_build("silvertorch_fork"),
         "commit": _git("rev-parse", "--short", "HEAD"),
         "dirty": subtree_dirty(),
         "repo_dirty": repo_dirty(),

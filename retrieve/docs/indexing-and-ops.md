@@ -63,7 +63,7 @@ import retrieve.ops.triton              # registers torch.ops.retrieve.* (Triton
 retrieve.ops.triton.codesigned_probe_score(query, probe_ids, cluster_offsets, item_codes, sort_perm, global_scale, k, width)
 retrieve.ops.reference.codesigned_probe_score(...)   # same signature, pure torch, torch.equal to the above
 retrieve.ops.official.ensure_loaded(); retrieve.ops.official.st.fused_kmean_ann(...)   # Meta's op
-retrieve.ops.available_backends()       # ("triton", "torch") or ("triton", "torch", "official")
+retrieve.ops.available_backends()       # ("triton", "torch"), plus "official" / "official-fork" where each loads
 ```
 
 | op | `triton` / `reference` | consumer |

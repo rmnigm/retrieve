@@ -249,6 +249,31 @@ paper.
   FPR against width (both blooms showed zero false positives, so S8 needs
   roadmap D3), seeds 1-2, k in {500, 1000}.
 
+## META-FORK: `backend="official-fork"` (not yet validated)
+
+Our fork of Meta's SilverTorch ([`official-fork/`](../official-fork/CHANGES.md), head `46ff49e`, merged at
+`1f6fed8`): one row per gate. fork-review: **ACCEPT** at `1f6fed8`; NOT CITABLE until its NUMBERS legs pass. Every timing below is pod b's A100 (GPU 0, SM
+clocks unlocked), or pod 1's / pod d's where named. Raw outputs: Hub `artifacts/meta-fork/pod-b-32c0d61`, plus
+the runners' `head-82fafb6`, `laion30m-82fafb6` and `laion30m-b1-32c0d61` ([hub index](artifacts/hub-index.md)); scripts in
+[`artifacts/meta-fork/`](artifacts/meta-fork/README.md). Triton left the study on 2026-10-11 (user), so the
+Triton-relative target was dropped; Triton numbers below are a record, not a gate.
+
+| gate | state | notes |
+|---|---|---|
+| upstream sync 21aa35e → 22c2007 | **applied, built** | upstream `HEAD` still `22c2007` on 2026-10-11 17:05Z (`git ls-remote`); the pinned `backend="official"` stays at 21aa35e |
+| build (C0, F8 object-name fix) | **pass** | the fork and upstream `-O3` coexist in one process (`c0_coexist.py`: both namespaces, `fused_kmean_ann` `torch.equal` at int32 / fp16 × mask none / full-`N`) |
+| Meta's own suite on the fork | **pass**, 122 passed | after the two test-file fixes the pod 1 runner found at C0 |
+| library tests | **pass**: `test_official.py` 146 passed / 26 skipped (the skips: fork-only gates on the `official` parametrisation); compile gate 35 passed | pod b, at `e6cdf78`: the fork rebuilt at `46ff49e` (`_C.so` sha256 `4f86bed50e14150e…`), after the review's N1 (the `STFORK_COOP` / `STFORK_QUERY_SHARED` switches removed, their defaults hard-coded: the default path is identical to `32c0d61`'s, so the head records stand) and B2 (`bloom_path="full"` refused on the fork; C13 has one bloom path, the T6 full case asserts the refusal) |
+| X: `torch.equal` to upstream `-O3` (ids and scores) | **pass** on every cell run | head `32c0d61`, pod b: **300 / 300 cells** with Meta's bloom semantics, none and exact, all `equal` (arXiv d128 / d256, goodreads d128, PubMed d768, YFCC d192; none / exact / bloom partial + full with Meta's semantics; n_probe 24 … 2048; bs 1 / 16 / 64; k 100 / 1000; eager + graph). The head grid's other 36 rows are R cells (the fork's default rechecked bloom against upstream's own bloom), not X cells: 24 equal upstream, 12 differ by design (upstream's false positives). `82fafb6`: pod 1 1,536 / 1,536 (≤ 10 M, unswapped and `--swap`, int32 + an fp16 subset), pod d 168 / 168 at 30 M (LAION d256). **30 M at `32c0d61`** (pod d, LAION d256): bloom partial + full **64 / 64**, both build orders, the bloom index builds equal 64 / 64. 30 M none / exact last ran at `8ff11e0` (72 / 72); K fixes 16 / 18 changed those paths since, covered at the head by pod b's 300 cells (incl. PubMed exact `all5`, n_lists 16384 / n_probe 2048) and the library tests, not at 30 M |
+| speed against Meta `-O3` | **pass**: faster on every cell | head, pod b, fork / upstream eager: the 300 X cells (Meta's semantics) median 0.230, max 0.764; the 36 R cells (default bloom against upstream's own bloom) median 0.287, max 0.788; at `82fafb6` max 1.031 inside the A/A floor (1.001-1.035). 30 M (LAION d256, pod d, bloom partial + full, `32c0d61`, 64 records): median **0.279**, min 0.059, max 0.467, faster in every record (the 210 MHz clock samples are taken after each round on the idle GPU; the 1 Hz trace reads 1395-1410 MHz under load, and the arms run round-robin) |
+| S: no host sync, no copy | **pass** | head (`syncs.py`, 24 forwards: none / exact / bloom partial + full × bs 1 / 16 / 64 × k 100 / 1000): `set_sync_debug_mode("error")` ok, 0 D2H, 0 pageable H2D (0.1 sync a call is the instrument's profiler exit, as for Triton), 9-10 kernels a forward (upstream: 3-6 syncs, 50 kernels) |
+| capture | **pass** | head (`graph_launches.py`, 24 cells): 1 `cudaGraphLaunch` a replay, `torch.equal` to eager over 16 batches, in a static capture and in the harness `graph` mode (one launch outside the graph unfiltered: cudagraph trees' input copy, as Triton) |
+| torch.compile (controller 11:40Z) | **pass**, 35 passed | `torch.library.opcheck` on all 16 `stfork` ops (the list pinned to the dispatcher); `SilverTorch(backend="official-fork")` none / exact / bloom traces `fullgraph` with 0 graph breaks and one graph, compiles in the default and `reduce-overhead` modes with `dynamic` False and True, `torch.equal` to eager; `torch.export` runs and equals eager. `backend="official"` keeps refusing to compile |
+| R: the fork's default bloom (C12 configured width + C13 recheck) | **pass** | 0 false positives on every cell (m_bits 64 … 2048 on goodreads / arXiv / PubMed, 36 cells; head 36 cells). Recall against a Triton exact oracle at the same probes 1.0, or 0.99994-0.999998 in 8 head cells where an id at the k-th score differs: sorted scores are bit-equal and each differing id ties the k-th score (`triton_vs_fork_exact.py`), and the rechecked bloom is `torch.equal` to the fork's exact path (`recheck_vs_exact.py`) |
+| C10: cluster / tile skip | **no change**, measured | Meta's scorer already skips at lane granularity; the fork's time grows with the pass rate only through the scorer |
+| C11: scorer per D | **changed** (K fix 14) | the cooperative-load scorer for D ≥ 128; the query staged in shared memory had no consistent winner (0.954-1.101) and is not used (both fixed in `search`, no runtime switch) |
+| against Triton v2.12 (record only) | above Triton on 90 of 672 (cell, mode) pairs at head, max 1.139 | PubMed d768 none and `c3_journal_reverse` 1.001-1.080 (the d768 scorer at ~1.26 TB/s against Triton's 1.32); arXiv d128 rechecked bloom `c0_maincat` np 24 bs 16 / 64 1.03-1.14 (the recheck pass beside the scorer, against Triton's fused bloom scorer without a recheck); arXiv exact `c0_maincat` np 24 / 256 1.00-1.06; bs 1 bloom `all4` np 24 1.03-1.07 and PubMed np 1024 bs 1 1.01-1.07 (launch latency); YFCC d192 none np 1024 1.01-1.03; the rest ≤ 1.01. A cluster-major scorer that removes the d768 / d256 gap (PubMed none np 1024 bs 64 33.9 vs Triton 93.9 ms) is built on `dev/meta-fork-k19-wip`, ungated and not merged |
+
 ## Campaign v2 (Phase V): not yet validated
 
 Every row is at the code_version it names (campaign-v2 `408b1188` unless it says otherwise) and NOT CITABLE until D1-G.
@@ -692,6 +717,6 @@ resume (`--resume` has never run on the GPU).
 - Clause 5 of the campaign gate (ids identical across modes).
 - The official exact path without our adapter's mask packing (the adapted code's C9 runs
   exact inside its search; its gates are META-FORK's).
-- The adapted SilverTorch backend as a whole: META-FORK review, gate R (C12 / C13), the 30 M
-  cells are open; the loss-cluster K fixes are dropped (Triton is out of the study) ([roadmap](roadmap.md#1-meta-fork-review-accept-tag)).
+- The adapted SilverTorch backend at 30 M without a filter and on the exact path at the head (last run at `8ff11e0`):
+  re-run before the paper states "bit-exact at 30 M" for those paths, else it reads "30 M: bloom at the head; none / exact at `8ff11e0`".
 - Every row above on a new pod, until the library suite has run there.

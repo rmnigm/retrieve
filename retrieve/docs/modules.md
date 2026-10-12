@@ -56,8 +56,13 @@ and bloom phases, with our k-means and quantization in front; it is Meta's code 
 the reference the adapted code is checked against, eager-only (`torch.compile` raises), and its bloom mode is Meta's
 bloom index rather than ours (`m_bits` is optional; `official=OfficialConfig(...)` carries
 `b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path, the
-and the partial-vs-full bloom path; the expression parse runs in `prepare_queries`). Any other
-module given `"official"` — or any string outside its
+and the partial-vs-full bloom path; the expression parse runs in `prepare_queries`).
+`backend="official-fork"` runs the same path on our fork of Meta's kernels (`torch.ops.stfork.*`,
+package `silvertorch-fork`, also in the `official` extra): ids and scores equal to Meta's, no host
+sync, so it captures and compiles; its bloom evaluates only the probed clusters
+(`OfficialConfig(bloom_path="full")` raises) and by default rechecks the bloom's survivors
+exactly, so it returns no false positives. Any other
+module given `"official"` / `"official-fork"` — or any string outside its
 backend literal — raises `ValueError` at construction.
 
 ## LiNR variants

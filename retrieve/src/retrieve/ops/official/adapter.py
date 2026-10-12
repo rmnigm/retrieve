@@ -1,11 +1,14 @@
 """The official-backend adapter proper: attributes → features / expressions, mask packing, the
-bloom searches and the scoring wrappers over ``torch.ops.st.*`` (loader, ``OfficialConfig`` and
-the upstream constants live in the package ``__init__``). Everything is eager only.
+bloom searches and the scoring wrappers over ``torch.ops.st.*`` or the fork's ``torch.ops.stfork.*``
+(each op-calling function takes ``backend``; loader, ``OfficialConfig`` and
+the upstream constants live in the package ``__init__``). Eager only on ``official``; the
+fork's ops capture and compile.
 """
 
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 import torch
 from torch import Tensor
@@ -19,6 +22,7 @@ from retrieve.ops.official import (
     MAX_SEARCH_K,
     WARP,
     BitOrder,
+    OfficialBackend,
     ScorePath,
     ensure_loaded,
 )
@@ -61,17 +65,30 @@ def build_bloom_index(
     b_multiplier: float,
     build_k: int,
     fast_build: bool = False,
+    bits_per_doc: int | None = None,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor]:
     """``bloom_index_build`` over cluster-sorted attrs → ``(bloom_index int64 [W],
     bundle_b_offsets int64 [n_bundles+1])`` on ``attrs.device`` (the CUDA builder needs
     CUDA inputs; the CPU builder is a single-threaded loop). ``W = Σ_bundles B_bundle ·
-    32`` words, i.e. ``B_bundle / 8`` bytes per doc."""
-    st = ensure_loaded()
+    32`` words, i.e. ``B_bundle / 8`` bytes per doc. ``bits_per_doc`` (the fork's configured
+    width, CUDA only) makes every ``B_bundle`` that many bits and ignores ``b_multiplier``."""
+    st = ensure_loaded(backend)
     if not b_multiplier > 1.0:
         raise ValueError(f"b_multiplier must be > 1.0, got {b_multiplier}")
     if not 0 < build_k <= MAX_SEARCH_K:
         raise ValueError(f"build_k must be in [1, {MAX_SEARCH_K}], got {build_k}")
     feature_ids, feature_offsets, feature_values = attrs_to_features(attrs)
+    if bits_per_doc is not None:
+        bloom_index, bundle_b_offsets = st.bloom_index_build_fixed(
+            feature_ids,
+            feature_offsets,
+            feature_values,
+            int(bits_per_doc),
+            int(build_k),
+            fast_build,
+        )
+        return bloom_index.contiguous(), bundle_b_offsets.contiguous()
     bloom_index, bundle_b_offsets = st.bloom_index_build(
         feature_ids, feature_offsets, feature_values, float(b_multiplier), int(build_k), fast_build
     )
@@ -112,13 +129,17 @@ def queries_to_expressions(
 
 
 def parse_plans(
-    expressions: list[str], hash_k: int, max_sub_queries: int = 5
+    expressions: list[str],
+    hash_k: int,
+    max_sub_queries: int = 5,
+    *,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor]:
     """``(plans_data int8, plans_offsets int64)`` on **CPU** for a batch of expressions, one call
     into Meta's CPU parser (≈ 59 µs at B=16). The search ops decode plans on the host per call
     (``bloom_index_search_cuda.cu:1045``), so CPU plans spare them a D2H. Query preparation:
     ``SilverTorch.prepare_queries`` runs it outside ``forward``."""
-    st = ensure_loaded()
+    st = ensure_loaded(backend)
     # `silvertorch_ks` is accepted and ignored upstream (expression_query_parser.cpp:395).
     ks = torch.ones(len(expressions), dtype=torch.int64)
     _max_stack, plans = st.parse_expression_query_batch(
@@ -126,6 +147,73 @@ def parse_plans(
     )
     data, offsets = plans
     return data.contiguous(), offsets.contiguous()
+
+
+class DevicePlans(NamedTuple):
+    """The fork's prepared plans (``official-fork``): the parser's encoding on the device, read in
+    place by the ``*_prepared`` searches — ``blob`` int64 ``[8 · slots + words]`` (per plan slot 8
+    byte offsets, then the data), ``slots`` plan slots (the batch's rows), and the parser's
+    ``max_stack_size`` (picks the search kernel's stack)."""
+
+    blob: Tensor
+    slots: int
+    max_stack_size: int
+
+
+def plan_capacity_bytes(n_clauses: int, hash_k: int) -> int:
+    """An upper bound on one parsed conjunction of ``n_clauses`` (possibly negated) terms in the
+    parser's encoding: ≤ 3C + 1 operators (C terms, ≤ C ``NOT``s, ≤ C ``AND``s at any fan-out, or
+    one ``EMPTY``), one more offset than operators, ≤ 4C + 1 parameters (each non-root operator is
+    one parameter of its parent, each term one more), ``hash_k`` hashes per term; every segment
+    8-aligned. Measured against the parser for C ≤ 12, plain and negated terms."""
+    ops = 3 * n_clauses + 1
+    return (
+        _align8(ops) + _align8(4 * (ops + 1)) + _align8(4 * (4 * n_clauses + 1))
+        + 8 * hash_k * n_clauses
+    )  # fmt: skip
+
+
+def _align8(n: int) -> int:
+    return -(-n // 8) * 8
+
+
+def prepare_plans(
+    expressions: list[str],
+    hash_k: int,
+    max_sub_queries: int,
+    n_clauses: int,
+    device: torch.device,
+    *,
+    slots: int,
+    backend: OfficialBackend = "official-fork",
+) -> DevicePlans:
+    """Meta's CPU parse, then its encoding uploaded once (one pinned H2D) as the fork's
+    :class:`DevicePlans`. The blob is padded to ``slots`` plans of
+    :func:`plan_capacity_bytes`, so it has one shape per ``(slots, n_clauses, hash_k)`` (a graph
+    replays any batch of that shape). Query preparation: ``SilverTorch.prepare_queries`` runs it
+    outside ``forward``."""
+    st = ensure_loaded(backend)
+    ks = torch.ones(len(expressions), dtype=torch.int64)
+    max_stack, (data, offsets) = st.parse_expression_query_batch(
+        list(expressions), ks, int(hash_k), True, int(max_sub_queries)
+    )
+    capacity = slots * plan_capacity_bytes(n_clauses, hash_k)
+    if len(expressions) > slots or data.numel() > capacity:
+        raise ValueError(
+            f"{len(expressions)} plans of {data.numel()} bytes exceed {slots} slots of "
+            f"{capacity} bytes (plan_capacity_bytes({n_clauses}, {hash_k}))"
+        )
+    blob = torch.zeros(8 * slots + capacity // 8, dtype=torch.int64, pin_memory=True)
+    blob[: offsets.numel()] = offsets
+    blob[8 * slots :].view(torch.int8)[: data.numel()] = data.view(torch.int8)
+    return DevicePlans(blob.to(device, non_blocking=True), slots, int(max_stack))
+
+
+def max_partial_columns(rows: int, n_probe: int, max_tensor_size_per_row: int) -> int:
+    """The prepared partial search's static column capacity: a probed cluster of ``len`` docs
+    starting ``off < 64`` into a 64-doc column spans ``ceil((len + off) / 64) ≤ len // 64 + 2``
+    columns, and a row's clusters hold ≤ ``max_tensor_size_per_row`` docs."""
+    return rows * (max_tensor_size_per_row // 64 + 2 * n_probe)
 
 
 # --- masks ------------------------------------------------------------------------------
@@ -188,12 +276,13 @@ def fused_scores(
     divisor: int = -1,
     filtering_bit_mask: Tensor | None = None,
     partial: tuple[Tensor, Tensor, Tensor] | None = None,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor]:
     """Raw call into the official scorer: ``(scores, indices)`` as the op returns them —
     int32 or fp16 ``[B, padded_rows]``, int32 sorted-table positions with ``-1`` pads and
     filtered-out slots. ``partial`` selects ``fused_kmean_ann_with_partial_masks``;
     otherwise ``fused_kmean_ann`` with an optional full-``N`` ``filtering_bit_mask``."""
-    st = ensure_loaded()
+    st = ensure_loaded(backend)
     if q_codes.dtype != torch.int8 or item_codes_sorted.dtype != torch.int8:
         raise TypeError("official scorer takes int8 queries and int8 embeddings")
     cluster_ids = probe_ids.to(torch.int64).contiguous()
@@ -269,6 +358,7 @@ def official_scores_full(
     divisor: int | None = None,
     filtering_bit_mask: Tensor | None = None,
     partial: tuple[Tensor, Tensor, Tensor] | None = None,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Phases 2+3 on the official ops with our quantization and epilogue, **before** the
     top-k: ``(scores fp32 [B, M], ids int64 [B, M], valid bool [B, M])`` with ``M =
@@ -290,6 +380,7 @@ def official_scores_full(
         divisor=div,
         filtering_bit_mask=filtering_bit_mask,
         partial=partial,
+        backend=backend,
     )
     return dequantize_scores(raw, idx, q_scales, global_scale, sort_perm, div)
 
@@ -309,6 +400,7 @@ def official_probe_score(
     divisor: int | None = None,
     filtering_bit_mask: Tensor | None = None,
     partial: tuple[Tensor, Tensor, Tensor] | None = None,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor]:
     """The official scorer + our top-k epilogue → ``(ids int64 [B, k], scores fp32 [B, k])`` with
     ``-1`` / ``-inf`` pads, like every other backend. The top-k runs on the scorer's raw ``[B, M]``
@@ -332,6 +424,7 @@ def official_probe_score(
         divisor=div,
         filtering_bit_mask=filtering_bit_mask,
         partial=partial,
+        backend=backend,
     )
     valid = idx >= 0
     floor = torch.iinfo(raw.dtype).min if raw.dtype == torch.int32 else float("-inf")
@@ -352,18 +445,88 @@ def official_probe_score(
     return ids, scores
 
 
+class ForkBloom(NamedTuple):
+    """The fork's bloom filter for one forward: the official index, the prepared plans with their
+    row → plan index (``None``: a plan per row), the search ``k`` and the stored hashes."""
+
+    bloom_index: Tensor
+    bundle_b_offsets: Tensor
+    plans: DevicePlans
+    plan_index: Tensor | None
+    k: int
+    hash_k: int
+
+
+def fork_search(
+    query: Tensor,
+    probe_ids: Tensor,
+    cluster_offsets: Tensor,
+    cluster_sizes: Tensor,
+    item_codes_sorted: Tensor,
+    sort_perm: Tensor,
+    global_scale: Tensor,
+    k: int,
+    max_tensor_size_per_row: int,
+    *,
+    score_path: ScorePath = "int32",
+    divisor: int | None = None,
+    filtering_bit_mask: Tensor | None = None,
+    bloom: ForkBloom | None = None,
+    exact: tuple[Tensor, Tensor, Tensor] | None = None,
+) -> tuple[Tensor, Tensor]:
+    """Phases 2+3 on the fork in one call, ``torch.ops.stfork.search``: query int8, the probed
+    clusters, the filter (the bloom over prepared plans; ``exact`` = the cluster-sorted
+    ``(item_clause_attrs, clause_is_reverse, query_clause_attrs)``, tested over the probed docs
+    only, alone or as the bloom's recheck; or a full-``N`` ``filtering_bit_mask``), payloads +
+    scorer, top-k on the
+    raw scores and the ``[B, k]`` epilogue of :func:`official_probe_score` → ``(ids int64 [B, k],
+    scores fp32 [B, k])``, ``-1`` / ``-inf`` pads (kernels.md § official-fork)."""
+    st = ensure_loaded("official-fork")
+    div = (
+        -1
+        if score_path == "int32"
+        else (default_divisor(item_codes_sorted.shape[1]) if divisor is None else int(divisor))
+    )
+    b = bloom
+    return st.search(
+        query,
+        probe_ids,
+        cluster_offsets,
+        cluster_sizes,
+        item_codes_sorted,
+        sort_perm,
+        global_scale,
+        int(k),
+        int(max_tensor_size_per_row),
+        div,
+        filtering_bit_mask,
+        None if b is None else b.bloom_index,
+        None if b is None else b.bundle_b_offsets,
+        None if b is None else b.plans.blob,
+        0 if b is None else b.plans.slots,
+        0 if b is None else b.plans.max_stack_size,
+        None if b is None else b.plan_index,
+        0 if b is None else int(b.k),
+        0 if b is None else int(b.hash_k),
+        *(exact if exact is not None else (None, None, None)),
+    )
+
+
 # --- bloom search ---------------------------------------------------------------------
 
 
 def bloom_partial_masks(
     bloom_index: Tensor,
     bundle_b_offsets: Tensor,
-    plans: tuple[Tensor, Tensor],
+    plans: tuple[Tensor, Tensor] | DevicePlans,
     selected_cluster_offsets: Tensor,
     selected_cluster_lengths: Tensor,
     k: int,
     hash_k: int,
     query_plan_index: Tensor | None = None,
+    *,
+    max_columns: int | None = None,
+    backend: OfficialBackend = "official",
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Phase 2 of the paper's co-design: the official bloom evaluated **only over the
     probed clusters**, returned as the ``(column_counts_cumsum int32 [B·P],
@@ -372,11 +535,27 @@ def bloom_partial_masks(
     ``lengths`` are int64 ``[B, P]`` (``cluster_offsets[probe_ids]``,
     ``cluster_sizes[probe_ids]``). ``query_plan_index`` (int64 ``[B]`` on the device) maps each
     row to its plan, so ``plans`` may hold one plan per distinct expression
-    (``bloom_index_search_cuda.cu:1230``)."""
-    st = ensure_loaded()
+    (``bloom_index_search_cuda.cu:1230``). ``plans`` as :class:`DevicePlans` (the fork) runs the
+    prepared search, whose ``column_mask_response`` has the static length ``max_columns``
+    (:func:`max_partial_columns`) with a zero tail."""
+    st = ensure_loaded(backend)
     if not 0 < k <= MAX_SEARCH_K:
         raise ValueError(
             f"k must be in [1, {MAX_SEARCH_K}] (MAX_K_V2, unchecked upstream), got {k}"
+        )
+    if isinstance(plans, DevicePlans):
+        return st.bloom_index_search_batch_return_partial_response_prepared(
+            bloom_index,
+            bundle_b_offsets,
+            plans.blob,
+            plans.slots,
+            plans.max_stack_size,
+            selected_cluster_offsets.to(torch.int64).contiguous(),
+            selected_cluster_lengths.to(torch.int64).contiguous(),
+            int(k),
+            int(hash_k),
+            query_plan_index,
+            int(max_columns),
         )
     data, offsets = plans
     return st.bloom_index_search_batch_return_partial_response(
@@ -395,18 +574,31 @@ def bloom_partial_masks(
 def bloom_full_mask(
     bloom_index: Tensor,
     bundle_b_offsets: Tensor,
-    plans: tuple[Tensor, Tensor],
+    plans: tuple[Tensor, Tensor] | DevicePlans,
     k: int,
     hash_k: int,
     *,
     return_bool_mask: bool = False,
+    backend: OfficialBackend = "official",
 ) -> Tensor:
     """``bloom_index_search_batch`` over the whole index: bool ``[B, n_bundles·2048]`` or
-    the packed int64 ``[B, n_bundles·32]`` (high-first words)."""
-    st = ensure_loaded()
+    the packed int64 ``[B, n_bundles·32]`` (high-first words); over :class:`DevicePlans` (the
+    fork, one plan per row) the prepared search."""
+    st = ensure_loaded(backend)
     if not 0 < k <= MAX_SEARCH_K:
         raise ValueError(
             f"k must be in [1, {MAX_SEARCH_K}] (MAX_K_V2, unchecked upstream), got {k}"
+        )
+    if isinstance(plans, DevicePlans):
+        return st.bloom_index_search_batch_prepared(
+            bloom_index,
+            bundle_b_offsets,
+            plans.blob,
+            plans.slots,
+            plans.max_stack_size,
+            int(k),
+            int(hash_k),
+            bool(return_bool_mask),
         )
     data, offsets = plans
     return st.bloom_index_search_batch(
@@ -417,15 +609,17 @@ def bloom_full_mask(
 def bloom_filtering_mask(
     bloom_index: Tensor,
     bundle_b_offsets: Tensor,
-    plans: tuple[Tensor, Tensor],
+    plans: tuple[Tensor, Tensor] | DevicePlans,
     k: int,
     hash_k: int,
+    *,
+    backend: OfficialBackend = "official",
 ) -> Tensor:
     """The full-``N`` official bloom mask in the scorer's ``filtering_bit_mask`` order —
     the packed search output, bit-reversed per word only if :data:`MASK_BIT_ORDER` ever
     differs from :data:`BLOOM_OUTPUT_BIT_ORDER` (both high-first at 21aa35e)."""
     packed = bloom_full_mask(
-        bloom_index, bundle_b_offsets, plans, k, hash_k, return_bool_mask=False
+        bloom_index, bundle_b_offsets, plans, k, hash_k, return_bool_mask=False, backend=backend
     )
     if MASK_BIT_ORDER != BLOOM_OUTPUT_BIT_ORDER:
         packed = reverse_bits64(packed)

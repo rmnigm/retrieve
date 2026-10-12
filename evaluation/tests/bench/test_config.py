@@ -237,7 +237,7 @@ def test_codesign_suite_carries_bloom_path_in_the_key():
 
 
 def test_bloom_path_off_the_official_bloom_path_is_a_config_error():
-    with pytest.raises(ConfigError, match="bloom_path applies to silvertorch/bloom on official"):
+    with pytest.raises(ConfigError, match="bloom_path applies to silvertorch/bloom on the off"):
         load_matrix(MINI, SUITES, "bad_bloom_path")
 
 
@@ -699,7 +699,11 @@ def test_score_path_is_an_official_build_param():
         == "int32"
     )
     assert official_config("silvertorch", "bloom", "official", {}) is None
-    with pytest.raises(ValueError, match="score_path applies to silvertorch/official only"):
+    assert (
+        official_config("silvertorch", "none", "official-fork", {"score_path": "int32"}).score_path
+        == "int32"
+    )
+    with pytest.raises(ValueError, match="score_path applies to silvertorch on the official"):
         official_config("silvertorch", "bloom", "triton", {"score_path": "int32"})
 
 

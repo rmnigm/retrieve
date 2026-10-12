@@ -14,8 +14,10 @@ dependencies = [
 # Meta's official SilverTorch ops (torch.ops.st.*), the reference backend for
 # Algorithm 1 phases 2+3. Pinned to a git sha in the workspace root's
 # [tool.uv.sources]; not on PyPI. Building it needs nvcc + ninja + setuptools.
+# silvertorch-fork is our fork of it (torch.ops.stfork.*), the workspace member official-fork/.
 official = [
     "silvertorch",
+    "silvertorch-fork",
 ]
 
 [project.scripts]

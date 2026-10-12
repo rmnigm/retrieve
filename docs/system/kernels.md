@@ -1834,6 +1834,106 @@ scorer 10.9–17.8× ours on goodreads) was our former padded probe layout,
 and it closed with TF-9 / TF-1. The current kernel-only numbers, re-run on
 the b3 methodology, are in the same validation section.
 
+### `official-fork` — our fork of Meta's ops
+
+[`official-fork/`](../../official-fork/CHANGES.md) is a uv workspace member: Meta's
+`meta-recsys/silvertorch` vendored at `21aa35e`, synced to upstream `22c2007`, renamed so it
+loads beside the pinned upstream in one process (package `silvertorch_fork`, ops
+`torch.ops.stfork.*`, C++ namespace `st::ops` kept, extensions loaded `RTLD_LOCAL`), Apache-2.0
+with Meta's `LICENSE` and headers and one "Modified by the retrieve authors" line per changed
+file. `CHANGES.md` lists every change; each has its gate row in
+[validation](../../research/validation.md#meta-fork-backendofficial-fork-not-yet-validated).
+`SilverTorch(backend="official-fork")` selects it.
+
+**Forward: one op.** `SilverTorch(backend="official-fork")` runs phase 1 (ours) and then one
+`torch.ops.stfork.search` call (`adapter.fork_search`; `fork_search_cuda.cu`). In order:
+
+1. **Prep, one launch** (`probe_prep_kernel`; `stfork::probe_prep` exposes it): per query row the
+   int8 codes and scale exactly as eager torch computes our `quantize_int8` (the code quotient in
+   fp64 rounded to fp32; the scale `abs_max · fp32(1/127)`, as torch divides by a CPU scalar), and
+   one block for the probed clusters' ids, lengths and offsets, the warp sizes and the scorer's
+   three cumsums.
+2. **Filter, into the payloads.** Bloom (`bloom_path="partial"` only; `SilverTorch` raises on
+   `"full"` for this backend): the payload kernels evaluate the
+   prepared plan (one per distinct expression) on the ≤ 2 bloom columns a payload's docs span and
+   cut the same mask bits upstream's payload kernels cut from `column_mask_response`, so no column
+   search runs; the scorer reads no other bit of Meta's full-`N` mask, so the result is the one Meta's full
+   path returns, without its scan of all `N`. A `full` label would time the same code as
+   `partial`, so the S9 / C5 partial-vs-full ablation stays on `backend="official"`.
+   Each filter's full-warp and remainder payload kernels are one launch (the blocks split
+   between the two), so their latencies overlap at small batches. `exact`: the clauses are
+   tested over the probed docs only, one warp per 32-doc payload with `__brev(__ballot_sync(…))`
+   as its mask, an inactive clause a warp-uniform skip. A given full-`N` `filtering_bit_mask`
+   is read by the scorer as upstream's.
+3. **Scorer**: upstream's payload scorer (`process_cluster` / `_remaining`), except that for
+   D ≥ 128 full warps go to `process_cluster_coop` (fixed in `search`; no switch):
+   the warp reads its 32 consecutive rows linearly (≤ 256 bytes a row a chunk) into a padded
+   shared tile and each lane takes its row's `dp4a` dot from there; a payload with < 16 passing
+   docs keeps upstream's per-lane loads, and the int32 sum and `post_process` are upstream's, so
+   scores are equal. Filtered, a warp loads up to 32 consecutive payloads at once (as many as keep
+   ≥ 64 warps an SM) and walks them by shuffle, since most filtered payloads only write sentinels. On `search`'s path its `[B, width]` buffers are not pre-filled: lanes failing
+   the filter write the sentinels themselves and each row's written width (from the prep kernel)
+   bounds what the select reads. Payload kernels use a warp-parallel cluster search, or one warp
+   per cluster at wide probes (≥ 40 full warps a cluster and ≥ 8192 probed clusters).
+4. **Top-k on the raw scores, ours (k ≤ 1024)**: a radix select per row chunk of 8192 slots in a
+   512-thread CTA (keys that order like the scores, held in registers; four 8-bit warp-aggregated
+   histogram passes; keys equal to the k-th taken in index order, as `torch.topk` takes them, so
+   the result is deterministic and graph replays equal eager), repeated over the chunks' winners
+   until one CTA holds them, then the final select with a register bitonic sort and the `[B, k]`
+   epilogue (`official_probe_score`'s, its fp32 multiplies in its order) fused. Rows with ≥ 8
+   blocks of 256 slots per top-k slot are first cut to their k best blocks, whose maxima the
+   scorer folds as it writes. Above k 1024, `topk` (two-level from `B · width ≥ 2²³`) and a
+   one-kernel epilogue.
+
+It returns `(ids int64 [B, k], scores fp32 [B, k])` with `-1` / `-inf` pads.
+`official_probe_score` stays for `"official"`.
+
+**Bloom width (C12).** `OfficialConfig.bloom_width`: `"configured"` (the fork's default) builds the
+official bloom with `bloom_index_build_fixed`, every 2048-doc bundle `m_bits` bits per doc (the
+layer's `m_bits` is then required), so its index is `N · m_bits / 8` bytes like Triton's;
+`"upstream"` keeps Meta's `max terms · k · b_multiplier` per bundle (OF-10), the only width
+`"official"` has.
+
+**Exact recheck (C13).** `OfficialConfig.recheck` (the fork's default; `"official"` has none):
+`prepare_queries` also keeps the query attrs and the layer keeps the cluster-sorted exact attrs
+beside the bloom index, and `search` tests the bloom's survivors exactly (partial path: a warp takes up
+to 32 consecutive payloads, as many as keep ≥ 64 warps an SM, lane l evaluating payload l's bloom
+columns; the warp then walks its payloads, skipping those without bloom survivors, each lane
+testing one bloom-passing doc). Bloom ∧ exact is the exact
+filter, so the fork's bloom returns no false positive; the parity gate against Meta's bloom runs
+with `bloom_width="upstream", recheck=False`.
+
+**Upstream-shaped ops.** The fork still registers the same six ops as upstream, under `stfork::`
+with upstream's schema strings (the parity gates call them), and the adapter of the [`official`
+section](#official--metas-torchopsst-kernels-as-the-reference-backend) calls them unchanged:
+`ensure_loaded(backend)` / `is_available(backend)` are memoized per backend
+(`PACKAGES = {backend: (package, namespace)}`) and every op-calling adapter function takes
+`backend=`. So everything that section says (ops, scores, filter modes, bit order, eager only)
+holds for the fork until a change below replaces it. Builds: the fork's `setup.py` compiles host
+code at `-O3` (OF-11) and adds `is_topk` / `fresh_index_post_processing` to the sources;
+`env.official_fork_build` records its `.so`.
+
+| op (adapter caller) | fork state |
+|---|---|
+| `fused_kmean_ann` (`fused_scores`) | changed: no host sync (C3); its scorer, which `search` also runs, takes the prep kernel's hints (C6) and gains no pre-fill, block maxima, the cooperative scorer from D 128 and filtered payload batches (K fixes 3, 10, 12, 14, 16; `official-fork/CHANGES.md`) |
+| `fused_kmean_ann_with_partial_masks` (`fused_scores(partial=…)`) | changed: no host sync (C3) |
+| `bloom_index_build` (`build_bloom_index`) | upstream's (22c2007: CCCL 3 guards, old cub path on CUDA 12.8) |
+| `parse_expression_query_batch` (`parse_plans`) | upstream's |
+| `bloom_index_search_batch` (`bloom_full_mask`) | upstream's; the fork forward calls `bloom_index_search_batch_prepared` instead (C4) |
+| `bloom_index_search_batch_return_partial_response` (`bloom_partial_masks`) | upstream's; the fork forward calls `bloom_index_search_batch_return_partial_response_prepared` instead (C4) |
+
+**No host sync (C3, C4).** `fused_kmean_ann` and `_with_partial_masks` find each warp
+slot's probed cluster by a binary search over the device warp cumsum instead of a host
+`repeat_interleave`, size their payload buffers by static capacities (a row holds at most
+`max_tensor_size_per_row / 32` full warps and `min(31·P, max_tensor_size_per_row)` remainder docs) and
+read the totals on the device. Bloom plans are prepared once: `prepare_queries` runs Meta's parser and
+uploads its encoding (`adapter.prepare_plans`, `DevicePlans`: an int64 blob of 8 byte offsets per plan
+slot, then the data, padded to `slots · plan_capacity_bytes(C, n_stored_hashes)` so a batch shape has
+one blob shape); the `*_prepared` searches build each plan per thread from it. The partial search's
+`column_mask_response` has the static length `max_partial_columns(B, P, width) = B · (width / 64 + 2P)`
+with a zero tail. `official-fork/silvertorch_fork/ops/_fake.py` gives every `stfork` op's shape function (16,
+`opcheck` green), so the fork forward is `capturable` and compiles (`backend="official"` stays eager-only).
+
 ### Deleted backends
 
 A hand-written CUDA C++ SilverTorch backend and its one-to-one port into
