@@ -116,48 +116,72 @@ def assert_prefixes(content_dir: Path) -> None:
             raise RuntimeError(f"{problem} — re-encode")
 
 
+def assert_not_normalised(content_dir: Path) -> None:
+    """A ``normalize: false`` dataset must not read vectors an ETL already L2-normalised: that
+    would score cosine while the config says dot product, with no error."""
+    for name in ("text_emb", "query_emb"):
+        meta = json.loads((content_dir / f"{name}.meta.json").read_text())
+        if meta.get("normalization") != "none":
+            raise RuntimeError(
+                f"{content_dir / name}.meta.json: normalization {meta.get('normalization')!r}, "
+                "but the dataset sets normalize: false — rebuild the vectors un-normalised"
+            )
+
+
 def load_sharded(
-    shard_index: Path, device: torch.device, *, normalize: bool = False
+    shard_index: Path, device: torch.device, *, normalize: bool = False, float32: bool = False
 ) -> torch.Tensor:
     """``content/text_emb_shard_*.pt`` → one ``[N, D]`` tensor on device, in the shards' dtype,
-    or with ``normalize`` fp32 L2-normalised shard by shard — the peak is then the fp32 matrix
-    plus one shard, not the three whole-matrix copies of ``.float()`` + ``F.normalize``."""
+    or fp32 with ``float32`` (and L2-normalised with ``normalize``, which implies it), shard by
+    shard — the peak is then the fp32 matrix plus one shard, not the three whole-matrix copies
+    of ``.float()`` + ``F.normalize``."""
     with open(shard_index) as f:
         idx = json.load(f)
     n, d = int(idx["n_items"]), int(idx["dim"])
-    dtype = torch.float32 if normalize else getattr(torch, idx["dtype"])
+    dtype = torch.float32 if normalize or float32 else getattr(torch, idx["dtype"])
     out = torch.empty((n, d), dtype=dtype, device=device)
     for s in idx["shards"]:
         shard = torch.load(str(shard_index.parent / s["filename"]), map_location=device)
         start, rows = int(s["start_id"]), int(s["n_rows"])
         if shard.shape != (rows, d):
             raise RuntimeError(f"{s['filename']}: shape {tuple(shard.shape)} != ({rows}, {d})")
-        out[start : start + rows] = F.normalize(shard.float(), dim=-1) if normalize else shard
+        out[start : start + rows] = (
+            F.normalize(shard.float(), dim=-1) if normalize else shard.to(dtype)
+        )
         del shard
     return out
 
 
-def load_text_items(content_dir: Path, device: torch.device) -> torch.Tensor:
-    """``[N, D]`` fp32 L2-normalised item embeddings of a pre-encoded text layout (the pad row
-    of a legacy file dropped *before* normalisation); the prefix sidecars asserted first."""
+def load_text_items(
+    content_dir: Path, device: torch.device, *, normalize: bool = True
+) -> torch.Tensor:
+    """``[N, D]`` fp32 item embeddings of a pre-encoded text layout, L2-normalised unless the
+    dataset scores raw dot products (``normalize: false``, PubMed MedCPT); the pad row of a
+    legacy file is dropped *before* normalisation; the prefix sidecars asserted first."""
     assert_prefixes(content_dir)
+    if not normalize:
+        assert_not_normalised(content_dir)
     shard_index = content_dir / "shard_index.json"
     what = f"{content_dir.name}/text_emb"
     if shard_index.exists():
         # Row-wise, so normalising before the pad-row drop is the same; an all-zero row stays zero.
         return drop_legacy_padding_row(
-            load_sharded(shard_index, device, normalize=True), kind="emb", what=what
+            load_sharded(shard_index, device, normalize=normalize, float32=True),
+            kind="emb",
+            what=what,
         )
     item_embs = torch.load(str(content_dir / "text_emb.pt"), map_location=device)
     item_embs = drop_legacy_padding_row(item_embs, kind="emb", what=what)
-    return F.normalize(item_embs.float().contiguous(), dim=-1)
+    item_embs = item_embs.float().contiguous()
+    return F.normalize(item_embs, dim=-1) if normalize else item_embs
 
 
 def load_text_queries(
-    data_dir: Path, content_dir: Path, dim: int
+    data_dir: Path, content_dir: Path, dim: int, *, normalize: bool = True
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """``(queries [U, D] fp32 normalised, targets [U, 1] 0-indexed, n_targets [U])`` from
-    ``query_emb.pt`` + ``heldout.parquet`` (whose 1-indexed ``item_id`` is shifted ``-1``)."""
+    """``(queries [U, D] fp32, normalised as the items are, targets [U, 1] 0-indexed,
+    n_targets [U])`` from ``query_emb.pt`` + ``heldout.parquet`` (whose 1-indexed ``item_id``
+    is shifted ``-1``)."""
     heldout = pl.read_parquet(data_dir / "heldout.parquet")
     targets = torch.tensor(heldout["item_id"].to_list(), dtype=torch.long).unsqueeze(-1) - 1
     queries = torch.load(str(content_dir / "query_emb.pt"), map_location="cpu")
@@ -165,7 +189,9 @@ def load_text_queries(
         raise RuntimeError(f"query_emb rows={queries.shape[0]} != heldout rows={heldout.height}")
     if queries.shape[1] != dim:
         raise RuntimeError(f"query dim={queries.shape[1]} != item dim={dim}")
-    queries = F.normalize(queries.float(), dim=-1)
+    queries = queries.float()
+    if normalize:
+        queries = F.normalize(queries, dim=-1)
     return queries, targets, torch.ones(heldout.height, dtype=torch.long)
 
 

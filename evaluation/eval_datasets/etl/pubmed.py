@@ -675,11 +675,10 @@ def _parse_shard_content(content_path: Path, pmids: np.ndarray) -> pl.DataFrame:
 
 def _fold_shard_embeddings(npy: Path, positions: np.ndarray, out: Path, batch_rows: int) -> None:
     """Rows ``positions`` of the shard's ``(N_i, 768)`` fp32 matrix, in that order →
-    L2-normalised fp16 ``[len(positions), 768]`` saved at ``out``. The source is mmapped
-    and gathered in ascending-position batches, so a 3 GB shard costs one pass and
-    ``batch_rows × 768 × 4`` bytes of RAM, not the shard."""
+    fp16 ``[len(positions), 768]`` saved at ``out``, not normalised (MedCPT scores by dot
+    product). The source is mmapped and gathered in ascending-position batches, so a 3 GB
+    shard costs one pass and ``batch_rows × 768 × 4`` bytes of RAM, not the shard."""
     import torch
-    import torch.nn.functional as F
 
     from eval_datasets.layout import atomic_write
 
@@ -695,7 +694,7 @@ def _fold_shard_embeddings(npy: Path, positions: np.ndarray, out: Path, batch_ro
     for s in range(0, src_sorted.shape[0], batch_rows):
         e = min(s + batch_rows, src_sorted.shape[0])
         block = torch.from_numpy(np.array(arr[src_sorted[s:e]], dtype=np.float32))
-        dest[torch.from_numpy(order[s:e])] = F.normalize(block, dim=-1).to(torch.float16)
+        dest[torch.from_numpy(order[s:e])] = block.to(torch.float16)
     del arr
     atomic_write(out, lambda fh: torch.save(dest, fh))
 
@@ -707,18 +706,19 @@ def _write_shard_index(content_dir: Path, n_items: int, entries: list[dict]) -> 
         "dtype": "float16",
         "n_shards": len(entries),
         "shards": entries,
-        "source": f"{MEDCPT_BASE} (embeds_chunk_*.npy, fp32 → L2-normalised fp16)",
+        "source": f"{MEDCPT_BASE} (embeds_chunk_*.npy, fp32 → fp16, not normalised)",
         "order": "shard order, ascending PMID within a shard (= item_id order)",
     }
     (content_dir / "shard_index.json").write_text(json.dumps(payload, indent=2))
 
 
 def _submit_fetches(
-    fetcher: ThreadPoolExecutor, i: int, *, skip_embeds: bool, log_path: Path
+    fetcher: ThreadPoolExecutor, i: int, *, skip_embeds: bool, have_parquet: bool, log_path: Path
 ) -> list[Future]:
-    """Queue the missing raw files of shard ``i``; the futures resolve to ``_fetch_one``'s bool."""
+    """Queue the missing raw files of shard ``i``; the futures resolve to ``_fetch_one``'s bool.
+    The content JSON only feeds the article parquet, so it is not fetched once that exists."""
     paths = _shard_paths(i)
-    need = ["content"] + ([] if skip_embeds else ["embeds"])
+    need = ([] if have_parquet else ["content"]) + ([] if skip_embeds else ["embeds"])
     return [
         fetcher.submit(_fetch_one, *paths[k], log=log_path)
         for k in need
@@ -826,7 +826,11 @@ def cmd_convert(args: argparse.Namespace) -> int:
         for ahead in order[j : j + 1 + args.prefetch]:
             if fetcher is not None and ahead not in pending:
                 pending[ahead] = _submit_fetches(
-                    fetcher, ahead, skip_embeds=args.skip_embeds, log_path=log_path
+                    fetcher,
+                    ahead,
+                    skip_embeds=args.skip_embeds,
+                    have_parquet=(staging / f"articles_chunk_{ahead}.parquet").exists(),
+                    log_path=log_path,
                 )
         if i in pending and not all(fut.result() for fut in pending.pop(i)):
             print(f"ERROR shard {i}: download failed", flush=True)
@@ -878,7 +882,7 @@ def cmd_convert(args: argparse.Namespace) -> int:
                     "encoder": "ncbi/MedCPT-Article-Encoder (precomputed, NCBI FTP)",
                     "dim": EMB_DIM_NATIVE,
                     "reduction": "none",
-                    "normalization": "l2",
+                    "normalization": "none",
                     "n_rows": n_items,
                     "shape": [n_items, EMB_DIM_NATIVE],
                     "dtype": "float16",
@@ -1237,7 +1241,6 @@ def _titles_for_pmids(output: Path, want: set[int]) -> dict[int, str]:
 
 def cmd_encode_queries(args: argparse.Namespace) -> int:
     import torch
-    import torch.nn.functional as F
     from transformers import AutoModel, AutoTokenizer
 
     output = Path(args.output_dir).expanduser()
@@ -1271,10 +1274,8 @@ def cmd_encode_queries(args: argparse.Namespace) -> int:
             out = model(**enc).last_hidden_state[:, 0, :]
         embs[s : s + len(batch)] = out.float().cpu()
 
-    # Native dim, no reduction. L2-normalised so the harness's inner-product
-    # top-k is cosine on both sides (the item matrix is normalised the same way
-    # in `convert`).
-    q16 = F.normalize(embs, dim=-1).to(torch.float16)
+    # Native dim, not normalised: MedCPT is trained for dot-product scoring.
+    q16 = embs.to(torch.float16)
     sub = output / f"content_d{EMB_DIM_NATIVE}"
     sub.mkdir(parents=True, exist_ok=True)
     torch.save(q16, sub / "query_emb.pt")
@@ -1286,7 +1287,7 @@ def cmd_encode_queries(args: argparse.Namespace) -> int:
                 "pooling": "cls",
                 "dim": EMB_DIM_NATIVE,
                 "reduction": "none",
-                "normalization": "l2",
+                "normalization": "none",
                 "max_seq_length": args.max_seq_length,
                 "n_rows": int(q16.shape[0]),
                 "shape": list(q16.shape),

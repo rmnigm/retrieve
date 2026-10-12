@@ -500,6 +500,7 @@ dims: [64, 128, 256]
 encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}       # SASRec datasets only
 users_limit: 10000                                                    # or null
 # exact_gate: 0.9716                                                  # optional: the exact-algo floor at k_max < 1000
+# normalize: false                                                   # content_dir only: score raw dot products (pubmed)
 filters:                                                              # optional
   attrs: item_attrs_narrow.pt                                         # relative to data_dir
   reverse: clause_is_reverse_narrow.pt                                # optional
@@ -509,7 +510,12 @@ filters:                                                              # optional
 ```
 
 `gt_dir` is derived (`<data_dir>/gt_d{dim}`). Unknown keys
-raise `ConfigError` naming the file.
+raise `ConfigError` naming the file. `normalize` (default `true`) decides whether a
+`content_dir` dataset's items and queries are L2-normalised at load, so that the oracle and
+every algo score cosine; `false` keeps the stored vectors and every arm and the oracle score
+the raw dot product (PubMed: MedCPT is trained for it; user, 2026-10-13). It is refused on a
+`checkpoint` dataset, and with `false` the loader refuses vectors whose sidecars do not say
+`normalization: "none"` ([datasets](datasets.md#the-layout-contract-layoutpy)).
 
 ```yaml
 # config/suites.yaml — a suite = cells run on every listed dataset × the dims both list

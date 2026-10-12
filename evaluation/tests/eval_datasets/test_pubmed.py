@@ -284,12 +284,10 @@ def test_convert_writes_a_normalised_native_768_style_matrix(raw_root, tmp_path)
 
     assert emb.shape == (3, 8)
     assert emb.dtype == torch.float16
-    # rows are L2-normalised (the harness scores by inner product)
-    assert torch.allclose(emb.float().norm(dim=-1), torch.ones(3), atol=2e-3)
-    # row i holds item_id i+1, i.e. the i-th PMID in ascending order. Shard row 1
+    # rows are MedCPT as shipped, not normalised (MedCPT scores by dot product).
+    # Row i holds item_id i+1, i.e. the i-th PMID in ascending order. Shard row 1
     # is PMID 1000000 == item_id 1 == output row 0.
-    want = torch.nn.functional.normalize(torch.from_numpy(src[1]), dim=-1).half()
-    assert torch.allclose(emb[0].float(), want.float(), atol=2e-3)
+    assert torch.equal(emb[0], torch.from_numpy(src[1]).half())
 
     # the sharded layout the harness reads (layout.load_sharded): one output shard per
     # input shard, contiguous [start_id, start_id + n_rows)
@@ -301,7 +299,7 @@ def test_convert_writes_a_normalised_native_768_style_matrix(raw_root, tmp_path)
     whole = layout.load_sharded(content / "shard_index.json", torch.device("cpu"))
     assert torch.equal(whole, emb)
     meta = json.loads((content / "text_emb.meta.json").read_text())
-    assert meta["reduction"] == "none" and meta["normalization"] == "l2"
+    assert meta["reduction"] == "none" and meta["normalization"] == "none"
     assert "prefix" in meta and meta["prefix"] is None  # the declared no-prefix encoder
     assert not (content / "text_emb.pt").exists()  # no monolithic copy, ever
 
@@ -579,8 +577,7 @@ def test_streaming_convert_two_shards_delete_raw_resume_and_layout(raw_root, tmp
         assert id_map == {"1000000": 1, "1000001": 2, "1000002": 3, "2000000": 4, "2000001": 5}
         whole = layout.load_sharded(content / "shard_index.json", torch.device("cpu"))
         assert whole.shape == (5, 8)
-        want = torch.nn.functional.normalize(torch.from_numpy(src1[1]), dim=-1).half()
-        assert torch.allclose(whole[3].float(), want.float(), atol=2e-3)  # 2000000 = row 3
+        assert torch.equal(whole[3], torch.from_numpy(src1[1]).half())  # 2000000 = row 3
         # a rerun with the raw gone is a pure resume: nothing re-fetched, nothing rewritten
         mtime = (content / "text_emb_shard_01.pt").stat().st_mtime_ns
         assert pubmed.cmd_convert(args) == 0

@@ -786,6 +786,20 @@ def test_exact_gate_is_yfcc_synths_below_k_1000():
     assert run.exact_gate(load_dataset(CFG / "yfcc10m.yaml", 192), 100) == run.EXACT_MIN_RECALL
 
 
+def test_normalize_is_off_for_pubmed_only(tmp_path):
+    """MedCPT scores by dot product (user 2026-10-13); every other dataset is L2-normalised."""
+    off = {f.stem for f in sorted(CFG.glob("*.yaml"))
+           if f.stem != "suites" and not load_dataset(f, _ds_dim(f)).normalize}  # fmt: skip
+    assert off == {"pubmed"}
+    bad = tmp_path / "x.yaml"
+    bad.write_text("data_dir: d\ncheckpoint: c.pt\ndims: [8]\nnormalize: false\n")
+    with pytest.raises(ConfigError, match="content_dir dataset only"):
+        load_dataset(bad, 8)
+    bad.write_text("data_dir: d\ncontent_dir: c\ndims: [8]\nnormalize: 0\n")
+    with pytest.raises(ConfigError, match="true or false"):
+        load_dataset(bad, 8)
+
+
 def _ds_dim(f: Path) -> int:
     return yaml.safe_load(f.read_text())["dims"][0]
 
