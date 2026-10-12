@@ -578,6 +578,72 @@ def _failed(job: Job, params: dict, env: dict, stage: str, exc: BaseException, t
     }
 
 
+def _record_failures(
+    path: Path,
+    cells: Sequence[tuple[Job, dict]],
+    env: dict,
+    stage: str,
+    exc: BaseException,
+    t0: float,
+    counts: Counter,
+    msg: str,
+) -> bool:
+    """Log ``exc`` and append one ``failed`` record per ``(job, params)`` cell. Returns whether
+    it is sticky: the caller re-raises then, from its own ``except`` block."""
+    _log_failure(msg, exc)
+    for job, params in cells:
+        records.append_record(path, _failed(job, params, env, stage, exc, t0))
+        counts["failed"] += 1
+    if is_sticky(exc):
+        logger.error("sticky CUDA error: the context is dead, ending this process")
+        return True
+    return False
+
+
+def _new_record(
+    job: Job,
+    params: dict,
+    resolved: dict,
+    built: dict[str, Any],
+    assets: dict,
+    inp: dict,
+    interleave: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """A cell's record before quality and perf: its key block, inputs, sweep assets and build."""
+    return {
+        "schema_version": records.SCHEMA_VERSION,
+        "status": "partial" if built["reasons"] else "ok",
+        "partial_reasons": built["reasons"] or None,
+        **job.key(params),
+        "path": job.path,
+        "n_items": inp["n_items"],
+        "n_queries": inp["n_queries"],
+        "n_kept": int(assets["keep"].sum()),
+        "n_queries_heldout": int(assets["heldout_rows"].sum()),
+        "n_targets_in_filter": assets["n_targets_in_filter"],
+        "n_queries_oracle": int(assets["oracle_rows"].sum())
+        if assets["oracle_rows"] is not None
+        else None,
+        "pass_rate": assets["pass_rate"],
+        "bloom_fp_rate": assets["bloom_fp_rate"],
+        "bloom": dict(job.bloom) if job.filter_kind == "bloom" else None,
+        "k_max": max(job.ks),
+        "ks": list(job.ks),
+        "batch_sizes": list(job.batch_sizes),
+        "build_s": built["build_s"],
+        "compile_s": built["compile_s"],
+        "candidate_pool": resolved.get("candidate_pool"),
+        "index_mib": built["index_mib"],
+        "filter_mib": built["filter_mib"],
+        "seed_scope": "pool" if job.algo in SEED_FREE_QUALITY else "pool+build",
+        "quality_source": None,
+        "per_query": None,
+        "interleave": interleave,
+        "quality": None,
+        "perf": None,
+    }
+
+
 def _akey(job: Job) -> tuple:
     """The step-3 asset key: what ``sweep_assets`` depends on."""
     return (
@@ -709,13 +775,10 @@ def run(
                 compile_s = (
                     compile_warmup(module, inp, assets, device) if "compile" in job.build else None
                 )
-            except Exception as exc:  # recorded, the loop continues (H §7)
-                _log_failure(f"build failed: {job.key(first)}", exc)
-                for p in todo[id(job)]:
-                    records.append_record(path, _failed(job, p, env0, "build", exc, t0))
-                    counts["failed"] += 1
-                if is_sticky(exc):
-                    logger.error("sticky CUDA error: the context is dead, ending this process")
+            except Exception as exc:  # recorded, the loop continues
+                cells = [(job, p) for p in todo[id(job)]]
+                msg = f"build failed: {job.key(first)}"
+                if _record_failures(path, cells, env0, "build", exc, t0, counts, msg):
                     raise
                 module = None
             if module is None:
@@ -759,38 +822,8 @@ def run(
                     qp = {k: v for k, v in resolved.items() if k in QUERY_PARAMS}
                     if qp:
                         module.set_query_params(**qp)
-                    rec: dict[str, Any] = {
-                        "schema_version": records.SCHEMA_VERSION,
-                        "status": "partial" if b["reasons"] else "ok",
-                        "partial_reasons": b["reasons"] or None,
-                        **job.key(params),
-                        "path": job.path,
-                        "n_items": inp["n_items"],
-                        "n_queries": inp["n_queries"],
-                        "n_kept": int(assets["keep"].sum()),
-                        "n_queries_heldout": int(assets["heldout_rows"].sum()),
-                        "n_targets_in_filter": assets["n_targets_in_filter"],
-                        "n_queries_oracle": int(assets["oracle_rows"].sum())
-                        if assets["oracle_rows"] is not None
-                        else None,
-                        "pass_rate": assets["pass_rate"],
-                        "bloom_fp_rate": assets["bloom_fp_rate"],
-                        "bloom": dict(job.bloom) if job.filter_kind == "bloom" else None,
-                        "k_max": k_max,
-                        "ks": list(job.ks),
-                        "batch_sizes": list(job.batch_sizes),
-                        "build_s": b["build_s"],
-                        "compile_s": b["compile_s"],
-                        "candidate_pool": resolved.get("candidate_pool"),
-                        "index_mib": b["index_mib"],
-                        "filter_mib": b["filter_mib"],
-                        "seed_scope": "pool" if job.algo in SEED_FREE_QUALITY else "pool+build",
-                        "quality_source": None,
-                        "per_query": None,
-                        "interleave": None if group is None else {**group, "position": pos},
-                        "quality": None,
-                        "perf": None,
-                    }
+                    member = None if group is None else {**group, "position": pos}
+                    rec = _new_record(job, params, resolved, b, assets, inp, member)
                     src = (
                         None
                         if skip_quality
@@ -829,12 +862,9 @@ def run(
                     records.append_record(path, _failed(job, params, env0, stage, exc, t0))
                     counts["failed"] += 1
                     raise
-                except Exception as exc:  # recorded, the loop continues (H §7)
-                    _log_failure(f"cell failed at {stage}: {job.key(params)}", exc)
-                    records.append_record(path, _failed(job, params, env0, stage, exc, t0))
-                    counts["failed"] += 1
-                    if is_sticky(exc):
-                        logger.error("sticky CUDA error: the context is dead, ending this process")
+                except Exception as exc:  # recorded, the loop continues
+                    msg = f"cell failed at {stage}: {job.key(params)}"
+                    if _record_failures(path, [(job, params)], env0, stage, exc, t0, counts, msg):
                         raise
                 if id(job) not in recs_by:
                     _release()
@@ -853,15 +883,12 @@ def run(
                         profile=profile,
                         latency_kw=latency_kw,
                     )
-                except Exception as exc:  # recorded, the loop continues (H §7)
-                    _log_failure(f"perf failed: {[j.key(j.build) for j in timed]}", exc)
+                except Exception as exc:  # recorded, the loop continues
                     for j in timed:
                         recs_by.pop(id(j))
-                        p = {**j.build, **q}
-                        records.append_record(path, _failed(j, p, env0, "perf", exc, t0))
-                        counts["failed"] += 1
-                    if is_sticky(exc):
-                        logger.error("sticky CUDA error: the context is dead, ending this process")
+                    cells = [(j, {**j.build, **q}) for j in timed]
+                    msg = f"perf failed: {[j.key(j.build) for j in timed]}"
+                    if _record_failures(path, cells, env0, "perf", exc, t0, counts, msg):
                         raise
                     results = None
                 if results is None:
