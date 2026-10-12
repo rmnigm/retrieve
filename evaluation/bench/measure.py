@@ -74,7 +74,7 @@ def warm_gpu_once() -> None:
     torch.cuda.synchronize()
 
 
-def git(*args: str, cwd: Path = ROOT) -> str | None:
+def _git(*args: str, cwd: Path = ROOT) -> str | None:
     try:
         return subprocess.check_output(
             ["git", *args], cwd=cwd, stderr=subprocess.DEVNULL, text=True
@@ -86,7 +86,7 @@ def git(*args: str, cwd: Path = ROOT) -> str | None:
 def subtree_dirty() -> bool | None:
     """Uncommitted changes (untracked files included) under ``LIB``, in the checkout that holds
     it — the code the harness measures. ``None`` when ``LIB`` is not in a git checkout."""
-    out = git("status", "--porcelain", "--", ".", cwd=LIB)
+    out = _git("status", "--porcelain", "--", ".", cwd=LIB)
     return None if out is None else bool(out)
 
 
@@ -94,7 +94,7 @@ def repo_dirty() -> bool | None:
     """Uncommitted changes to *tracked* files anywhere; informational (docs, plans, harness
     code). ``None`` outside a git checkout. ``evaluation/results/`` is gitignored, so a
     campaign appending to its records never flips it."""
-    out = git("status", "--porcelain", "--untracked-files=no")
+    out = _git("status", "--porcelain", "--untracked-files=no")
     return None if out is None else bool(out)
 
 
@@ -106,7 +106,7 @@ def code_version() -> str:
     install pointing at another tree is stamped as what it runs. The two namespaces are
     disjoint, and a dirty subtree never reuses a cell measured at the committed tree."""
     if subtree_dirty() is False:
-        tree = git("rev-parse", "HEAD:./", cwd=LIB)
+        tree = _git("rev-parse", "HEAD:./", cwd=LIB)
         if tree:
             return tree
     return files_hash()
@@ -211,10 +211,10 @@ def provenance() -> dict[str, Any]:
         "official_commit": official_commit(),
         "official_build": official_build(),
         "official_fork_build": official_build("silvertorch_fork"),
-        "commit": git("rev-parse", "--short", "HEAD"),
+        "commit": _git("rev-parse", "--short", "HEAD"),
         "dirty": subtree_dirty(),
         "repo_dirty": repo_dirty(),
-        "git_branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
         "code_version": code_version(),
         "lib_dir": str(LIB),
         "host": socket.gethostname(),

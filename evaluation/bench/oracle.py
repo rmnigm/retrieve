@@ -16,7 +16,7 @@ import torch
 from loguru import logger
 from tqdm import tqdm
 
-from bench.measure import code_version, git
+from bench.measure import _git, code_version
 from eval_datasets.layout import atomic_write
 from retrieve.interfaces import FilterModule
 
@@ -268,7 +268,7 @@ def load_or_build(
         "clauses": None if clauses is None else [int(c) for c in clauses],
         "fingerprint": fp,
         "code_version": code_version(),
-        "harness_commit": git("rev-parse", "--short", "HEAD") or "unknown",
+        "harness_commit": _git("rev-parse", "--short", "HEAD") or "unknown",
         "torch": str(torch.__version__),
         "created": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     }
