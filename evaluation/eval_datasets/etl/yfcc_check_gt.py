@@ -17,7 +17,7 @@ What "exact filtered oracle" means here, precisely:
   uncapped ``item_tags_csr.pt`` by default (``--tags full``), which is the
   true predicate; ``--tags narrow`` instead evaluates the capped
   ``item_attrs_narrow.pt`` that the harness's clause sweeps use, to measure
-  what §3.4 gotcha (a)'s cap costs.
+  what that cap costs.
 * **Metric** — squared L2 over the raw uint8 vectors (``--metric l2``, the
   default and the only one the shipped GT is defined under). Every distance
   is an integer ≤ 192·255² = 12,484,800 < 2²⁴, and the fp16 embeddings hold

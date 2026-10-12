@@ -1,4 +1,4 @@
-"""``bench`` — the harness console script (H §3.4): ``run`` (one process), ``campaign`` (one
+"""``bench`` — the harness console script: ``run`` (one process), ``campaign`` (one
 child per group), ``oracle`` (prebuild the exact-oracle blobs), ``check`` (the on-disk
 layout), ``upload`` / ``fetch`` (results ↔ the HF Hub), ``report`` (tables and figures from
 the records; roadmap D4), ``env`` (the provenance and clock block as JSON, for a validation
@@ -8,7 +8,7 @@ record).
 below ``--suite`` is a narrow; ``--k`` / ``--bs`` / ``--mode`` replace the suite's lists and
 make the records ``partial``) and runs the cells in *this* process via ``run.run``. Zero
 cells — a ``--sweep`` typo, say — is an error (exit 1), never an empty success.
-``bench campaign`` is the loop of H §3.4 / §8.2 K: one child process per ``(dataset, dim,
+``bench campaign`` runs one child process per ``(dataset, dim,
 algo, backend)`` group, sequential, ``stdout+stderr`` to ``<out>/_logs/<group>.log``, a
 one-line summary per child in ``<out>/_logs/campaign.log``, non-zero rc recorded and the
 loop continues; ``--resume`` fills gaps; the records are aggregated into
@@ -221,8 +221,8 @@ def campaign(
     with open(log_dir / "campaign.log", "a") as summary:
         say = partial(_say, summary)
         say(f"=== campaign {suite} started {dt.datetime.now(dt.timezone.utc):%Y-%m-%dT%H:%M:%SZ}")
+        _, suites_yaml = _paths(config_dir, "_")
         for s in SUITES if suite == "all" else (suite,):
-            _, suites_yaml = _paths(config_dir, "_")
             with open(suites_yaml) as f:
                 listed = yaml.safe_load(f)[s]["datasets"]
             for ds in listed:
@@ -339,5 +339,3 @@ def env() -> None:
 
 if __name__ == "__main__":
     main()
-
-__all__ = ["main"]

@@ -171,6 +171,7 @@ def cmd_download(args) -> int:
     overall_t0 = time.monotonic()
 
     manifest_lines: list[str] = []
+    failed_downloads = 0
     for i, name in enumerate(files, 1):
         url = f"{BASE_URL}/{name}"
         dest = RAW_DIR / name
@@ -188,6 +189,7 @@ def cmd_download(args) -> int:
             size = download_one(url, dest)
         except Exception as e:
             print(f"ERROR [{i}/{len(files)}] {name}: {e}", flush=True)
+            failed_downloads += 1
             continue
         sha = file_hexdigest(dest, "sha256")
         manifest_lines.append(f"{name}  {size}  {sha}")
@@ -208,10 +210,11 @@ def cmd_download(args) -> int:
             print(f"ERROR gzip {f.name}: {e}", flush=True)
             fail += 1
     print(
-        f"ALL DONE download in {time.monotonic() - overall_t0:.0f}s, gzip failures={fail}",
+        f"ALL DONE download in {time.monotonic() - overall_t0:.0f}s, "
+        f"download failures={failed_downloads}, gzip failures={fail}",
         flush=True,
     )
-    return 0 if fail == 0 else 1
+    return 0 if fail == 0 and failed_downloads == 0 else 1
 
 
 # ----- convert ---------------------------------------------------------------
@@ -1327,6 +1330,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-__all__ = ["main"]

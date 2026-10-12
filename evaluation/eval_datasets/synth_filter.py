@@ -166,15 +166,3 @@ def synth_filter(
     click.echo(json.dumps({k: v for k, v in meta.items() if k != "per_rate"}))
     for r in meta["per_rate"]:
         click.echo(json.dumps({k: v for k, v in r.items() if k != "centroids"}))
-
-
-__all__ = [
-    "CORR_RATES",
-    "RATES",
-    "SEED",
-    "build",
-    "build_correlated",
-    "synth_filter",
-    "synth_flags",
-    "synth_u",
-]

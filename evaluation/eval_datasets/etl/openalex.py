@@ -1071,6 +1071,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-__all__ = ["abstract_text", "earlier_era_slots", "era_of", "main", "stage_table", "works_files"]

@@ -1477,7 +1477,8 @@ benchmark harness, which pins it off for measurement determinism.
 
 `samples_per_sec` counts training sequences over the training part of the
 epochs (eval excluded); `sm_mhz` is one SM clock sample per epoch taken
-mid-epoch under load (clocks cannot be locked on this box).
+mid-epoch under load (clocks cannot be locked on this box), from the
+training GPU: the first `CUDA_VISIBLE_DEVICES` entry, `0` when unset.
 
 `config.json` is what makes a checkpoint self-describing at eval time.
 A checkpoint without it falls back to

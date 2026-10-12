@@ -1,52 +1,8 @@
-"""The cell loop (H §2, §3.1 ``run.py``, §8.2 A/B/D/K).
-
-``run(jobs, out_dir=...)`` executes ``Job``s in this process, in order, and appends one JSONL
-record per cell to ``<out_dir>/<suite>/<dataset>-d<dim>.jsonl`` the moment the cell finishes
-(``records.append_record``: one ``write`` + ``fsync`` per line, so a crash loses at most the
-cell in flight). Per ``(dataset, dim)``: inputs once. Per ``(filter_kind, sweep, filter backend,
-k_max, bloom)``: the sweep attrs, skip mask, standalone filter, exact oracle (blob v4) and,
-on bloom cells, the bloom pass counts. Per job: one build (timed, ``index_bytes``). Per cell
-(query combo, applied with ``set_query_params``): quality at ``k_max`` → parity spill →
-perf per ``(bs, k, mode)`` → record.
-
-Resume (§8.2 B): a cell is skipped when its ``records.resume_key`` — the key block plus the
-library tree hash — is already in the file with ``status: ok``; failed and partial records
-are re-run, and ``report.py`` reads the last record per key. A record is ``partial`` when
-it does not carry everything the suite asked for: ``--skip-quality`` / ``--skip-perf``, a
-``--mode`` subset that drops a mode the module can run (not ``graph`` on an uncapturable
-one), or ``--k`` / ``--bs`` replacing the suite's lists (``Job.narrowed``);
-``partial_reasons`` names which. Failures (§8.2 D, §7): any
-exception inside a cell is written as ``status: failed`` with the traceback and the loop
-continues — an OOM on the torch path is a finding, not noise. Three things stop the
-process: ``KeyboardInterrupt``, the exact-algo recall gate of §2.4 (``QualityGateError``,
-recorded first) and a *sticky* CUDA error (``STICKY_CUDA``: an illegal memory access or a
-device-side assert kills the context, so every later cell would fail in seconds with the
-same traceback and ``--resume`` would re-run them all) — recorded, then re-raised so the
-campaign moves to the next group.
-
-Quality cache (docs/system/evaluation.md § Quality cache): a ``SEED_FREE_QUALITY`` cell copies
-the quality of another seed's record of the same file, key minus ``seed``, ``code_version`` and
-``ks`` (``quality_source``) instead of recomputing it; perf still runs. No parity spill then.
-
-Crash safety: the oracle blob, encode cache and parity file are written through
-``layout.atomic_write`` (tmp + ``os.replace``); the JSONL lines are one ``write`` + ``fsync``
-each, samples *before* the record so a crash between the two cannot leave a resumable
-record without its vector; ``records.read_keys`` tolerates (and logs) one torn trailing line.
-
-Clocks (H §7's unlocked-clock fallback, C4 finding L4-c): ``env.sm_mhz_idle`` is the
-process-start sample and is provenance only; every perf entry's ``sm_mhz`` is sampled under
-load right after its last window, ``env.sm_mhz_load`` is the median of those, and
-``clocks_drift`` fires when any of them differs by more than ``CLOCK_DRIFT`` from the first
-under-load sample of the process — load against load, never against idle.
-
-Cross-backend parity (§2.4, amended by §8.2 K): the first backend to run a cell writes its
-top-``k_max`` ids and scores to ``<out_dir>/_parity/<group>/<hash>.npz`` (``parity_group``;
-hash over the key minus ``backend``); later backends record ``jaccard_vs_first@k`` and
-``score_max_abs_diff`` against it, and the same backend's own spill (a kill between spill and
-record) is rewritten. ``bench campaign`` drops every other group's spill before each child.
-There is no "no reference" state: whichever backend runs a cell first *writes* the
-reference (``parity: "reference"``), so after ``--resume`` skips the triton cells, ``torch``
-becomes the reference and ``official`` is compared against torch (``parity: "vs_torch"``).
+"""The cell loop (docs/system/evaluation.md § The cell loop): ``run(jobs, out_dir=...)``
+executes ``Job``s in this process, in order, and appends one JSONL record per cell to
+``<out_dir>/<suite>/<dataset>-d<dim>.jsonl`` the moment the cell finishes. Resume, failures,
+crash safety, clocks, the quality cache and the cross-backend parity spill are specified on
+that page (§ Resume, § Quality cache, § Arm release).
 """
 
 from __future__ import annotations
@@ -75,8 +31,8 @@ from bench.metrics import accumulate, accumulator, finalize, jaccard_at_k
 from eval_datasets.layout import atomic_write
 
 MODES = ("eager", "graph")
-QUALITY_CPU_THREADS = 1  # H-QLOOP: the loop's host work is [chunk]-row masks; more threads spin
-QUALITY_CHUNK = 16  # the OOM bound of the old passes.py (H §2.4): [B, P, D] on loose filters
+QUALITY_CPU_THREADS = 1  # the loop's host work is [chunk]-row masks; more threads spin
+QUALITY_CHUNK = 16  # the OOM bound: [B, P, D] on loose filters
 EXACT_ALGOS = ("linr_v1_filter_mask", "linr_v2")  # §2.4: recall_oracle@k_max >= 0.99 or die
 EXACT_MIN_RECALL = 0.99
 # Arms whose quality cannot depend on the seed (it only moves their perf pool): the quality
@@ -87,9 +43,9 @@ SEED_FREE_QUALITY = ("linr_v1_filter_mask", "linr_v2", "postfilter")
 PER_K_QUALITY = ("postfilter",)
 ARM_FREE_SLACK_MIB = 256
 CLOCK_DRIFT = 0.05  # §2.1: an under-load sample > 5 % off the process's first one
-POOL_MIN = 2000  # the floor of a resolved candidate_pool_frac (the re-plan's "minimum 2k")
+POOL_MIN = 2000  # the floor of a resolved candidate_pool_frac
 # An exception whose message carries one of these has killed the CUDA context: recorded, then
-# re-raised so the child exits and ``bench campaign`` moves on (review §2.9).
+# re-raised so the child exits and ``bench campaign`` moves on.
 STICKY_CUDA = ("CUDA error", "illegal memory access", "device-side assert")
 MiB = measure.MiB
 # The stat keys of a perf entry; a variant that cannot run records them as null + ``reason``.
@@ -102,12 +58,12 @@ IDS_PROBE_BATCHES = 8  # the pool batches ``ids_sha256`` hashes, outside the tim
 
 
 class QualityGateError(RuntimeError):
-    """An exact algo scored below ``EXACT_MIN_RECALL`` against the oracle (H §2.4)."""
+    """An exact algo scored below ``EXACT_MIN_RECALL`` against the oracle (§2.4)."""
 
 
 def exact_gate(ds: Dataset, k_max: int) -> float:
     """§2.4's floor: ``EXACT_MIN_RECALL``, or the dataset's ``exact_gate`` below k 1000 (YFCC's
-    fp16-storage allowance at k 100, user 2026-10-10; @1000 stays 0.99)."""
+    fp16-storage allowance at k 100; @1000 stays 0.99)."""
     return ds.exact_gate if ds.exact_gate is not None and k_max < 1000 else EXACT_MIN_RECALL
 
 
@@ -124,7 +80,7 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
     """Sweep attrs + skip mask, the standalone filter for this cell's filter backend, the
     exact oracle blob (filter cells), bloom pass counts (bloom cells) and the row masks the
     quality pass scores: ``keep`` (not skip-masked), ``oracle_rows`` (kept and ≥ 1
-    survivor — the old harness's zero-target skip), ``heldout_rows`` (kept, ≥ 1 target and,
+    survivor), ``heldout_rows`` (kept, ≥ 1 target and,
     on filter cells, ``target_in_filter``), and ``n_targets_in_filter`` — the held-out
     targets those rows score (on filter cells only the ones the exact mask admits)."""
     fk, n = job.filter_kind, inp["n_queries"]
@@ -137,7 +93,7 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
     bloom_fp = None
     oracle_rows = None
     if fk != "none":
-        blob = sweep_oracle(job, inp, k_max, device, filters, warn_missing=True)
+        blob = sweep_oracle(job, inp, k_max, device, filters, qa_s, skip, warn_missing=True)
         heldout &= blob["target_in_filter"]
         oracle_rows = keep & (blob["topk"][:, 0] != -1)
         if fk == "bloom":
@@ -160,11 +116,19 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
 
 
 def sweep_oracle(
-    job: Job, inp: dict, k_max: int, device: torch.device, filters: dict, *, warn_missing: bool
+    job: Job,
+    inp: dict,
+    k_max: int,
+    device: torch.device,
+    filters: dict,
+    qa_s: torch.Tensor | None,
+    skip: torch.Tensor | None,
+    *,
+    warn_missing: bool,
 ) -> dict[str, Any]:
     """The blob v4 of a filter job's sweep at ``k_max`` (``oracle.load_or_build``) under the
-    exact mask (``inputs.exact_filter`` over the cell's standalone ``filters``)."""
-    qa_s, skip = inputs.sweep_qa(inp["qa"], job.clauses)
+    exact mask (``inputs.exact_filter`` over the cell's standalone ``filters``); ``qa_s, skip``
+    are the sweep's ``inputs.sweep_qa``."""
     return oracle.load_or_build(
         job.data.gt_dir,
         job.sweep,
@@ -188,20 +152,17 @@ def prebuild_oracles(jobs: Sequence[Job], device: torch.device | None = None) ->
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     measure.setup(0)
     counts: Counter = Counter()
-    need = {
-        (j.dataset, j.dim, j.filter_kind, j.sweep, max(j.ks)): j
-        for j in jobs
-        if j.filter_kind != "none"
-    }
-    by_inputs: dict[tuple, list[Job]] = {}
-    for (ds, dim, *_), j in need.items():
-        by_inputs.setdefault((ds, dim), []).append(j)
+    by_inputs: dict[tuple, dict[tuple, Job]] = {}
+    for j in jobs:
+        if j.filter_kind != "none":
+            by_inputs.setdefault((j.dataset, j.dim), {})[j.filter_kind, j.sweep, max(j.ks)] = j
     for group in by_inputs.values():
-        inp = inputs.load_inputs(group[0].data, device, with_filters=True)
-        for j in group:
+        inp = inputs.load_inputs(next(iter(group.values())).data, device, with_filters=True)
+        for j in group.values():
             fk = "clause" if j.filter_kind == "clause" else "none"  # bloom builds its exact one
             filters = inputs.build_filters(fk, inp, [j.backend], bloom=j.bloom)
-            sweep_oracle(j, inp, max(j.ks), device, filters, warn_missing=False)
+            qa_s, skip = inputs.sweep_qa(inp["qa"], j.clauses)
+            sweep_oracle(j, inp, max(j.ks), device, filters, qa_s, skip, warn_missing=False)
             counts["sweeps"] += 1
         del inp
         _release()
@@ -281,8 +242,7 @@ def quality(
     per_q = {f"{name}@{k}": nan() for name in ("recall_oracle", "heldout_recall") for k in ks}
     ids_all: list[torch.Tensor] = []
     sc_all: list[torch.Tensor] = []
-    # H-QLOOP: the per-row tensors go to the device once; gathering them per chunk on the host and
-    # copying from pageable memory was ~80 % of the pass (evaluation.md § Quality pass)
+    # staged once: a per-chunk host gather and pageable copy dominated the pass
     rows_d = rows.to(device)
     queries = inp["queries"].to(device)
     qa_all = assets["qa_s"].to(device) if assets["qa_s"] is not None else None
@@ -372,7 +332,7 @@ def parity(
     scores: torch.Tensor,
     ks: Sequence[int],
 ) -> dict[str, Any]:
-    """The spill-file wiring check (§2.4 / §8.2 K): write the reference when absent, else
+    """The spill-file wiring check (§2.4): write the reference when absent, else
     compare against it."""
     key = {k: v for k, v in job.key(params).items() if k != "backend"}
     # score_path picks the official kernel's epilogue, a backend knob: its arms share a spill
@@ -520,7 +480,7 @@ def perf(
     interleave group, timed round-robin by ``measure.latency_group``): the fixed-seed pool of
     ``job`` rotated round-robin, ``module.k = k`` before each variant, ``graph`` via
     ``measure.graph_callable`` (one capture per shape, dynamo reset once before the variant's
-    captures) or a null entry with the ``reason`` (``official`` → ``not_capturable``, O D7).
+    captures) or a null entry with the ``reason`` (``official`` → ``not_capturable``).
     Each module's pool filters are prepared before timing (``prepare_pool``) and every entry
     records the cost as ``query_prep_ms`` (``None`` where there is no prepare step). Each
     measured entry gets
@@ -586,9 +546,6 @@ def _log_failure(msg: str, exc: BaseException) -> None:
     logger.error("{}\n{}", msg, "".join(traceback.format_exception(exc)))
 
 
-_FAILED = object()  # a build that raised: released once its traceback is gone
-
-
 def _release() -> None:
     gc.collect()
     torch._dynamo.reset()
@@ -618,6 +575,72 @@ def _failed(job: Job, params: dict, env: dict, stage: str, exc: BaseException, t
         "error": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
         "elapsed_s": time.perf_counter() - t0,
         "env": env,
+    }
+
+
+def _record_failures(
+    path: Path,
+    cells: Sequence[tuple[Job, dict]],
+    env: dict,
+    stage: str,
+    exc: BaseException,
+    t0: float,
+    counts: Counter,
+    msg: str,
+) -> bool:
+    """Log ``exc`` and append one ``failed`` record per ``(job, params)`` cell. Returns whether
+    it is sticky: the caller re-raises then, from its own ``except`` block."""
+    _log_failure(msg, exc)
+    for job, params in cells:
+        records.append_record(path, _failed(job, params, env, stage, exc, t0))
+        counts["failed"] += 1
+    if is_sticky(exc):
+        logger.error("sticky CUDA error: the context is dead, ending this process")
+        return True
+    return False
+
+
+def _new_record(
+    job: Job,
+    params: dict,
+    resolved: dict,
+    built: dict[str, Any],
+    assets: dict,
+    inp: dict,
+    interleave: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """A cell's record before quality and perf: its key block, inputs, sweep assets and build."""
+    return {
+        "schema_version": records.SCHEMA_VERSION,
+        "status": "partial" if built["reasons"] else "ok",
+        "partial_reasons": built["reasons"] or None,
+        **job.key(params),
+        "path": job.path,
+        "n_items": inp["n_items"],
+        "n_queries": inp["n_queries"],
+        "n_kept": int(assets["keep"].sum()),
+        "n_queries_heldout": int(assets["heldout_rows"].sum()),
+        "n_targets_in_filter": assets["n_targets_in_filter"],
+        "n_queries_oracle": int(assets["oracle_rows"].sum())
+        if assets["oracle_rows"] is not None
+        else None,
+        "pass_rate": assets["pass_rate"],
+        "bloom_fp_rate": assets["bloom_fp_rate"],
+        "bloom": dict(job.bloom) if job.filter_kind == "bloom" else None,
+        "k_max": max(job.ks),
+        "ks": list(job.ks),
+        "batch_sizes": list(job.batch_sizes),
+        "build_s": built["build_s"],
+        "compile_s": built["compile_s"],
+        "candidate_pool": resolved.get("candidate_pool"),
+        "index_mib": built["index_mib"],
+        "filter_mib": built["filter_mib"],
+        "seed_scope": "pool" if job.algo in SEED_FREE_QUALITY else "pool+build",
+        "quality_source": None,
+        "per_query": None,
+        "interleave": interleave,
+        "quality": None,
+        "perf": None,
     }
 
 
@@ -678,9 +701,7 @@ def run(
     latency_kw = dict(latency_kw or {})
     reasons0 = ["skip_quality"] if skip_quality else []
     skipped_modes = set(MODES) - set(modes)
-    with_filters = {(j.dataset, j.dim): False for j in jobs}
-    for j in jobs:
-        with_filters[j.dataset, j.dim] |= j.filter_kind != "none"
+    with_filters = {(j.dataset, j.dim) for j in jobs if j.filter_kind != "none"}
     units = interleave_units(jobs) if interleave else [(None, [j]) for j in jobs]
 
     existing: dict[Path, dict[str, str]] = {}
@@ -716,7 +737,7 @@ def run(
             assets_by = {}
             _release()
             inp = inputs.load_inputs(
-                unit[0].data, device, with_filters=with_filters[unit[0].dataset, unit[0].dim]
+                unit[0].data, device, with_filters=(unit[0].dataset, unit[0].dim) in with_filters
             )
             inputs_key = (unit[0].dataset, unit[0].dim)
         assert inp is not None
@@ -754,16 +775,13 @@ def run(
                 compile_s = (
                     compile_warmup(module, inp, assets, device) if "compile" in job.build else None
                 )
-            except Exception as exc:  # recorded, the loop continues (H §7)
-                _log_failure(f"build failed: {job.key(first)}", exc)
-                for p in todo[id(job)]:
-                    records.append_record(path, _failed(job, p, env0, "build", exc, t0))
-                    counts["failed"] += 1
-                if is_sticky(exc):
-                    logger.error("sticky CUDA error: the context is dead, ending this process")
+            except Exception as exc:  # recorded, the loop continues
+                cells = [(job, p) for p in todo[id(job)]]
+                msg = f"build failed: {job.key(first)}"
+                if _record_failures(path, cells, env0, "build", exc, t0, counts, msg):
                     raise
-                module = _FAILED
-            if module is _FAILED:
+                module = None
+            if module is None:
                 _release()  # after the except: its traceback holds the failed build's tensors
                 continue
             # A module that cannot capture loses nothing to a skipped graph mode; a quality-only
@@ -804,38 +822,8 @@ def run(
                     qp = {k: v for k, v in resolved.items() if k in QUERY_PARAMS}
                     if qp:
                         module.set_query_params(**qp)
-                    rec: dict[str, Any] = {
-                        "schema_version": records.SCHEMA_VERSION,
-                        "status": "partial" if b["reasons"] else "ok",
-                        "partial_reasons": b["reasons"] or None,
-                        **job.key(params),
-                        "path": job.path,
-                        "n_items": inp["n_items"],
-                        "n_queries": inp["n_queries"],
-                        "n_kept": int(assets["keep"].sum()),
-                        "n_queries_heldout": int(assets["heldout_rows"].sum()),
-                        "n_targets_in_filter": assets["n_targets_in_filter"],
-                        "n_queries_oracle": int(assets["oracle_rows"].sum())
-                        if assets["oracle_rows"] is not None
-                        else None,
-                        "pass_rate": assets["pass_rate"],
-                        "bloom_fp_rate": assets["bloom_fp_rate"],
-                        "bloom": dict(job.bloom) if job.filter_kind == "bloom" else None,
-                        "k_max": k_max,
-                        "ks": list(job.ks),
-                        "batch_sizes": list(job.batch_sizes),
-                        "build_s": b["build_s"],
-                        "compile_s": b["compile_s"],
-                        "candidate_pool": resolved.get("candidate_pool"),
-                        "index_mib": b["index_mib"],
-                        "filter_mib": b["filter_mib"],
-                        "seed_scope": "pool" if job.algo in SEED_FREE_QUALITY else "pool+build",
-                        "quality_source": None,
-                        "per_query": None,
-                        "interleave": None if group is None else {**group, "position": pos},
-                        "quality": None,
-                        "perf": None,
-                    }
+                    member = None if group is None else {**group, "position": pos}
+                    rec = _new_record(job, params, resolved, b, assets, inp, member)
                     src = (
                         None
                         if skip_quality
@@ -874,12 +862,9 @@ def run(
                     records.append_record(path, _failed(job, params, env0, stage, exc, t0))
                     counts["failed"] += 1
                     raise
-                except Exception as exc:  # recorded, the loop continues (H §7)
-                    _log_failure(f"cell failed at {stage}: {job.key(params)}", exc)
-                    records.append_record(path, _failed(job, params, env0, stage, exc, t0))
-                    counts["failed"] += 1
-                    if is_sticky(exc):
-                        logger.error("sticky CUDA error: the context is dead, ending this process")
+                except Exception as exc:  # recorded, the loop continues
+                    msg = f"cell failed at {stage}: {job.key(params)}"
+                    if _record_failures(path, [(job, params)], env0, stage, exc, t0, counts, msg):
                         raise
                 if id(job) not in recs_by:
                     _release()
@@ -898,15 +883,12 @@ def run(
                         profile=profile,
                         latency_kw=latency_kw,
                     )
-                except Exception as exc:  # recorded, the loop continues (H §7)
-                    _log_failure(f"perf failed: {[j.key(j.build) for j in timed]}", exc)
+                except Exception as exc:  # recorded, the loop continues
                     for j in timed:
                         recs_by.pop(id(j))
-                        p = {**j.build, **q}
-                        records.append_record(path, _failed(j, p, env0, "perf", exc, t0))
-                        counts["failed"] += 1
-                    if is_sticky(exc):
-                        logger.error("sticky CUDA error: the context is dead, ending this process")
+                    cells = [(j, {**j.build, **q}) for j in timed]
+                    msg = f"perf failed: {[j.key(j.build) for j in timed]}"
+                    if _record_failures(path, cells, env0, "perf", exc, t0, counts, msg):
                         raise
                     results = None
                 if results is None:
@@ -963,29 +945,3 @@ def run(
     logger.info(measure.clock_histogram(sm_windows))
     logger.info("done: {}", dict(counts))
     return counts
-
-
-__all__ = [
-    "ARM_FREE_SLACK_MIB",
-    "CLOCK_DRIFT",
-    "POOL_MIN",
-    "EXACT_ALGOS",
-    "IDS_PROBE_BATCHES",
-    "MODES",
-    "PERF_STAT_KEYS",
-    "PER_K_QUALITY",
-    "QUALITY_CHUNK",
-    "QUALITY_CPU_THREADS",
-    "SEED_FREE_QUALITY",
-    "STICKY_CUDA",
-    "QualityGateError",
-    "compile_warmup",
-    "group_label",
-    "ids_sha256",
-    "is_sticky",
-    "per_query_path",
-    "prebuild_oracles",
-    "resolve_pool",
-    "run",
-    "write_per_query",
-]

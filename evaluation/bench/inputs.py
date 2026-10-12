@@ -1,4 +1,4 @@
-"""Inputs of a ``(dataset, dim)`` process (H §2.2): item embeddings, queries, held-out targets,
+"""Inputs of a ``(dataset, dim)`` process (§2.2): item embeddings, queries, held-out targets,
 query attrs, item attrs — loaded once — plus the per-sweep query attrs, the standalone
 filter modules keyed by *filter* backend, the oracle's exact mask source and the fixed-seed
 perf pool.
@@ -139,7 +139,7 @@ def query_pool(
     n_pool: int = 4096,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
-    """The fixed-seed perf pool (H §2.5): ``[n_pool, bs, D]`` query batches drawn with
+    """The fixed-seed perf pool (§2.5): ``[n_pool, bs, D]`` query batches drawn with
     ``torch.Generator().manual_seed(seed)`` from the kept rows, plus the matching
     ``[n_pool, bs, C]`` attr batches on filter cells. Identical across backends and modes."""
     g = torch.Generator(device="cpu").manual_seed(seed)
@@ -158,6 +158,3 @@ def query_pool(
         else None
     )
     return pool, qa_pool
-
-
-__all__ = ["build_filters", "exact_filter", "load_inputs", "query_pool", "sweep_qa"]

@@ -1,5 +1,4 @@
-"""``bench upload`` / ``bench fetch`` — a results tree to and from a HuggingFace dataset repo
-(H §3.1, §8.2 G/I).
+"""``bench upload`` / ``bench fetch`` — a results tree to and from a HuggingFace dataset repo.
 
 The storage policy this implements is the "Results storage" section of
 ``docs/system/evaluation.md``: a results tree is local, gitignored working state while a
@@ -320,6 +319,3 @@ def fetch(repo_id, prefix, results) -> None:
             shutil.copyfile(local / f["path"], dst)
     click.echo(f"{man['n_files']} files, {man['n_records']} record(s) from {repo_id}/{prefix} "
                f"-> {results}; " + ("CITABLE" if man["citable"] else "NOT CITABLE"))  # fmt: skip
-
-
-__all__ = ["RESULTS_REPO", "fetch", "files", "manifest", "readme", "upload", "verify"]

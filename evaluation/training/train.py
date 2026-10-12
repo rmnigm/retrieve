@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -48,8 +49,10 @@ def _enable_tf32() -> None:
 
 
 def _sm_mhz() -> float:
+    # nvidia-smi ignores CUDA_VISIBLE_DEVICES: ask for the device this process trains on
+    device = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")[0].strip() or "0"
     out = subprocess.run(
-        ["nvidia-smi", "--query-gpu=clocks.sm", "--format=csv,noheader,nounits", "-i", "0"],
+        ["nvidia-smi", "--query-gpu=clocks.sm", "--format=csv,noheader,nounits", "-i", device],
         capture_output=True,
         text=True,
         check=True,
@@ -405,7 +408,3 @@ def run(config_path: str | None, resume: bool, overrides: tuple[str, ...]) -> No
     fields = dict(_parse_override(o) for o in overrides)
     config = TrainConfig.load(config_path, **fields) if config_path else TrainConfig(**fields)
     train(config, resume=resume)
-
-
-if __name__ == "__main__":
-    run()

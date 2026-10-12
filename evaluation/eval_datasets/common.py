@@ -92,9 +92,6 @@ def sample_rare_biased_wide(
         common_idx = int(rng.choice(len(bag), p=w_common))
         common_id = int(bag[common_idx])
         rest = np.array([i for i in range(len(bag)) if i != common_idx])
-        if len(rest) == 0:
-            n_drop_2 += 1
-            continue
         w_rare2 = 1.0 / np.sqrt(np.maximum(freq[rest], 1.0))
         w_rare2 = w_rare2 / w_rare2.sum()
         rare_id = int(bag[rest[int(rng.choice(len(rest), p=w_rare2))]])
@@ -157,14 +154,3 @@ def file_hexdigest(path: Path, algorithm: str) -> str:
         while chunk := f.read(1 << 24):
             h.update(chunk)
     return h.hexdigest()
-
-
-__all__ = [
-    "file_hexdigest",
-    "merge_prep_log",
-    "parse_ranges",
-    "pmid_hash",
-    "sample_rare_biased_wide",
-    "select_pmids",
-    "synthesize_qa_narrow",
-]

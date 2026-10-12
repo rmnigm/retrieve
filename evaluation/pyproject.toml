@@ -62,7 +62,7 @@ explicit-preview-rules = true
 # The ETL CLIs import torch / sentence-transformers / transformers (1.5-8 s) inside the
 # subcommand that needs them, so download, plan and --help run without paying for them.
 "eval_datasets/etl/*.py" = ["PLC0415"]
-# Its three broad excepts are claimed by the evaluation-cleanup backlog, not fixed here.
+# Per-file broad excepts (download, gzip check, convert) report the file and go on; the ETL is frozen.
 "eval_datasets/etl/goodreads.py" = ["BLE001"]
 
 [tool.ruff.lint.isort]

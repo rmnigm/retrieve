@@ -1,20 +1,20 @@
-"""Config matrix for harness v2 (H §3.3, amended by §8.2 A and J).
+"""Config matrix (docs/system/evaluation.md § Config).
 
 One YAML per dataset (``config/<dataset>.yaml``) plus one ``config/suites.yaml``;
 ``load_matrix`` expands ``(dataset, suite)`` into ``Job``s. A ``Job`` is one index *build*:
 ``(dataset, dim, filter_kind, sweep, algo, backend, build params, seed)`` carrying the query-param
-combos measured against that build (§8.2 A: the ``QUERY_PARAMS`` mutate via ``set_query_params``,
+combos measured against that build (the ``QUERY_PARAMS`` mutate via ``set_query_params``,
 they never rebuild), its ``ks`` / ``batch_sizes``, its bloom (the defaults or the arm's gridded
 widths) and the resolved ``Dataset`` (paths with ``{dim}`` substituted). A suite is a list of
 *arms*: one algo on its backends with optional filter kinds, sweeps, grids and per-dataset
-overrides (docs/system/evaluation.md § Config). One *cell* is ``(job, params)``
+overrides. One *cell* is ``(job, params)``
 with ``params = build | query combo``; ``Job.key(params)`` is the record's key block and the input
 to ``records.resume_key``.
 
 Backends that run the same code collapse to one job (``PATHS``: ``linr_v1`` on ``none``
 is cuBLAS whatever the flag says) and ``(algo, filter_kind, backend)`` triples
 ``PATHS`` marks ``None`` are skipped; both are logged once. Sweep entries accept the long
-form ``{clauses: [...], disabled: true}`` (§8.2 J). No anchors, no env interpolation, no
+form ``{clauses: [...], disabled: true}``. No anchors, no env interpolation, no
 schema library: unknown keys and malformed values raise ``ConfigError`` naming the file.
 """
 
@@ -30,13 +30,21 @@ from typing import Any
 import yaml
 from loguru import logger
 
-from bench.algos import ALGOS, BACKENDS, FILTER_KINDS, PATHS, is_valid_combo, official_config
+from bench.algos import (
+    ALGOS,
+    BACKENDS,
+    BLOOM_DEFAULTS,
+    FILTER_KINDS,
+    PATHS,
+    is_valid_combo,
+    official_config,
+)
 
 # set_query_params, no rebuild; candidate_pool_frac is resolved per sweep to candidate_pool (run.py)
 QUERY_PARAMS = frozenset({"n_probe", "candidate_pool", "candidate_pool_frac", "alpha"})
 BLOOM_PARAMS = frozenset({"m_bits", "k_hash"})  # gridded on silvertorch/bloom: the job's bloom
 COMPILE_MODES = ("max-autotune",)
-NONE_SWEEP = "full_scan"  # the one sweep of filter_kind ``none`` (the old harness's name)
+NONE_SWEEP = "full_scan"  # the one sweep of filter_kind ``none``
 _DATASET_KEYS = {"data_dir", "checkpoint", "content_dir", "dims", "encode", "users_limit"}
 _DATASET_KEYS |= {"filters", "exact_gate"}
 _FILTER_KEYS = {"attrs", "reverse", "query_attrs", "clause", "bloom"}
@@ -44,7 +52,6 @@ _SUITE_KEYS = {"datasets", "dims", "filter_kinds", "ks", "batch_sizes", "arms", 
 _SUITE_KEYS |= {"sweeps", "ks_by_sweep", "seeds_by_sweep", "perf", "interleave"}
 _ARM_KEYS = {"algo", "backends", "filter_kinds", "sweeps", "build", "query", "datasets"}
 _ENCODE = {"batch_size": 512, "num_workers": 8, "max_seq_length": 200}
-_BLOOM = {"m_bits": 1024, "k_hash": 5}
 
 
 class ConfigError(ValueError):
@@ -109,7 +116,7 @@ class Job:
         return [{**self.build, **q} for q in self.query]
 
     def key(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """The record's key block (H §3.2); ``params`` defaults to the build params."""
+        """The record's key block; ``params`` defaults to the build params."""
         return {
             "dataset": self.dataset,
             "dim": self.dim,
@@ -125,7 +132,7 @@ class Job:
 
     @property
     def group(self) -> tuple[str, int, str, str]:
-        """The campaign's process boundary (H §8.2 K)."""
+        """The campaign's process boundary."""
         return (self.dataset, self.dim, self.algo, self.backend)
 
 
@@ -170,7 +177,7 @@ def _template(where: str, v: Any, dim: int) -> Any:
 
 def _sweeps(where: str, kind: str, raw: Any) -> dict[str, tuple[int, ...]]:
     """``name: [clauses]`` or ``name: {clauses: [...], disabled: true}``; disabled entries
-    are dropped here, once, with a log line (§8.2 J)."""
+    are dropped here, once, with a log line."""
     out: dict[str, tuple[int, ...]] = {}
     for name, spec in (raw or {}).items():
         disabled = False
@@ -251,7 +258,7 @@ def _combos(where: str, spec: Any) -> list[dict[str, Any]]:
 
 
 def _params(where: str, build_spec: Any, query_spec: Any) -> tuple[list[dict], list[dict]]:
-    """An arm's ``build:`` / ``query:`` grids → (build combos, query combos) (§8.2 A)."""
+    """An arm's ``build:`` / ``query:`` grids → (build combos, query combos)."""
     build = _combos(f"{where}.build", build_spec)
     query = _combos(f"{where}.query", query_spec)
     bad_b = {k for c in build for k in c if k in QUERY_PARAMS}
@@ -411,7 +418,7 @@ def load_matrix(
     ``dim → algo → backend → arm → filter_kind → sweep → build → seed``. Each of a suite's
     ``arms`` names an algo and its backends, optionally the filter kinds, sweeps, ``build`` /
     ``query`` grids and the datasets it runs on, each with its own overrides
-    (docs/system/evaluation.md § Config). Keyword narrows are the CLI overrides (H §3.4): they
+    (docs/system/evaluation.md § Config). Keyword narrows are the CLI overrides: they
     filter the lists *before* the PATHS collapse, so ``backends=["torch"]`` on a ``none`` cell
     yields the cuBLAS job labelled ``torch``. ``ks`` / ``batch_sizes`` *replace* the suite's
     lists rather than select cells, so when they differ the jobs are ``narrowed`` and ``run``
@@ -431,7 +438,7 @@ def load_matrix(
     seed_list = s.get("seeds", [0])
     if not isinstance(seed_list, list) or not all(isinstance(x, int) and x >= 0 for x in seed_list):
         raise ConfigError(f"{where}: seeds must be a list of ints >= 0, got {seed_list!r}")
-    bloom = {**_BLOOM, **(suites.get("bloom") or {}), **(s.get("bloom") or {})}
+    bloom = {**BLOOM_DEFAULTS, **(suites.get("bloom") or {}), **(s.get("bloom") or {})}
     groups = _interleave(where, s.get("interleave"))
     timed = s.get("perf", True)
     if not isinstance(timed, bool):
@@ -560,18 +567,3 @@ def load_matrix(
 
 def _canon(params: dict[str, Any]) -> str:
     return json.dumps(params, sort_keys=True)
-
-
-__all__ = [
-    "BLOOM_PARAMS",
-    "COMPILE_MODES",
-    "NONE_SWEEP",
-    "QUERY_PARAMS",
-    "ConfigError",
-    "Dataset",
-    "Job",
-    "interleave_units",
-    "load_dataset",
-    "load_matrix",
-    "shared_key",
-]

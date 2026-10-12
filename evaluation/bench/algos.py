@@ -1,7 +1,6 @@
-"""The algorithm table (the retired library-harness-boundary plan; see
-docs/system/architecture.md for the current module map): harness name → library class, the
-filter kinds and backends, ``PATHS`` derived from ``retrieve.interfaces.DISPATCH``, and
-``build`` — the one factory the cell loop calls.
+"""The algorithm table (docs/system/evaluation.md § Algorithms and the `PATHS` table):
+harness name → library class, the filter kinds and backends, ``PATHS`` derived from
+``retrieve.interfaces.DISPATCH``, and ``build`` — the one factory the cell loop calls.
 
 ``PATHS[(algo, filter_kind, backend)]`` is the code path that actually runs, or ``None`` when there
 is no such cell: ``DISPATCH``'s label for the module's backend (``cublas`` where the flag is a
@@ -12,7 +11,7 @@ filter's backend on filter cells of the cuBLAS algos (``cublas+triton``: cuBLAS 
 ``postfilter`` is the harness's own baseline (``bench.postfilter``), not a library module:
 ``DISPATCH`` gains its row here, torch only, filter cells only. ``tests/bench/test_paths.py`` pins
 the derived table. The standalone filter modules of ``official`` / ``official-fork`` cells are
-Triton (O §6.2): ``filter_backend``.
+Triton: ``filter_backend``.
 """
 
 from __future__ import annotations
@@ -78,12 +77,12 @@ def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
 def official_config(
     algo: str, filter_kind: str, backend: str, params: dict[str, Any]
 ) -> OfficialConfig | None:
-    """The ``bloom_path`` (the S9 co-design ablation) and ``score_path`` (fp16 | int32, the
+    """The ``bloom_path`` and ``score_path`` (fp16 | int32, the
     H2H-final arms) build params as ``OfficialConfig`` on the two official backends; ``None``
     (the library default, ``partial`` / ``fp16``) when both keys are absent or the backend is
     triton. ``bloom_path`` means something on ``silvertorch / bloom`` on official, official-fork
     (``partial`` only; the layer refuses ``full``) and triton (there the layer's own
-    ``bloom_path``, C5-OURS), ``score_path`` on ``silvertorch``
+    ``bloom_path``), ``score_path`` on ``silvertorch``
     on the official backends; each raises anywhere else."""
     kw = {k: params[k] for k in ("bloom_path", "score_path") if k in params}
     if not kw:
@@ -179,7 +178,7 @@ def build(
         if algo == "linr_v3":
             p["seed"] = seed
         module = ALGOS[algo](k, filter=filter_mod, backend=backend, **p)
-        if k_bits is not None:  # LiNRV3 does not take k_bits: its stage 1 does (V-V3BITS)
+        if k_bits is not None:  # LiNRV3 does not take k_bits: its stage 1 does
             module.stage1 = OneBitKNN(k=module.stage1.k, seed=seed, backend=backend, k_bits=k_bits)
         module.register_index(item_embs)
     return module if compile_mode is None else compile_module(module, compile_mode)
@@ -194,22 +193,3 @@ def compile_module(module: nn.Module, mode: str) -> nn.Module:
     cls = type(module)  # SilverTorch's capturable is a read-only property: override per instance
     module.__class__ = type(cls.__name__, (cls,), {"capturable": False})
     return module
-
-
-__all__ = [
-    "ALGOS",
-    "BACKENDS",
-    "BLOOM_DEFAULTS",
-    "DISPATCH",
-    "FILTER_KINDS",
-    "FILTER_MODE",
-    "OFFICIAL_BACKENDS",
-    "PATHS",
-    "SILVERTORCH_DEFAULTS",
-    "build",
-    "build_filter",
-    "compile_module",
-    "filter_backend",
-    "is_valid_combo",
-    "official_config",
-]

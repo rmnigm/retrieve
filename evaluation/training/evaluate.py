@@ -3,7 +3,7 @@
 Plain torch path: scores the model's last-position query against the full item
 catalog, masks history (and padding), takes top-K, and computes
 NDCG/Recall/Coverage at the requested cutoffs. No ``retrieve`` layers, and its
-own recall / ndcg (plan V D5): a checkpoint's reported quality must not move
+own recall / ndcg: a checkpoint's reported quality must not move
 when the harness's metric code does. ``tests/training/test_encode.py`` pins the
 two to agree to 1e-9.
 """
@@ -151,12 +151,11 @@ def evaluate(
             topk_vals = sel.values
             topk_idx = cat_idx.gather(1, sel.indices)
 
-        topk = topk_idx
-        hits = hits_at(topk, targets)
+        hits = hits_at(topk_idx, targets)
         for k in ks:
             sums[f"ndcg@{k}"] += ndcg_at_k(hits, num_targets, k).double().sum()
             sums[f"recall@{k}"] += recall_at_k(hits, num_targets, k).double().sum()
-            coverage_seen[k].scatter_(0, topk[:, :k].reshape(-1), True)
+            coverage_seen[k].scatter_(0, topk_idx[:, :k].reshape(-1), True)
         n_rows += b
 
     out: dict[str, float] = {key: (v / max(n_rows, 1)).item() for key, v in sums.items()}

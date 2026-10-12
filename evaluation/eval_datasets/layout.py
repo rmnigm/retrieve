@@ -207,7 +207,7 @@ def load_item_attrs(
 
 def apply_users_limit(n: int | None, *tensors: torch.Tensor | None) -> tuple:
     """The one ``users_limit`` site: the first ``n`` rows of every query-side tensor (prefix,
-    not sample — H §2.2, §7). ``None`` entries pass through; a limit at or above the split is
+    not sample — §2.2). ``None`` entries pass through; a limit at or above the split is
     a no-op."""
     if n is None or not tensors or tensors[0] is None or n >= tensors[0].shape[0]:
         return tensors
@@ -280,21 +280,3 @@ def validate_layout(data_dir: Path, content_dir: Path | None = None) -> list[str
             if rows != n_queries:
                 problems.append(f"eval_split rows {rows} != queries {n_queries}")
     return problems
-
-
-__all__ = [
-    "EXPECTED_DOC_PREFIX",
-    "EXPECTED_QUERY_PREFIX",
-    "apply_users_limit",
-    "assert_prefixes",
-    "atomic_write",
-    "check_items_aligned",
-    "drop_legacy_padding_row",
-    "load_item_attrs",
-    "load_query_attrs",
-    "load_sharded",
-    "load_text_items",
-    "load_text_queries",
-    "prefix_problem",
-    "validate_layout",
-]

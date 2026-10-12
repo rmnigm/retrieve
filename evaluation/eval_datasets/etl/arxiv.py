@@ -343,7 +343,7 @@ def _encode_with_prefix(
     prefix: str,
     out_basename: str,
     item_ids: list[int],
-    n_rows_out: int,  # N_items + 1 for items, N_heldout for queries
+    n_rows_out: int,
     encoder: str,
     text_template: str,
     description_chars: int,
@@ -1064,6 +1064,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-__all__ = ["main"]

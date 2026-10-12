@@ -56,5 +56,3 @@ main.add_command(subset_cmd)
 
 if __name__ == "__main__":
     main()
-
-__all__ = ["main"]

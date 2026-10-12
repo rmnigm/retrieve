@@ -95,15 +95,3 @@ def at_recall(points: Sequence[tuple[float, float, str]], target: float) -> dict
         (p, q) for p, q in zip(pts, pts[1:], strict=False) if p[0] < target < q[0]
     )
     return {"latency": t0 + (t1 - t0) * (target - r0) / (r1 - r0), "bracket": (l0, l1)}
-
-
-__all__ = [
-    "B",
-    "SEED",
-    "at_recall",
-    "differs",
-    "mean_ci",
-    "median_ci",
-    "paired_ratio_ci",
-    "ratio_ci",
-]

@@ -44,13 +44,6 @@ RAW_REPOS: dict[str, tuple[str, str]] = {
     # source -> (repo_id, repo_type)
     "arxiv": ("open-index/open-arxiv", "dataset"),
     "yambda": ("yandex/yambda", "dataset"),
-    # yfcc10m is fetched over plain HTTPS from dl.fbaipublicfiles.com by
-    # `yfcc download`, not from the Hub — it is listed here only so that
-    # `raw_dir("yfcc10m")` has a documented home next to the others.
-    # openalex is streamed from the public snapshot bucket (s3://openalex,
-    # anonymous, CC0) by `openalex convert`, not from the Hub — listed here
-    # only so that `raw_dir("openalex")` has a documented home next to the
-    # others.
 }
 
 # What we *don't* want in the per-dataset eval repo. Excludes training inputs,
@@ -88,8 +81,7 @@ EPOCH_SNAPSHOT_PATTERN = "*-ep*.pt"
 
 # Always-skip files in checkpoint dirs (run output or resume-only state, not
 # the trained checkpoint itself). _resume.pt carries optimizer state and can
-# be tens of GB, larger than the checkpoint it resumes (found staging E4's
-# kuairand checkpoint, 2026-09-26); encoded_queries_v2.pt is training.encode's
+# be tens of GB, larger than the checkpoint it resumes; encoded_queries_v2.pt is training.encode's
 # cache, keyed on checkpoint mtime, not portable to a fresh copy.
 CKPT_ALWAYS_IGNORE: list[str] = [
     "evaluate.json",
@@ -122,6 +114,14 @@ def ckpt_dir(dataset: str, ckpt_id: str) -> Path:
 
 def raw_dir(source: str) -> Path:
     return data_root() / "_raw" / source
+
+
+def _require_raw(source: str) -> tuple[str, str]:
+    try:
+        return RAW_REPOS[source]
+    except KeyError as e:
+        avail = ", ".join(sorted(RAW_REPOS)) or "(none)"
+        raise ValueError(f"Unknown raw source {source!r}. Known: {avail}") from e
 
 
 def _require_dataset(dataset: str) -> str:
@@ -205,36 +205,24 @@ def download_raw(
     max_workers: int | None = None,
 ) -> Path:
     """Pull an upstream raw HF dataset into the unified `_raw/<source>/` dir."""
-    try:
-        repo_id, repo_type = RAW_REPOS[source]
-    except KeyError as e:
-        avail = ", ".join(sorted(RAW_REPOS)) or "(none)"
-        raise ValueError(f"Unknown raw source {source!r}. Known: {avail}") from e
-
+    repo_id, repo_type = _require_raw(source)
     local = raw_dir(source).resolve()
     local.mkdir(parents=True, exist_ok=True)
 
     logger.info("snapshot_download {} -> {} (allow={})", repo_id, local, allow_patterns)
-    kwargs: dict = {
-        "repo_id": repo_id,
-        "repo_type": repo_type,
-        "local_dir": str(local),
-        "allow_patterns": allow_patterns,
-    }
-    if max_workers is not None:
-        kwargs["max_workers"] = max_workers
-    snapshot_download(**kwargs)
+    snapshot_download(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        local_dir=str(local),
+        allow_patterns=allow_patterns,
+        **({} if max_workers is None else {"max_workers": max_workers}),
+    )
     return local
 
 
 def download_raw_file(source: str, filename: str) -> Path:
     """Pull a single file from an upstream raw HF dataset. Returns the local path."""
-    try:
-        repo_id, repo_type = RAW_REPOS[source]
-    except KeyError as e:
-        avail = ", ".join(sorted(RAW_REPOS)) or "(none)"
-        raise ValueError(f"Unknown raw source {source!r}. Known: {avail}") from e
-
+    repo_id, repo_type = _require_raw(source)
     local = raw_dir(source).resolve()
     local.mkdir(parents=True, exist_ok=True)
     return Path(
@@ -484,24 +472,3 @@ def publish_checkpoint(
         write_card=write_card,
         dry_run=dry_run,
     )
-
-
-__all__ = [
-    "EVAL_REPOS",
-    "RAW_REPOS",
-    "EVAL_IGNORE_PATTERNS",
-    "EPOCH_SNAPSHOT_PATTERN",
-    "data_root",
-    "eval_dir",
-    "ckpt_dir",
-    "raw_dir",
-    "download_eval_dataset",
-    "download_checkpoint",
-    "download_raw",
-    "download_raw_file",
-    "upload_eval_dataset",
-    "upload_checkpoint",
-    "fetch",
-    "publish",
-    "publish_checkpoint",
-]

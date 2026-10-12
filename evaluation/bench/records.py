@@ -1,18 +1,8 @@
-"""What a record *is*: the schema version, the key block, the resume key, the JSONL append
-with its ``fsync``, the samples sidecar, the tolerant ``read_keys`` and ``aggregate`` — one row
-per ``(record, perf entry)`` as ``results.parquet`` for ``report.py`` (H §3.2, §8.2 B/C/G).
-
-Schema 2 (C5): ``env.expected_sm_mhz`` and ``env.clocks_locked`` are gone (a box that cannot
-lock clocks cannot record whether they are locked), ``env.sm_mhz`` is ``env.sm_mhz_idle`` (the
-process-start sample) and ``env.sm_mhz_load`` is the median of the cell's under-load samples;
-``clocks_drift`` compares under-load samples with under-load samples only.
-
-Schema 3 (H2): the key block carries ``inputs``, the encoder / embedding identity
-(``config.Dataset.inputs``). A record written before it gets one from :func:`inputs_of`.
-
-Schema 4 (campaign v2): the body gains ``seed_scope``, ``quality_source``, ``per_query`` and
-``interleave``, perf entries ``ids_sha256`` (and ``rounds`` when interleaved), ``env``
-``frac_windows_below_max``. A schema-3 record reads them as null.
+"""What a record *is* (docs/system/evaluation.md § Output): the schema version, the key
+block, the resume key, the JSONL append with its ``fsync``, the samples sidecar,
+``read_records`` (one torn trailing line tolerated) and ``aggregate`` — one row per ``(record,
+perf entry)`` as ``results.parquet`` for ``report.py``. A record older than schema 3 has no
+``inputs``; :func:`inputs_of` supplies it.
 """
 
 from __future__ import annotations
@@ -53,9 +43,9 @@ _RECORD_COLUMNS = (
     "filter_mib", "unstable", "memory_reserved_mib", "elapsed_s",
     "schema_version", "stage", "error", "partial_reasons", "seed_scope", "per_query",
 )  # fmt: skip
-# results.parquet is shipped as a paper artifact (P §B.7), so it has to carry why a row is
-# incomplete, not only that it is: `stage`/`error` on a failure, `partial_reasons` on a
-# narrowed cell, `schema_version` because v1 and v2 records coexist in one file.
+# results.parquet is shipped as a paper artifact, so it has to carry why a row is incomplete,
+# not only that it is: `stage`/`error` on a failure, `partial_reasons` on a narrowed cell,
+# `schema_version` because records of several schemas can share one file.
 _ENV_COLUMNS = (
     "code_version", "commit", "dirty", "gpu", "sm_mhz_load", "clocks_drift", "git_branch",
     "frac_windows_below_max",
@@ -89,7 +79,7 @@ def key_block(rec: dict[str, Any]) -> dict[str, Any]:
 
 
 def resume_key(key: dict[str, Any], code_version: str) -> str:
-    """Canonical JSON of ``Job.key(params)`` plus the library's ``code_version`` (H §8.2 B):
+    """Canonical JSON of ``Job.key(params)`` plus the library's ``code_version``:
     a kernel change invalidates a cell instead of silently reusing it."""
     return json.dumps({**key, "code_version": code_version}, sort_keys=True, separators=(",", ":"))
 
@@ -210,22 +200,3 @@ def aggregate(results_dir: Path, out: Path | None = None) -> Path:
 
 def read_table(path: Path) -> list[dict[str, Any]]:
     return pq.read_table(path).to_pylist()
-
-
-__all__ = [
-    "KEY_FIELDS",
-    "SCHEMA_VERSION",
-    "aggregate",
-    "append_record",
-    "inputs_of",
-    "key_block",
-    "latest",
-    "read_keys",
-    "read_records",
-    "read_table",
-    "record_files",
-    "record_key",
-    "record_path",
-    "resume_key",
-    "samples_path",
-]
