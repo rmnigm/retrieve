@@ -55,7 +55,8 @@ and tags for both trees: [SCHEMA.md](SCHEMA.md). Structural changes:
   [abstract (submitted)](paper/abstract.md),
   [ECIR criteria](paper/ecir-criteria.md),
   [release and licenses](paper/release-and-licenses.md);
-  material: [data, intro, literature](paper/material/data-intro-literature.md)).
+  material: [data, intro, literature](paper/material/data-intro-literature.md),
+  [method](paper/material/method.md)).
 - [artifacts/](artifacts/): raw scripts behind measured numbers, one
   directory per plan; the raw outputs are on the Hub
   ([hub-index.md](artifacts/hub-index.md)).
