@@ -107,7 +107,8 @@ def test_one_update_matches_the_atomic_reduction():
     *atomic* side's float32 accumulation; the GEMM side is exact well past float32).
     """
     embs = make_index(200_000, 128)
-    assignments = torch.randint(0, 1024, (200_000,), device="cuda")
+    g = torch.Generator(device="cuda").manual_seed(0)
+    assignments = torch.randint(0, 1024, (200_000,), generator=g, device="cuda")
 
     new_sums, new_counts = KMeans._cluster_sums(embs, assignments, 1024, 1 << 14)
     old_sums, old_counts = _atomic_cluster_sums(embs, assignments, 1024)

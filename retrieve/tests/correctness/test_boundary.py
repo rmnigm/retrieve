@@ -22,7 +22,7 @@ from retrieve import (
     SilverTorchBuilder,
     modules as modules_pkg,
 )
-from retrieve.interfaces import DISPATCH
+from retrieve.interfaces import DISPATCH, OFFICIAL_BACKENDS
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs, require_official
 from tests.parity.conftest import assert_ids_equal_up_to_ties
 
@@ -155,14 +155,16 @@ def test_dispatch_names_every_class_and_backend():
     assert {cls.__name__ for cls in CLASSES} <= set(DISPATCH)
     for name, row in DISPATCH.items():
         assert isinstance(getattr(modules_pkg, name), type), name
-        assert list(row) == ["triton", "torch", "official"]
+        assert list(row) == ["triton", "torch", *OFFICIAL_BACKENDS]
         for backend in BACKENDS:
             assert row[backend] in ("triton", "torch", "cublas")
-    assert DISPATCH["SilverTorch"]["official"] == "official"
-    for cls in CLASSES[1:]:
-        assert DISPATCH[cls.__name__]["official"] is None
-        with pytest.raises(ValueError, match="unknown backend"):
-            cls(k=K, filter=ExactAttributeFilter(), backend="official")
+    assert OFFICIAL_BACKENDS == ("official", "official-fork")
+    for ob in OFFICIAL_BACKENDS:
+        assert DISPATCH["SilverTorch"][ob] == ob
+        for cls in CLASSES[1:]:
+            assert DISPATCH[cls.__name__][ob] is None
+            with pytest.raises(ValueError, match="unknown backend"):
+                cls(k=K, filter=ExactAttributeFilter(), backend=ob)
 
 
 class TestQueryParams:

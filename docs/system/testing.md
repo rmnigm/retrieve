@@ -690,9 +690,10 @@ each of `SilverTorch` (`filter_mode="exact"`), `LiNRV1`–`LiNRV3` (with an
 - `capturable` is defined on the class (a `bool` or a property), never
   stamped on the instance; `True` on both backends, `False` on
   `SilverTorch(backend="official")` (gated by `require_official`).
-- `DISPATCH` names every algo-level class × the three backends, every key
-  is a `retrieve.modules` class, `None` cells raise `ValueError("unknown
-  backend")` at construction.
+- `DISPATCH` names every algo-level class × the four backends (`triton`,
+  `torch`, then `OFFICIAL_BACKENDS`: `official`, `official-fork`), every key
+  is a `retrieve.modules` class, only `SilverTorch` has an official path, and
+  every `None` cell raises `ValueError("unknown backend")` at construction.
 - `set_query_params`: `SilverTorch(n_probe=…)` re-runs the two
   `register_index` validations (`<= n_lists`, probe pool `>= k`);
   `LiNRV3(candidate_pool=…)` re-validates against `N`.

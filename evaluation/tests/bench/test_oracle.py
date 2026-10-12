@@ -238,6 +238,24 @@ def test_fingerprint_covers_the_item_side_of_the_predicate(tmp_path):
     assert d != oracle.attrs_digest(ATTRS, None) != oracle.attrs_digest(None, None)
 
 
+def test_fingerprint_samples_the_last_row_past_2_24_rows():
+    """At N = 2^24 + 4 the float32 ``linspace`` rounds ``N - 1`` up to ``N`` (the 30 M laion
+    tables): the fingerprint still runs and its row sample still ends on the last row."""
+    n = 2**24 + 4
+    assert torch.linspace(0, n - 1, steps=oracle._FP_SAMPLE_ROWS)[-1].long() == n
+    items = torch.zeros(n, 1, dtype=torch.float16)
+    queries = torch.zeros(2, 1)
+
+    def fp(t):
+        return oracle.fingerprint(t, queries, None, None, None, 10, attrs_digest="a")
+
+    first = fp(items)
+    items[-1] = 1.0
+    assert fp(items) != first
+    items[-1], items[-2] = 0.0, 1.0  # between the last two samples
+    assert fp(items) == first
+
+
 def test_corrupt_file_at_the_v4_path_is_rebuilt(tmp_path):
     """A crash mid-save used to leave an unreadable file that ``torch.load`` raised on at
     every later run; now the save is atomic and an unreadable file is rebuilt."""

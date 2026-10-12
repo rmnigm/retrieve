@@ -127,6 +127,22 @@ def test_manifest_checksums_match_the_listed_files(tree):
         assert f["sha256"] == upload.sha256(p) and f["bytes"] == p.stat().st_size
 
 
+def test_n_records_counts_only_the_suite_form(tree, tmp_path):
+    """Records count only as ``<suite>/<dataset>-d<dim>.jsonl`` under ``--results``: the same
+    file uploaded from the suite directory, or a JSON-only tree (the ceiling legs), carries every
+    file but ``n_records`` 0, which is how a leg's upload check catches the wrong form."""
+    suite = tree / "filter"
+    listing = upload.files(suite)
+    assert [p.name for p in listing] == ["goodreads-d128.jsonl", "goodreads-d128.samples.jsonl"]
+    man = upload.manifest(suite, listing, "c4", None)
+    assert man["n_records"] == 0 and man["n_files"] == 2
+    ceiling = tmp_path / "ceiling"
+    (ceiling / "laion30m").mkdir(parents=True)
+    (ceiling / "laion30m" / "ceiling.json").write_text("{}")
+    man = upload.manifest(ceiling, upload.files(ceiling), "c6", None)
+    assert man["n_records"] == 0 and man["n_files"] == 1
+
+
 def test_manifest_is_not_citable_without_a_gate(tree):
     man = upload.manifest(tree, upload.files(tree), "c4", None)
     assert man["citable"] is False
