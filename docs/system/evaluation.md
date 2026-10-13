@@ -79,9 +79,8 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    device, one sync at the end. The exact algos (`EXACT_ALGOS`:
    `linr_v1_filter_mask`, `linr_v2`) must
    reach `recall_oracle@k_max ≥ 0.99` (fp16 tolerance), or the dataset's
-   `exact_gate` when `k_max` < 1000 (`run.exact_gate`; only `yfcc10m-synth`,
-   0.9716, a dataset out of the study: its fp16 item storage costs
-   0.013-0.026 at k 100, an fp32 table gives 1.0); a failure is
+   `exact_gate` when `k_max` < 1000 (`run.exact_gate`; no config sets one since YFCC
+   left the study); a failure is
    recorded as `failed` and then raises `QualityGateError`, which ends the
    run. Cross-backend correctness belongs to the library's parity suite
    ([testing](testing.md)); the harness keeps only a *wiring* check, the
@@ -383,21 +382,20 @@ each chunk the same way.
 
 ## Config: one YAML per dataset + `suites.yaml`
 
-Twelve files under [`evaluation/config/`](../../evaluation/config/):
+The files under [`evaluation/config/`](../../evaluation/config/):
 [`goodreads.yaml`](../../evaluation/config/goodreads.yaml),
 [`arxiv.yaml`](../../evaluation/config/arxiv.yaml),
 [`yambda-500m.yaml`](../../evaluation/config/yambda-500m.yaml),
 [`yambda-5b.yaml`](../../evaluation/config/yambda-5b.yaml),
-[`yfcc10m.yaml`](../../evaluation/config/yfcc10m.yaml),
 [`pubmed.yaml`](../../evaluation/config/pubmed.yaml) and
 [`openalex.yaml`](../../evaluation/config/openalex.yaml) and
 [`kuairand.yaml`](../../evaluation/config/kuairand.yaml), the
 synthetic-selectivity siblings `goodreads-synth.yaml`, `arxiv-synth.yaml`,
-`pubmed-synth.yaml` (the dot-product build), `yfcc10m-synth.yaml` and `laion{1,3,10,30}m-synth.yaml` plus arXiv's
+`pubmed-synth.yaml` (the dot-product build) and `laion{1,3,10,30}m-synth.yaml` plus arXiv's
 cluster-correlated `arxiv-corr-synth.yaml`, and each one's second and third draw `<name>-synth-s1.yaml` /
 `-s2.yaml` ([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv and
 pubmed in the `filter` suite, pubmed at 768; yambda-500m is unfiltered and
-read by the A5-yambda suite in `research/artifacts/yambda/` and FULL-RERUN's `fr-yambda`; yfcc10m, yfcc10m-synth, openalex,
+read by the A5-yambda suite in `research/artifacts/yambda/` and FULL-RERUN's `fr-yambda`; openalex,
 yambda-5b and kuairand are out of the study and in no suite), and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
 10000` and the goodreads/arXiv sweeps, ks and batch sizes match the
@@ -450,7 +448,7 @@ so the old records still read. There is no unfiltered `quality` suite ([decision
 
 No suite runs SilverTorch's `triton` / `torch` backends, LiNR (or the postfilter) on a bloom filter, or YFCC: they are out
 of the study ([decisions](../../research/decisions.md#goal-and-scheduling)). The adapted SilverTorch (`official-fork`)
-runs from the NUMBERS suites ([`research/artifacts/numbers/`](../../research/artifacts/numbers/README.md)).
+runs from the FULL-RERUN suites ([`research/artifacts/full-rerun/`](../../research/artifacts/full-rerun/README.md)).
 
 ### IVF tuning
 
@@ -764,7 +762,7 @@ On arXiv and PubMed (and arxiv-synth, arxiv-corr-synth, pubmed-synth and their d
 catalogue item's own text and its single held-out target is that item, which stays in the index
 ([datasets](datasets.md#arxiv)), so the exact oracle's top-1 is the query itself and so is every
 method's when it finds it. Those dataset files set `self_match: true` (`Dataset.self_match`,
-default false; LAION, YFCC and OpenAlex queries are never in the catalogue, Goodreads' are user
+default false; LAION and OpenAlex queries are never in the catalogue, Goodreads' are user
 histories). On such a dataset every **filter** cell is self-excluded (`Job.self_excluded`; a
 `none` cell's oracle keeps the own item and its key is unchanged):
 
@@ -1504,7 +1502,7 @@ trailing-whitespace hooks (the last two never on `articles/`, `research/artifact
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../../research/artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
 | `eval_datasets/test_layout.py` | the legacy pad-row rule, `apply_users_limit`, `validate_layout` clean on both layouts and flagging a short `eval_split`, a missing or swapped prefix sidecar, misaligned attrs |
 | `eval_datasets/test_synth_filter.py` | G-synth: achieved pass rate within 1 % of target wherever `N·p ≥ 10^4` (N = 2 M), pass sets nested, same seed byte-identical, `query_attrs_synth` all ones at the full-split row count, the real attrs' bytes and `attrs_digest` untouched (modern and legacy layouts), the CLI resolving `data_dir` from the dataset YAML. G-corr (`--correlated`, on 10 tight blobs): items and queries both at their nearest centroid (brute force), the sidecar's mean pass rate equal to the attrs' and within 50 % of p (a random-init local optimum), over 80 % of a query's 10 nearest items passing, the real and uniform files untouched, rebuilds byte-identical, the CLI picking `content_dir` at `--dim` and refusing a dataset without one |
-| `eval_datasets/test_yfcc.py`, `test_pubmed.py`, `test_kuairand.py`, `test_openalex.py` | the four ETL loaders on synthetic fixtures |
+| `eval_datasets/test_pubmed.py`, `test_kuairand.py`, `test_openalex.py` | the three ETL loaders on synthetic fixtures |
 | `training/test_encode.py` | `training.evaluate`'s recall / ndcg equal `bench.metrics` to 1e-9; `encode_split`'s cache hit / stale key |
 
 ## How to run

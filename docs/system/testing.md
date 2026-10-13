@@ -112,7 +112,7 @@ The split is **by purpose**, not by module:
   shares the kernel's accumulation error and cannot see it). Every file
   whose kernel pads its width (kernels.md § Padding) also runs a
   non-power-of-two case against the oracle at the true width: D = 192 and
-  768 (yfcc10m's and pubmed's), OPORP `W = 3` / `12`, bloom `W = 3` / `12`.
+  768 (pubmed's), OPORP `W = 3` / `12`, bloom `W = 3` / `12`.
 - `compile/` answers *"does the compile/export machinery still see the
   kernels?"* — `test_silvertorch_compile.py` warms the
   `reduce-overhead` module up on one query, then replays the captured

@@ -45,55 +45,6 @@ the user moving it onto the roadmap.
 
 ## After the paper
 
-- **Triton SilverTorch kernel work** (top-k fused into the probe scorer,
-  TF-3 / TF-4 retune, cross-query cluster sharing): cancelled. Our Triton
-  SilverTorch is out of the paper and the release
-  ([decisions](decisions.md#goal-and-scheduling)); kernel work on
-  SilverTorch goes into the adapted official code (roadmap META-FORK).
-- **G-b: extended experiments**: a synthetic scale ladder to 240M and 1B
-  items (L4, L5), co-design ablation depth, V3 bit width, an extended batch
-  grid (G10-G12, G15, G16).
-- **G-c: a resource paper about the library.** After F5.
-- **G-e: two re-scoped plans** (deferred until after F5 by the user):
-  `torch.export` of the composites is small (the kernel side is
-  export-clean; three `Tensor | None` forward params in `modules/linr.py`
-  remain). The live upsert/delete API (`LiveIndexMixin` on
-  `retrieve.modules`) is medium-large: a new subsystem across five module
-  classes and both filters.
-- **Offer the adaptation's fixes upstream.** The changes that remove
-  defects of Meta's published code (host syncs, per-call plan decode,
-  capture, the unparsable tests, `-O0` host code) could go to
-  `meta-recsys/silvertorch` as pull requests after the paper; filing the
-  defects as issues is on the roadmap's "Needs the user".
-
-## Sequential-encoder follow-ups
-
-- **Atomic `_resume.pt` write**: it is written in place, so a crash during
-  the ~45 s write destroys the only resume state. A temporary file plus
-  `os.replace` doubles its peak on disk.
-- **Window val-day clicks** for `train_on_val` users with more than 200 of
-  them, as `train.parquet` is windowed
-  ([validation](validation.md#gates)).
-- **`--resume` of a `train_on_val` run on the GPU** has never run.
-- **Launch overhead / CUDA graphs** in the training step.
-- **goodreads d64 R@100**: −0.0039 against the bar, the one miss of the
-  success rule ([final models](validation.md#final-models-the-e1c-recipe)).
-- **Goodreads trainer-input tiebreak**: `cmd_prep` sorts by `(user_id,
-  ts)` with no tiebreak, so the order inside timestamp ties changes run to
-  run ([validation](validation.md#trainer-inputs-with-timestamps-data-gates-not-citable)).
-  A tiebreak moves the output off the Hub copy.
-- **yambda val/test row order**: the `uid` joins in `cmd_prep` give a
-  fresh row order each run; nothing may align to it by position.
-
-## Defects that block no remaining run
-
-- **A finer manifest `match`** (seed and a `params` subset, or an ordered
-  list of code_versions per entry). Phase P found ~241 cells whose old
-  records pass the reuse rule cell by cell, but only 36 are reachable
-  through entries that cannot name a seed or params. Worth ≈ 3.5 GPU-h of
-  perf (mostly YFCC seed 0) plus the quality pass of ~200 arXiv `deep`
-  cells whose timing reruns anyway; not built (one more report mechanism
-  for ~2 % of the budget). [reuse](artifacts/campaign-v2/README.md#reuse-entries)
 - **`scripts/check_doc_links.py` cannot parse `for … in f(...)` in a CLI
   module** (it reads `node.iter.func.value`); cv2-harness-core shaped
   `bench/cli.py`'s `_children` around it instead of editing the checker.

@@ -44,7 +44,7 @@ State per leg in [validation](../../../validation.md). NOT CITABLE until D1-G.
 | [`yfcc-seeds-filter-v210.sh`](yfcc-seeds-filter-v210.sh) | V-SEEDS YFCC half at campaign-v2.10: yfcc10m `filter` V1 / V2 / V3 triton, seeds 0-2 (9 cells); Hub `campaign-v2.10/yfcc10m-filter-seeds` |
 | [`tune_timed_config.py`](tune_timed_config.py), [`tune-timed-candidates.json`](tune-timed-candidates.json), [`tune-timed-v211.sh`](tune-timed-v211.sh) | the timed tune phase at campaign-v2.11: 736 SilverTorch cells (goodreads / arXiv threshold + knee points, YFCC Pareto + knee re-time), bs {1, 16, 64}, `--skip-quality`; stopped after goodreads-synth (arXiv goes to the final pass); Hub `campaign-v2.11/{yfcc10m,goodreads}-tune-timed` |
 | [`tune_timed_readout.py`](tune_timed_readout.py) | joins the timed cells with the quality grids' recall; prints the graph bs 16 front and the fastest setting per recall target and bs |
-| [`yfcc-int8.sh`](yfcc-int8.sh) | the YFCC int8-precision check (quality only; [`../../campaign-v2.5/yfcc-int8/int8_check.py`](../../campaign-v2.5/yfcc-int8/int8_check.py)) |
+| [`yfcc-int8.sh`](yfcc-int8.sh) | the YFCC int8-precision check (quality only; `../../campaign-v2.5/yfcc-int8/int8_check.py` (at tag `pre-release-cleanup`)) |
 | [`chain-legs.sh`](chain-legs.sh) | the queue as arguments (`v-gr-deep`, `v-router`, `v-yfcc-deep`, `v-yfcc-synth`, `gr-synth-mid`, `yfcc-int8`, `ax-synth-v1v2`, `gr-synth-mid-q`), one lock hold, stop file between legs |
 | [`chain.sh`](chain.sh) | the queue after V-V3BITS (at the tag common.sh defaults to, now campaign-v2.7): V-GR-DEEP, V-YFCC deep, the synth chunks, one lock hold, stop file between legs |
 | [`v-seeds-yfcc.sh`](v-seeds-yfcc.sh) | V-SEEDS, YFCC half: yfcc10m `filter`, every arm |

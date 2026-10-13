@@ -1,5 +1,7 @@
 # campaign-final: the final pass's config and recipe
 
+> **Superseded by the FULL-RERUN, not for the paper** ([full-rerun](../full-rerun/README.md)). Kept because current code or docs point here; the records stay on the Hub ([hub-index § Superseded](../hub-index.md#superseded-not-for-the-paper)).
+
 The final pass (roadmap F-REPRO; user directive 2026-10-10) reruns every suite and dataset the campaign drew claims from,
 at one frozen library code_version (`campaign-v2.12`, library `e16512f5`; the extension legs from tag `campaign-final`, same library), into `campaign-final/` on the Hub. Every number stays NOT CITABLE until
 D1-G passes.

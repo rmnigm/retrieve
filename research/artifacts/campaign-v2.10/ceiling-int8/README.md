@@ -1,6 +1,6 @@
 # C6 recall-ceiling check, goodreads + arXiv (campaign-v2.10)
 
-Modelled on [`../../campaign-v2.5/yfcc-int8/int8_check.py`](../../campaign-v2.5/yfcc-int8/int8_check.py): are SilverTorch's 0.95-0.99
+Modelled on `../../campaign-v2.5/yfcc-int8/int8_check.py` (at tag `pre-release-cleanup`): are SilverTorch's 0.95-0.99
 ceilings on goodreads and arXiv the one global int8 item scale? Quality only. Hub `artifacts/ceiling-int8-gr-ax`.
 
 | file | what |
