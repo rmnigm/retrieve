@@ -1,5 +1,7 @@
 # NUMBERS: the paper's measurement legs
 
+> **Superseded by the FULL-RERUN, not for the paper** ([full-rerun](../full-rerun/README.md)). Kept because current code or docs point here; the records stay on the Hub ([hub-index § Superseded](../hub-index.md#superseded-not-for-the-paper)).
+
 The legs that produce the paper's numbers. The study pits SilverTorch, Meta's official code adapted (`backend="official-fork"`), against LiNR
 V1-V3. [`plan.yaml`](plan.yaml) lists every leg: id, GPU queue, dependency, command, upload path, estimate. Raw outputs go to the Hub
 under `numbers/<leg>` ([hub-index](../hub-index.md)). Nothing here is citable until its gate is green in [validation](../../validation.md).

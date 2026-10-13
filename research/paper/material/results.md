@@ -9,6 +9,8 @@ sources: [research/paper/outline.md, research/paper/results.md, research/paper/c
 
 # Material C3: results, verdicts, deviations that move them
 
+> **Numbers superseded by the FULL-RERUN, not for the paper.** The figures on this page come from the NUMBERS legs and the final pass at earlier tags; the paper's tables are regenerated from the FULL-RERUN's `results.parquet` ([roadmap](../../roadmap.md) step 7, [validation](../../validation.md#full-rerun)). The structure and the rulings stand.
+
 Collected facts for the [outline](../outline.md)'s §2 (T1 verdict column),
 §4 (C1-C6), §5 (F3, T2), §6 (T3 numbers) and §7 (deviations that move a
 verdict). Facts with sources, not prose.

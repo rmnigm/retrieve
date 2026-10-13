@@ -9,6 +9,8 @@ sources: [official-fork/, research/validation.md, research/artifacts/hub-index.m
 
 # Meta's SilverTorch: as published vs adapted
 
+> **Numbers superseded by the FULL-RERUN, not for the paper.** The figures on this page come from the NUMBERS legs and the final pass at earlier tags; the paper's tables are regenerated from the FULL-RERUN's `results.parquet` ([roadmap](../roadmap.md) step 7, [validation](../validation.md#full-rerun)). The structure and the rulings stand.
+
 > **Status: citable.** The adapted code passed its review (ACCEPT at
 > `1f6fed8`, tag `campaign-fork`, [validation](../validation.md#meta-fork-backendofficial-fork)),
 > and its NUMBERS gate is green
@@ -89,7 +91,7 @@ State (citable; raw outputs on the Hub, [hub-index](../artifacts/hub-index.md)):
 | the unmodified adapted tree against the published code (C0) | 126 / 126 arXiv d128 cells `torch.equal` | `artifacts/meta-fork/c0` |
 | S and capture after C3 / C4 | no device-to-host copy and no pageable upload per forward at C4; capture equal to eager | `artifacts/meta-fork/c3-c4` |
 | X at the head (`32c0d61` → `46ff49e`) | 276 / 276 cells `torch.equal` to the published `-O3` code with Meta's bloom semantics (goodreads, arXiv d128 / d256, PubMed d768; none / exact / bloom; bs 1 / 16 / 64; k 100 / 1000) | `artifacts/meta-fork/pod-b-32c0d61` |
-| X at ≤ 10 M, the earlier grid (`82fafb6`) | 1,488 / 1,488 cells `torch.equal` (the same datasets; YFCC's 48 cells, also equal, are out of the study) | `artifacts/meta-fork/head-82fafb6` |
+| X at ≤ 10 M, the earlier grid (`82fafb6`) | 1,488 / 1,488 cells `torch.equal` (the same datasets) | `artifacts/meta-fork/head-82fafb6` |
 | compile gate | pass: `fullgraph`, 0 graph breaks, exports | — |
 | R (C12, C13) | 0 false positives on every cell; recall against an exact oracle 1.0 up to ties at the k-th score | `artifacts/meta-fork/pod-b-32c0d61` |
 | X at 30 M (LAION d256) | bloom partial + full 64 / 64 `torch.equal` at `32c0d61`; none / exact 72 / 72 at an earlier head | `artifacts/meta-fork/laion30m-b1-32c0d61` |

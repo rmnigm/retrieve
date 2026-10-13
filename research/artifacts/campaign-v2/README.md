@@ -1,5 +1,7 @@
 # campaign-v2: claims and the record inventory (roadmap P-INV)
 
+> **Superseded by the FULL-RERUN, not for the paper** ([full-rerun](../full-rerun/README.md)). Kept because current code or docs point here; the records stay on the Hub ([hub-index § Superseded](../hub-index.md#superseded-not-for-the-paper)).
+
 Scripts behind the campaign-v2 plan's measured inputs. Raw outputs are on the Hub under
 `artifacts/campaign-v2/` ([hub-index](../hub-index.md)). Nothing here is citable: these are
 planning numbers read from records whose gates are not green.

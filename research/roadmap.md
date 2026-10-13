@@ -188,7 +188,7 @@ tables are regenerated from FULL-RERUN's parquet (step 7).
 
 ### 5. RENAME: the adapted backend becomes SilverTorch's default
 
-Needs 2 and FULL-RERUN's run (beside 4, on its own branch). `backend="official-fork"` becomes
+Needs FULL-RERUN finished and 6 (beside 4, on its own branch). `backend="official-fork"` becomes
 the default `SilverTorch` backend under a name decided in this step; the
 package, distribution and op-namespace names (`silvertorch_fork`,
 `silvertorch-fork`, `stfork`) likewise. Records keep the names they were
@@ -202,24 +202,37 @@ today run the default `backend="triton"`, then run the adapted backend.
 package, the compile gate, outputs `torch.equal` before / after on the
 gate grid's int32 cells (a rename changes no behaviour).
 
-### 6. TRITON-ST-DELETE: delete the Triton SilverTorch reimplementation
+### 6. TRITON-ST-DELETE: delete what the release cleanup had to leave
 
-Needs 5 (rule 5: the adapted backend is accepted and NUMBERS measured it, both done).
-Tag `triton-silvertorch-final` on `staging` first, then delete
-`SilverTorch`'s `backend="triton"` and `backend="torch"` paths: the
-`codesigned_probe_score*` and `bloom_full_mask` kernels and their
-`ops/reference` twins, SilverTorch-only host helpers, their parity /
-correctness / compile tests (the official parity tests re-pointed at
-adapted vs published), the harness arms and suite entries, the
-`tune-kernels` entries, and their docs (`kernels.md`'s SilverTorch kernels
-section, `architecture.md`, `filtering.md`, `testing.md`, `evaluation.md`,
-`retrieve/docs/`). What SilverTorch's other backends share stays: phase 1
-(`KMeans`, `quantize_int8*`, `csr_layout`, probe selection), the clause
-kernels, the bloom hash (LiNR's `BloomFilter`), `two_level_topk` (LiNR V1).
-LiNR's kernels stay.
+Needs FULL-RERUN finished (the user's rule: until then every file a final-run leg imports stays byte-identical to
+`final-freeze`, [decisions](decisions.md#goal-and-scheduling)). The user authorised the deletions (2026-10-13: our Triton
+SilverTorch, LiNR's bloom filter, YFCC); the tag `triton-silvertorch-final` is on `staging`, and the release cleanup did
+what touches no final-run file ([release-cleanup](artifacts/release-cleanup/README.md): YFCC's ETL and configs, the
+one-off artifact plans, the wiki). Left, all in files the final run imports:
 
-*Gate*: library and harness suites green, `interfaces.DISPATCH` without
-the deleted backends, `ruff`, links 0.
+- **Triton SilverTorch**: `SilverTorch`'s `backend="triton"` / `"torch"` paths (the triton `bloom_path`, the
+  `bloom_transposed` / `bloom_bit_freq` / `hash_seeds` / `clause_salt` buffers, `PreparedFilter.query_bits` / `sparse`,
+  the default backend), `interfaces.SilverTorchBackend` and `DISPATCH["SilverTorch"]`'s two entries; the
+  `codesigned_probe_score*` and `bloom_full_mask` kernels and their `ops/reference` twins, the `_host` / `common` helpers
+  only they use, `bloom_hash.build_transposed_sigs` / `build_query_bit_positions`, `selectivity.bloom_bit_freq`; the
+  harness's triton `bloom_path` in `algos.official_config` / `build` and `measure`'s `_codesigned_probe_score` scope
+  pattern; then their tests (`test_codesigned_probe_score*`, `test_bloom_full_mask`, the triton / torch cases of
+  `test_silvertorch.py`, `test_silvertorch_compile.py`, the official parity tests re-pointed at adapted vs published),
+  the `tune-kernels` entries and their docs (`kernels.md`'s SilverTorch kernels section, `architecture.md`,
+  `filtering.md`, `testing.md`, `evaluation.md`, `retrieve/docs/`).
+- **LiNR's bloom filter**: the fused LiNR paths `bloom_compact` and `bloom_match_scores` (triton and reference),
+  `BloomFilter.evaluate_indices` / `mask_scores` / `evaluate_subset`, `functional.bloom_subset_match`, the harness's
+  `linr_* / postfilter` bloom cells in `algos.PATHS`, and their tests. `BloomFilter` with `bloom_match` stays while the
+  harness computes `bloom_fp_rate` with it on every SilverTorch bloom cell (that field measures our hash, not
+  SilverTorch's: the user decides whether it stays in the records).
+- **YFCC**: the `yfcc` / `yfcc-check-gt` entries of `eval_datasets/cli.py`'s ETL table (their modules are gone, so the
+  two subcommands fail on import), `hub.py`'s `yfcc10m` repo, `report.py`'s labels and `REAL` entry, the YFCC-only
+  `exact_gate` (`run.exact_gate`, the `config.py` key), `ingest.py`'s docstring, `test_report.py`'s fixtures.
+
+What SilverTorch's other backends share stays: phase 1 (`KMeans`, `quantize_int8*`, `csr_layout`, probe selection),
+the clause kernels (`clause_mask_packed` feeds the official exact path), `two_level_topk` (LiNR V1). LiNR's kernels stay.
+
+*Gate*: library and harness suites green, `interfaces.DISPATCH` without the deleted backends, `ruff`, links 0.
 
 ### 7. FULL-RERUN: everything, pinned to one frozen tag
 
@@ -263,7 +276,7 @@ accounts and the release decisions.
 
 ```
 3 QUALITY ─> freeze ─> 7 FULL-RERUN ─> 4 PAPER tables (user) ─> 8 F4
-                          └─> 5 RENAME ─> 6 TRITON-ST-DELETE (after the rerun)
+                          └─> 6 TRITON-ST-DELETE ─> 5 RENAME (both after the rerun has finished)
 1b DOCS-SPLIT (CPU, before 5)
 Needs the user: release decisions before F4
 ```

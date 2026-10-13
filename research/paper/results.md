@@ -9,6 +9,8 @@ sources: [research/artifacts/results-draft/build_results.py, research/artifacts/
 
 # Results (draft): SilverTorch, adapted from Meta's code, against LiNR
 
+> **Numbers superseded by the FULL-RERUN, not for the paper.** The figures on this page come from the NUMBERS legs and the final pass at earlier tags; the paper's tables are regenerated from the FULL-RERUN's `results.parquet` ([roadmap](../roadmap.md) step 7, [validation](../validation.md#full-rerun)). The structure and the rulings stand.
+
 **Status: citable**, with the exclusions below. The SilverTorch numbers are
 measured on the adapted code (the NUMBERS legs, whose gate is green:
 [validation](../validation.md#numbers-adapted-silvertorch-over-the-study-grid));

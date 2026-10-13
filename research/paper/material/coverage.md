@@ -9,6 +9,8 @@ sources: [research/artifacts/hub-index.md, research/validation.md, research/pape
 
 # Coverage: every citable source and claim, and where the paper uses it
 
+> **Numbers superseded by the FULL-RERUN, not for the paper.** The figures on this page come from the NUMBERS legs and the final pass at earlier tags; the paper's tables are regenerated from the FULL-RERUN's `results.parquet` ([roadmap](../../roadmap.md) step 7, [validation](../../validation.md#full-rerun)). The structure and the rulings stand.
+
 Each row maps a citable source to the [outline](../outline.md) section that
 uses it, or says why it is not used. "§" is the outline's section; T / F
 are its exhibits. Built from the [hub-index](../../artifacts/hub-index.md)

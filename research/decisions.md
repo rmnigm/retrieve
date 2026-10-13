@@ -1,7 +1,7 @@
 ---
 title: decisions
 created: 2026-09-26
-updated: 2026-10-11
+updated: 2026-10-13
 type: summary
 tags: [decisions]
 sources: [pyproject.toml, evaluation/config/suites.yaml, retrieve/src/retrieve/, evaluation/bench/, evaluation/training/]
@@ -41,13 +41,21 @@ decisions.
 - **Our Triton SilverTorch reimplementation is out of the paper and out of
   the released code** (user, 2026-10-11): `SilverTorch(backend="triton")`
   and `backend="torch"` (our Algorithm 1 kernels and their eager
-  reference) are neither a result nor a shipped backend. Until its
-  deletion step the code stays in the repository, recorded and unused; it
-  is deleted under CLAUDE.md rule 5 only after the adapted backend's review
-  ACCEPT and its NUMBERS legs, behind the tag `triton-silvertorch-final`
-  ([roadmap](roadmap.md#6-triton-st-delete-delete-the-triton-silvertorch-reimplementation)).
-  Its records stay on the Hub (`campaign-final` and earlier), never
-  deleted, never cited. No new Triton SilverTorch kernel work.
+  reference) are neither a result nor a shipped backend. Its deletion is
+  authorised (user, 2026-10-13, with LiNR's bloom filter and YFCC) behind
+  the tag `triton-silvertorch-final`; the files the final run imports
+  stay byte-identical until the final run has finished (next item), so the
+  code leaves the library after it
+  ([roadmap](roadmap.md#6-triton-st-delete-delete-what-the-release-cleanup-had-to-leave)).
+  Its records stay on the Hub, never deleted, never cited. No new Triton
+  SilverTorch kernel work.
+- **The final run is final** (user, 2026-10-13): the FULL-RERUN at tag
+  `final-freeze` is the paper's one result set. No code change triggers a
+  rerun or a new tag of its legs; a leg is rerun only when it crashed or
+  failed its own checks, at the same tag. Until it has finished, a code
+  change is a deletion of code the final run does not import, or docs: every
+  file a final-run leg imports stays byte-identical to `final-freeze`
+  (gate: [release-cleanup](artifacts/release-cleanup/README.md)).
 - **Meta's code as published (`backend="official"`, pinned `21aa35e`,
   built `-O3`) is the parity reference, not an arm.** The adapted code is
   gated bit-exact against it, and the paper's "Meta as published vs

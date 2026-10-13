@@ -35,9 +35,9 @@ Produced on the A100 box, no GPU. The record is
 ## `yfcc10m/` — roadmap E1, 2026-09-06
 
 Produced on the CPU box (128 cores, no GPU used) by
-[`evaluation/eval_datasets/yfcc.py`](../../../evaluation/eval_datasets/etl/yfcc.py)
+`evaluation/eval_datasets/yfcc.py` (at tag `pre-release-cleanup`)
 and
-[`yfcc_check_gt.py`](../../../evaluation/eval_datasets/etl/yfcc_check_gt.py),
+`yfcc_check_gt.py` (at tag `pre-release-cleanup`),
 with `RETRIEVE_DATA_ROOT=/workspace/data`.
 
 | file | what it is |

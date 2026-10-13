@@ -287,8 +287,8 @@ raises an illegal address or returns wrong ids.
 
 ## Padding
 
-`tl.arange` needs a power-of-two extent, and D1's datasets do not all have one (yfcc10m
-D = 192, pubmed and openalex D = 768; OPORP's default `k_bits = D` gives `W = 3` and `12`).
+`tl.arange` needs a power-of-two extent, and the datasets do not all have one (pubmed and
+openalex D = 768; OPORP's default `k_bits = D` gives `W = 3` and `12`).
 Every kernel with a lane axis over the embedding or word width takes the true width and
 its `triton.next_power_of_2` as two constexprs (`D` / `D_PAD`, `W` / `W_PAD`), aranges over
 the padded one and masks lanes `≥ D` (`≥ W`) out of both the query and the item load with
@@ -1889,7 +1889,7 @@ files at gcc `-O0` (OF-11). The same sources at `-O3` are bit-identical and
 
 **Measured.** The head-to-head against Triton (end to end, kernel-only,
 phase 2, parity, memory) is in
-[validation](../../research/validation.md#official-against-our-triton-reimplementation-citable-contested-not-in-the-study),
+[validation](../../research/validation.md#official-against-our-triton-reimplementation),
 with tables in [artifacts](../../research/artifacts/official-silvertorch/b3/tables.md).
 Both scorers now read the same CSR. The b3 split (Meta's
 scorer 10.9–17.8× ours on goodreads) was our former padded probe layout,
