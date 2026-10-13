@@ -5,7 +5,7 @@ once without; the two JSON lines must be equal. Single-threaded: on 64 threads t
 losses of one and the same code differ run to run in the last bit at a few steps.
 
     cd evaluation && CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 uv run python \
-        ../docs/artifacts/seqrec-encoder/w6-cleanup-equivalence/cpu_proxy.py SYNTH_DIR
+        ../research/artifacts/seqrec-encoder/w6-cleanup-equivalence/cpu_proxy.py SYNTH_DIR
 """
 
 import json

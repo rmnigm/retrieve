@@ -4,8 +4,8 @@ If every swapped pair there sits within one fp16 ulp of the boundary score, the 
 measured rather than assumed.
 
     cd /workspace/wt/l4/retrieve && flock /workspace/gpu.lock uv run --no-sync python \
-        ../docs/artifacts/linr-v2-backend-parity/torch_side_rounding.py \
-        --out ../docs/artifacts/linr-v2-backend-parity/torch_side_rounding.json
+        ../research/artifacts/linr-v2-backend-parity/torch_side_rounding.py \
+        --out ../research/artifacts/linr-v2-backend-parity/torch_side_rounding.json
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """Attribute and log profile of the converted KuaiRand-27K parquets that fixed the clause
 layout and thresholds of eval_datasets/etl/kuairand.py (docs/system/datasets.md § kuairand).
-Run from evaluation/: python ../docs/artifacts/e4-kuairand/profile_attributes.py"""
+Run from evaluation/: python ../research/artifacts/e4-kuairand/profile_attributes.py"""
 
 import datetime as dt
 

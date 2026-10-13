@@ -1,7 +1,7 @@
 """Which campaign-v2 cells existing records cover under the record reuse rule (roadmap Phase P,
 "Manifest reuse entries"; research/decisions.md § Campaign v2), CPU only.
 
-    cd evaluation && uv run python ../docs/artifacts/campaign-v2/reuse/reuse.py <fetched root> <out>
+    cd evaluation && uv run python ../research/artifacts/campaign-v2/reuse/reuse.py <fetched root> <out>
 
 <fetched root> holds one directory per hub-index subtree (`bench fetch --results <root>/<subtree>`,
 as research/artifacts/campaign-v2/inventory.py reads it). The v2 grid is expanded from the checked-in

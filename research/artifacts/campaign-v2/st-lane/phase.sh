@@ -4,7 +4,7 @@
 # dir per run via the tests' conftest; no fixed TORCHINDUCTOR_CACHE_DIR). Want-flag + flock per job. Usage: phase.sh <out_dir>
 set -u
 OUT=$1; mkdir -p "$OUT"
-W=/scratch/wt/st-lane ART=$W/docs/artifacts/campaign-v2/st-lane
+W=/scratch/wt/st-lane ART=$W/research/artifacts/campaign-v2/st-lane
 export CUDA_VISIBLE_DEVICES=0 PY=/venvs/retrieve/bin/python
 gpu() {
   touch /scratch/gpu0.st-dloop-wants
@@ -13,10 +13,10 @@ gpu() {
 }
 for t in /scratch/wt/v24 $W; do
   TRITON_CACHE_DIR=$(mktemp -d -p /scratch/st-lane) PYTHONPATH=$W/retrieve gpu $PY \
-    $W/docs/artifacts/campaign-v2/st-skip128/sass_ungated.py --src $t/retrieve/src \
+    $W/research/artifacts/campaign-v2/st-skip128/sass_ungated.py --src $t/retrieve/src \
     > $OUT/sass_$(basename $t).txt 2> $OUT/sass_$(basename $t).err
 done
-export PYTHONPATH=/scratch/st-lane/pkgs:/scratch/st-dloop/v21:$W/retrieve/src:$W/retrieve:$W/docs/artifacts/campaign-v2/st-dloop
+export PYTHONPATH=/scratch/st-lane/pkgs:/scratch/st-dloop/v21:$W/retrieve/src:$W/retrieve:$W/research/artifacts/campaign-v2/st-dloop
 for d in 128 192 768; do gpu $PY $ART/lane_gate.py exact $d $OUT/exact_d$d.json > $OUT/exact_d$d.log 2>&1; done
 for d in 128 192 768; do gpu $PY $ART/lane_gate.py time $d $OUT/time_d$d.json > $OUT/time_d$d.log 2>&1; done
 (cd $W/retrieve && PYTHONPATH=$W/retrieve/src:$W/retrieve gpu $PY -m pytest tests/ -q -p no:cacheprovider > $OUT/suite.log 2>&1)

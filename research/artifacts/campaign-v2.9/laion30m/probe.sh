@@ -10,7 +10,7 @@ for sw in tags4 c0_domain; do
   done
 done
 cp -a "$L/logs/clocks-gpu$GPU.csv" "$L"/logs/probe-*.log "$R/logs/"
-$PY "$W/docs/artifacts/campaign-v2.5/laion30m/cal_table.py" "$R" | tee "$R/table.md"
+$PY "$W/research/artifacts/campaign-v2.5/laion30m/cal_table.py" "$R" | tee "$R/table.md"
 run upload-probe upload --results "$R" --path-in-repo campaign-v2.9/laion30m-filter --verify
 grep -E "MANIFEST|round trip" "$L/logs/upload-probe.log"
 echo "$(date -Is) probe rc=0"

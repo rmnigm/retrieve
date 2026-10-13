@@ -8,7 +8,7 @@ through the same `stage_table` as the snapshot rows, and writes them as one more
 It prints the `--keep-items` that keeps the pool at the hashes above that percentile.
 
     cd evaluation && RETRIEVE_DATA_ROOT=/scratch/e3-dryrun \
-        python ../docs/artifacts/e3-openalex/api_citation_topup.py
+        python ../research/artifacts/e3-openalex/api_citation_topup.py
 """
 
 import json

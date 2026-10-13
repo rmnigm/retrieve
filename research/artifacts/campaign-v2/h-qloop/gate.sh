@@ -13,7 +13,7 @@ OUT=/scratch/h-qloop
 PIN="taskset -c 0-63,128-191"
 export CUDA_VISIBLE_DEVICES=0 HF_HOME=/scratch/hf
 rm -rf "$OUT/A" "$OUT/B" "$OUT/golden-config"; mkdir -p "$OUT"
-(cd "$MAIN/evaluation" && $PY "$MAIN/docs/artifacts/campaign-v2/freeze/suites_freeze.py" golden "$OUT/golden-config") > "$OUT/golden-cells.txt" 2>&1 || exit 1
+(cd "$MAIN/evaluation" && $PY "$MAIN/research/artifacts/campaign-v2/freeze/suites_freeze.py" golden "$OUT/golden-config") > "$OUT/golden-cells.txt" 2>&1 || exit 1
 cells=(  # dataset|suite|config|narrowing (CLI), each one `bench run --skip-perf`
   "goodreads|filter|golden|"
   "arxiv|filter|golden|"

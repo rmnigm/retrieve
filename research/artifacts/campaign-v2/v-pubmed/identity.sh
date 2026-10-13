@@ -21,5 +21,5 @@ step $PIN $PY -m bench.cli check --dataset pubmed > $L/logs/bench-check.log 2>&1
 step $PIN $PY -m bench.cli run --dataset pubmed --dim 768 --suite filter --algo linr_v1_filter_mask \
   --backend triton --filter-kind clause --sweep c0_mesh --seed 0 --mode eager --skip-perf \
   --output $L/identity/v1-c0_mesh.jsonl > $L/logs/identity-cell.log 2>&1
-step $PY $W/docs/artifacts/campaign-v2/v-pubmed/compare_v1.py /scratch/v-pubmed/d1/filter/pubmed-d768.jsonl $L/identity/v1-c0_mesh.jsonl
+step $PY $W/research/artifacts/campaign-v2/v-pubmed/compare_v1.py /scratch/v-pubmed/d1/filter/pubmed-d768.jsonl $L/identity/v1-c0_mesh.jsonl
 echo "$(date -Is) identity done"

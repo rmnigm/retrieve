@@ -34,7 +34,7 @@ for sw in tags4 c0_domain; do
     --algo linr_v1_filter_mask --out "$R" --resume
 done
 cp -a "$L/logs/clocks-gpu$GPU.csv" "$L"/logs/x-*.log "$R/logs/"
-$PY "$W/docs/artifacts/campaign-v2.5/laion30m/cal_table.py" "$R" | tee "$R/table.md"
+$PY "$W/research/artifacts/campaign-v2.5/laion30m/cal_table.py" "$R" | tee "$R/table.md"
 run upload-x upload --results "$R" --path-in-repo campaign-v2.9/laion30m-x --verify
 grep -E "MANIFEST|round trip" "$L/logs/upload-x.log"
 echo "$(date -Is) x rc=0"

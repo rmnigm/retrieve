@@ -16,7 +16,7 @@
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)
-HERE=$ROOT/docs/artifacts/campaign-v2/freeze
+HERE=$ROOT/research/artifacts/campaign-v2/freeze
 OUT=${OUT:-/scratch/cv2-freeze}
 H2=${H2:-/scratch/h2-golden-up}  # bench fetch --path-in-repo artifacts/h2 elsewhere
 STAGES=${STAGES:-"golden oracle smoke timed report"}

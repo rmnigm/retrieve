@@ -8,10 +8,10 @@ every file says so in its own banner, caption or watermark.
 ```bash
 cd /workspace/wt/d4/evaluation
 mkdir -p /tmp/d4/filter
-cp ../docs/artifacts/evaluation-harness-v2/c4/results/filter/*.jsonl /tmp/d4/filter/
-cat ../docs/artifacts/evaluation-package-layout/c5/results/filter/goodreads-d128.jsonl \
+cp ../research/artifacts/evaluation-harness-v2/c4/results/filter/*.jsonl /tmp/d4/filter/
+cat ../research/artifacts/evaluation-package-layout/c5/results/filter/goodreads-d128.jsonl \
     >> /tmp/d4/filter/goodreads-d128.jsonl
-cat ../docs/artifacts/evaluation-package-layout/c5/results/filter/goodreads-d128.samples.jsonl \
+cat ../research/artifacts/evaluation-package-layout/c5/results/filter/goodreads-d128.samples.jsonl \
     >> /tmp/d4/filter/goodreads-d128.samples.jsonl
 CUDA_VISIBLE_DEVICES="" uv run bench report /tmp/d4 --out <here>
 ```

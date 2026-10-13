@@ -97,12 +97,12 @@ proxy-mode check); not done, because it relies on private torch APIs. That choic
 ```bash
 # from / so the config's relative data_dir resolves to /data/arxiv-papers
 cd / && CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/v-graph-ids flock /scratch/gpu0.lock \
-  taskset -c 64-127 /venvs/retrieve/bin/python $REPO/docs/artifacts/campaign-v2/v-graph-ids/repro.py /scratch/v-graph-ids/repro
+  taskset -c 64-127 /venvs/retrieve/bin/python $REPO/research/artifacts/campaign-v2/v-graph-ids/repro.py /scratch/v-graph-ids/repro
 ... element.py /scratch/v-graph-ids/repro
 ... repro.py /scratch/v-graph-ids/repro-divrn --emulate-div
 # the fix: this worktree's library and harness ahead of the shared venv's
 cd / && flock /scratch/gpu0.lock env CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$WT/retrieve/src:$WT/evaluation \
-  taskset -c 64-127 /venvs/retrieve/bin/python $WT/docs/artifacts/campaign-v2/v-graph-ids/fix_gates.py /scratch/v-graph-ids/fix
+  taskset -c 64-127 /venvs/retrieve/bin/python $WT/research/artifacts/campaign-v2/v-graph-ids/fix_gates.py /scratch/v-graph-ids/fix
 ```
 
 Raw outputs (the `.pt` dumps, `report.json`, `element.json`, `fix/fix_gates.json`, `fix-v1/`,

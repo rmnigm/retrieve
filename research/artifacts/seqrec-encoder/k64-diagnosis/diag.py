@@ -1,7 +1,7 @@
 """Bounded diagnosis of R-k64 (KuaiRand-27K d64): protocol structure, metric ceilings, a most-popular
 baseline and k64 on train-seen targets only, all through training.evaluate.evaluate.
 
-    cd evaluation && uv run python ../docs/artifacts/seqrec-encoder/k64-diagnosis/diag.py OUT.json
+    cd evaluation && uv run python ../research/artifacts/seqrec-encoder/k64-diagnosis/diag.py OUT.json
 """
 
 import json

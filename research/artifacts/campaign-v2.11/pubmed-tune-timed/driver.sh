@@ -6,7 +6,7 @@
 # setsid nohup bash driver.sh > /scratch/pubmed-tune-v211/driver.log 2>&1 &
 set -u
 T=/scratch/wt/tree-v211
-D=/scratch/wt/pubmed-tune-timed/docs/artifacts/campaign-v2.11/pubmed-tune-timed
+D=/scratch/wt/pubmed-tune-timed/research/artifacts/campaign-v2.11/pubmed-tune-timed
 PY=/venvs/v211/bin/python
 R=/scratch/campaign-v2.11/results
 L=/scratch/pubmed-tune-v211

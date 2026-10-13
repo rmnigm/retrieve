@@ -91,7 +91,7 @@ EVAL_DIR="$REPO_ROOT/evaluation"
 GOLDEN_DIR="${GOLDEN_DIR:-$EVAL_DIR/golden}"
 MAIN_GOLDEN_DIR="$GOLDEN_DIR/_main"
 LOG_DIR="$GOLDEN_DIR/_logs"
-A1_DIR="${A1_DIR:-$REPO_ROOT/docs/artifacts/evaluation-harness-v2/a1}"
+A1_DIR="${A1_DIR:-$REPO_ROOT/research/artifacts/evaluation-harness-v2/a1}"
 MAIN_WORKTREE="${MAIN_WORKTREE:-/workspace/wt/main-golden}"
 GPU_LOCK="${GPU_LOCK:-/workspace/gpu.lock}"
 export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-/venvs/golden}"
@@ -409,7 +409,7 @@ stage_step6() {
   run_all_cells "$MAIN_EVAL_DIR" "main" "$MAIN_GOLDEN_DIR"
 
   local d="$A1_DIR/step6"; mkdir -p "$d"
-  python3 "$REPO_ROOT/docs/artifacts/evaluation-harness-v2/a1_step6_diff.py" \
+  python3 "$REPO_ROOT/research/artifacts/evaluation-harness-v2/a1_step6_diff.py" \
       --branch "$GOLDEN_DIR" --main "$MAIN_GOLDEN_DIR" --report "$d/report.md" \
       | tee "$d/stdout.txt"
   if [ "${PIPESTATUS[0]}" -ne 0 ]; then
@@ -520,7 +520,7 @@ stage_step5() {
         fi
       fi
     done
-    python3 "$REPO_ROOT/docs/artifacts/evaluation-harness-v2/a1_step5_compare.py" \
+    python3 "$REPO_ROOT/research/artifacts/evaluation-harness-v2/a1_step5_compare.py" \
         --main "$d/main" --branch "$d/branch" --report "$d/report.md" | tee "$d/stdout.txt"
     if [ "${PIPESTATUS[0]}" -ne 0 ]; then
       echo "[FAIL] step5: a kernel is outside +-5% — see $d/report.md"

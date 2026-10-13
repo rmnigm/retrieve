@@ -15,7 +15,7 @@ export CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/c5-ours-
 PIN="flock /scratch/gpu0.lock taskset -c 0-95"
 mkdir -p "$R/_logs" "$L" "$TORCHINDUCTOR_CACHE_DIR"
 cd $W/evaluation
-[ -f $C/suites.yaml ] || { rm -rf $C; cp -r config $C; { echo; cat $W/docs/artifacts/campaign-v2.9/c5-ours-pubmed/suite-pubmed.yaml; } >> $C/suites.yaml; }
+[ -f $C/suites.yaml ] || { rm -rf $C; cp -r config $C; { echo; cat $W/research/artifacts/campaign-v2.9/c5-ours-pubmed/suite-pubmed.yaml; } >> $C/suites.yaml; }
 EXPECT=$($PY -c "import yaml; print(yaml.safe_load(open('campaign.yaml'))['default']['perf']['code_version'])")
 yield_gpu() { while [ -e /scratch/gpu0.st-dloop-wants ] || [ -e /scratch/gpu0.st-dloop-phase ]; do sleep 20; done; }
 

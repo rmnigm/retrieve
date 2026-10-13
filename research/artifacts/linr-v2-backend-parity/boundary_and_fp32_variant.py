@@ -9,8 +9,8 @@ B. A probe-only copy of the kernel that accumulates in fp32 (the shipped kernel 
 C. `do_bench` timings of the shipped and the fp32-accumulating launch on the cell's real shapes.
 
     cd /workspace/wt/l4/retrieve && flock /workspace/gpu.lock uv run --no-sync python \
-        ../docs/artifacts/linr-v2-backend-parity/boundary_and_fp32_variant.py \
-        --out ../docs/artifacts/linr-v2-backend-parity/boundary_and_fp32_variant.json
+        ../research/artifacts/linr-v2-backend-parity/boundary_and_fp32_variant.py \
+        --out ../research/artifacts/linr-v2-backend-parity/boundary_and_fp32_variant.json
 """
 
 from __future__ import annotations

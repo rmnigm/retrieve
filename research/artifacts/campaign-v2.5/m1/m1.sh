@@ -48,7 +48,7 @@ neighbour() {
 }
 export -f neighbour; export PY R LOG
 
-gpu0 $PY ../docs/artifacts/campaign-v2/v-pod1-run/move_old_oracles.py "$cv" arxiv || exit 1
+gpu0 $PY ../research/artifacts/campaign-v2/v-pod1-run/move_old_oracles.py "$cv" arxiv || exit 1
 step oracle gpu0 $PY -m bench.cli oracle --dataset arxiv --suite filter --dim 128 --sweep c0_maincat --sweep all4
 i=0
 for c in $ORDER; do

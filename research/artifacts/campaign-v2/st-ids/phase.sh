@@ -3,9 +3,9 @@
 # timing, the library suite. Each job under the want-flag + flock. Usage: phase.sh <out_dir>
 set -u
 OUT=$1; mkdir -p "$OUT"
-W=/scratch/wt/st-ids ART=$W/docs/artifacts/campaign-v2/st-ids
+W=/scratch/wt/st-ids ART=$W/research/artifacts/campaign-v2/st-ids
 export CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/st-ids PY=/venvs/retrieve/bin/python
-export PYTHONPATH=/scratch/st-ids/pkgs:/scratch/st-dloop/v21:$W/retrieve/src:$W/retrieve:$W/docs/artifacts/campaign-v2/st-dloop
+export PYTHONPATH=/scratch/st-ids/pkgs:/scratch/st-dloop/v21:$W/retrieve/src:$W/retrieve:$W/research/artifacts/campaign-v2/st-dloop
 gpu() {
   touch /scratch/gpu0.st-dloop-wants
   flock /scratch/gpu0.lock "$@"; local rc=$?

@@ -9,7 +9,7 @@ cd "$(dirname "$0")/../../../.."/evaluation
 export UV_PROJECT_ENVIRONMENT=/venvs/b3
 export RETRIEVE_DATA_ROOT=/workspace/data
 export TORCHINDUCTOR_CACHE_DIR=/tmp/inductor-b3
-OUT="$(cd .. && pwd)/docs/artifacts/official-silvertorch/b3/e2e"
+OUT="$(cd .. && pwd)/research/artifacts/official-silvertorch/b3/e2e"
 LOGS="$OUT/_logs"
 mkdir -p "$LOGS"
 

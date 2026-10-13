@@ -10,7 +10,7 @@ for sw in p0001 p0003 p001 p003 p005 p01 p02 p05 p1; do
     --algo linr_v1_filter_mask --algo linr_v2 --interleave --out "$R" --resume
 done
 cp -a "$L/logs/clocks-gpu$GPU.csv" "$L"/logs/c1-*.log "$R/logs/"
-$PY "$W/docs/artifacts/campaign-v2.5/laion30m/cal_table.py" "$R" | tee "$R/table.md"
+$PY "$W/research/artifacts/campaign-v2.5/laion30m/cal_table.py" "$R" | tee "$R/table.md"
 run upload-c1 upload --results "$R" --path-in-repo campaign-v2.9/laion30m-synth-v1v2 --verify
 grep -E "MANIFEST|round trip" "$L/logs/upload-c1.log"
 echo "$(date -Is) c1 rc=0"

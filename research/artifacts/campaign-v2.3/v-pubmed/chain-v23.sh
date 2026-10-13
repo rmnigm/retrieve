@@ -5,7 +5,7 @@
 # remaining non-SilverTorch chunks, then V-SEEDS arXiv (arXiv f01255f1 blobs set aside, compared after). Stops on any
 # non-zero step or oracle difference.
 set -u
-V23=/scratch/wt/v-pubmed-v23/docs/artifacts/campaign-v2.3
+V23=/scratch/wt/v-pubmed-v23/research/artifacts/campaign-v2.3
 SWAP="/venvs/retrieve/bin/python $V23/v-pubmed/oracle_swap.py"
 V21=f01255f106214ec0f540352d0e2a5cd90b84b6a1
 V22=0d23c615a60c6d170fbf3e79c66999406bd5006c
@@ -24,6 +24,6 @@ step bash $V23/d3-pubmed-timed/driver.sh >> /scratch/d3-pubmed-timed-v23/driver.
 step $SWAP compare $V21
 VPUBMED_CHUNKS=nost step bash $V23/v-pubmed/driver-chunks.sh >> /scratch/v-pubmed/driver-chunks-v23.log 2>&1
 step $SWAP aside $V21 $AX
-step bash /scratch/wt/v-seeds-ax/docs/artifacts/campaign-v2.1/v-seeds-ax/driver.sh >> /scratch/v-seeds-ax/driver.log 2>&1
+step bash /scratch/wt/v-seeds-ax/research/artifacts/campaign-v2.1/v-seeds-ax/driver.sh >> /scratch/v-seeds-ax/driver.log 2>&1
 step $SWAP compare $V21 $AX
 echo "$(date -Is) chain-v23 done"

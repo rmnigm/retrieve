@@ -6,7 +6,7 @@ set -euo pipefail
 REPO=$(git rev-parse --show-toplevel)
 SRC=8c493f2  # staging before H1: the last commit that tracks the files
 STAGE=${1:-/scratch/tmp/h1-hub}
-TSV=$REPO/docs/artifacts/h1-results-storage/cleanup.tsv
+TSV=$REPO/research/artifacts/h1-results-storage/cleanup.tsv
 rm -rf "$STAGE" && mkdir -p "$STAGE"
 tail -n +2 "$TSV" | awk -F'\t' '$2=="hub"{print $1"\t"$3}' | while IFS=$'\t' read -r path hub; do
   mkdir -p "$STAGE/$(dirname "$hub")"

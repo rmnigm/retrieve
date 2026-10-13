@@ -1,7 +1,7 @@
 """Fraction of KuaiRand-27K val/test targets that never occur in train.parquet's item_ids (so their
 item rows only ever get negative-sampling updates, no positive pull).
 
-    cd evaluation && uv run python ../docs/artifacts/seqrec-encoder/k64-sasrec-ssm-logq/cold_targets.py
+    cd evaluation && uv run python ../research/artifacts/seqrec-encoder/k64-sasrec-ssm-logq/cold_targets.py
 """
 
 import numpy as np

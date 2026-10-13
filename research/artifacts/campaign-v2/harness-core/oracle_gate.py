@@ -7,7 +7,7 @@ lists under both, anything else is a red gate. ``SWEEP:bloom`` also compares the
 pass counts with the one-shot ``evaluate_mask``. Peak GPU memory of the chunked build is
 reported above the resident inputs. Writes nothing to the staged ``gt_dir``.
 
-    cd evaluation && python ../docs/artifacts/campaign-v2/harness-core/oracle_gate.py \\
+    cd evaluation && python ../research/artifacts/campaign-v2/harness-core/oracle_gate.py \\
         arxiv 128 /scratch/cv2-harness-core/oracle-arxiv.json c0_maincat all4
 """
 

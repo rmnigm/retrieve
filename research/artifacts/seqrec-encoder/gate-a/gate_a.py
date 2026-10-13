@@ -1,7 +1,7 @@
 """Gate A: published checkpoints through load_model_for_eval + evaluate reproduce their
 eval_quality.json test ndcg@10 / recall@100 to 4 decimals.
 
-    cd evaluation && uv run python ../docs/artifacts/seqrec-encoder/gate-a/gate_a.py OUT.json
+    cd evaluation && uv run python ../research/artifacts/seqrec-encoder/gate-a/gate_a.py OUT.json
 """
 
 import json

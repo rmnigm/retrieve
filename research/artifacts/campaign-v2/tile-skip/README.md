@@ -57,8 +57,8 @@ Shapes: arXiv-like (N 3.0 M, D 128, n_lists 1664, n_probe 24) and goodreads-like
 
 ```bash
 cd evaluation   # for the official adapter's deps; RETRIEVE tree = this worktree
-CUDA_VISIBLE_DEVICES=0 uv run python ../docs/artifacts/campaign-v2/tile-skip/tile_skip.py arxiv /scratch/cv2-lib/arxiv.json
-CUDA_VISIBLE_DEVICES=0 uv run python ../docs/artifacts/campaign-v2/tile-skip/tile_skip.py goodreads /scratch/cv2-lib/goodreads.json
+CUDA_VISIBLE_DEVICES=0 uv run python ../research/artifacts/campaign-v2/tile-skip/tile_skip.py arxiv /scratch/cv2-lib/arxiv.json
+CUDA_VISIBLE_DEVICES=0 uv run python ../research/artifacts/campaign-v2/tile-skip/tile_skip.py goodreads /scratch/cv2-lib/goodreads.json
 ```
 
 ## Result: reverted

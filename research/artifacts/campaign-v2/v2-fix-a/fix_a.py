@@ -11,7 +11,7 @@ Phases (argv[2], comma-separated; default all):
           sm_mhz per window, kernel tables; clause + bloom, bs {1, 16}, p {0.001, 0.01, 1}
 
     cd evaluation && CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/v2-fix-a \
-        flock /scratch/gpu0.lock uv run python ../docs/artifacts/campaign-v2/v2-fix-a/fix_a.py \
+        flock /scratch/gpu0.lock uv run python ../research/artifacts/campaign-v2/v2-fix-a/fix_a.py \
         /scratch/v2-fix-a/out.json [gate,v3prof,sweep,abab]
 
 Resume-safe: rerunning the same command into the same file skips the phases already written.

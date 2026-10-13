@@ -1,7 +1,7 @@
 """E0: the published goodreads-work-id checkpoints re-scored on trainer/test.parquet (the bars
 for E3), through gate_a's path (load_model_for_eval + evaluate).
 
-    cd evaluation && uv run python ../docs/artifacts/seqrec-encoder/e0-goodreads-bars/rescore.py OUT.json
+    cd evaluation && uv run python ../research/artifacts/seqrec-encoder/e0-goodreads-bars/rescore.py OUT.json
 """
 
 import json

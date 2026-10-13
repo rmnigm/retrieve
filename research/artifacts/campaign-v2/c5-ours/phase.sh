@@ -6,7 +6,7 @@ set -u
 OUT=$1; mkdir -p "$OUT"
 touch /scratch/gpu0.st-dloop-phase
 trap 'rm -f /scratch/gpu0.st-dloop-phase /scratch/gpu0.st-dloop-wants' EXIT
-W=/scratch/wt/c5-ours ART=$W/docs/artifacts/campaign-v2/c5-ours
+W=/scratch/wt/c5-ours ART=$W/research/artifacts/campaign-v2/c5-ours
 export CUDA_VISIBLE_DEVICES=0 PY=/venvs/retrieve/bin/python
 gpu() {
   touch /scratch/gpu0.st-dloop-wants

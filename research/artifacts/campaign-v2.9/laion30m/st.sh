@@ -5,7 +5,7 @@
 # (4 builds) -> campaign-v2.9/laion30m-synth-synth. Oracle blobs are the v2.5-built ones (harness-only, data-determined; d-run's
 # running leg reads them too, so they are not moved). Rerun after a crash: --resume skips finished cells.
 . "$(dirname "$(readlink -f "$0")")/common.sh"
-TABLE=$W/docs/artifacts/campaign-v2.5/laion30m/cal_table.py
+TABLE=$W/research/artifacts/campaign-v2.5/laion30m/cal_table.py
 R=/scratch/campaign-v29/laion30m-filter
 mkdir -p "$R/logs"
 t0=$(date +%s)

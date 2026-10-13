@@ -1,7 +1,7 @@
 """E0b: the published yambda-500m d256 checkpoint re-scored on trainer/test.parquet (the bar
 for R-y256), through gate_a's path (load_model_for_eval + evaluate).
 
-    cd evaluation && uv run python ../docs/artifacts/seqrec-encoder/e0b-yambda-d256-bar/rescore.py OUT.json
+    cd evaluation && uv run python ../research/artifacts/seqrec-encoder/e0b-yambda-d256-bar/rescore.py OUT.json
 """
 
 import json

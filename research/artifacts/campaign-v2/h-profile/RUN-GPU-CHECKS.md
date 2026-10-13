@@ -25,7 +25,7 @@ cd "$WT/evaluation"
 ## 1. Drift diagnostic, the unfixed profiler body (≈ 6 min)
 
 ```bash
-$LOCK /venvs/retrieve/bin/python ../docs/artifacts/campaign-v2/h-profile/repro.py 30 20000 \
+$LOCK /venvs/retrieve/bin/python ../research/artifacts/campaign-v2/h-profile/repro.py 30 20000 \
   > "$OUT/repro-drift.log" 2>&1
 ```
 
@@ -40,7 +40,7 @@ records both sentinels or raises.
 ## 2. The fixed `profile_once` (≈ 6 min)
 
 ```bash
-$LOCK /venvs/retrieve/bin/python ../docs/artifacts/campaign-v2/h-profile/repro.py 30 20000 fixed \
+$LOCK /venvs/retrieve/bin/python ../research/artifacts/campaign-v2/h-profile/repro.py 30 20000 fixed \
   > "$OUT/repro-fixed.log" 2>&1
 ```
 

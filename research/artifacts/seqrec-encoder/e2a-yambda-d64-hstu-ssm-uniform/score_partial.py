@@ -3,7 +3,7 @@ Rebuild config.json from command.sh's overrides, then score the best epoch check
 (hstu-ep55) on val (must reproduce the logged 0.0781) and test through load_model_for_eval +
 evaluate with the training run's eval settings.
 
-    cd evaluation && uv run python ../docs/artifacts/seqrec-encoder/e2a-yambda-d64-hstu-ssm-uniform/score_partial.py
+    cd evaluation && uv run python ../research/artifacts/seqrec-encoder/e2a-yambda-d64-hstu-ssm-uniform/score_partial.py
 """
 
 import json

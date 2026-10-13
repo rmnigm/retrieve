@@ -3,8 +3,8 @@ where do their top-k lists diverge? Reproduces the C4 goodreads-d128 `c0_genre` 
 (SASRec cache, first 10 000 users, clause 0 only, chunks of 16, k_max = 1000) outside the harness.
 
     cd /workspace/wt/l4/retrieve && flock /workspace/gpu.lock uv run --no-sync python \
-        ../docs/artifacts/linr-v2-backend-parity/probe_v2_parity.py \
-        --out ../docs/artifacts/linr-v2-backend-parity/probe_v2_parity.json
+        ../research/artifacts/linr-v2-backend-parity/probe_v2_parity.py \
+        --out ../research/artifacts/linr-v2-backend-parity/probe_v2_parity.json
 """
 
 from __future__ import annotations

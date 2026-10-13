@@ -6,7 +6,7 @@
 set -u
 FROM=${FROM:-all}  # FROM=rescore runs only the V2 rescoring step (exact_miss.csv already written)
 T=/scratch/wt/tree-v210
-D=/scratch/wt/pubmed-diag/docs/artifacts/campaign-v2.10/pubmed-diag
+D=/scratch/wt/pubmed-diag/research/artifacts/campaign-v2.10/pubmed-diag
 PY=/venvs/c7-v28/bin/python
 O=/scratch/pubmed-diag
 export PYTHONPATH=$T/evaluation:$T/retrieve/src RETRIEVE_DATA_ROOT=/data HF_HOME=/scratch/hf

@@ -8,7 +8,7 @@ set -u
 REPO=/scratch/wt/v1-fuse
 PY=/venvs/v1-fuse/bin/python
 OUT=/scratch/v1-fuse/out3
-A=$REPO/docs/artifacts/campaign-v2/v1-fuse
+A=$REPO/research/artifacts/campaign-v2/v1-fuse
 CV=$(git -C "$REPO" rev-parse HEAD:retrieve/src/retrieve)
 export CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/v1-fuse-$CV HF_HOME=/scratch/hf V1FUSE_KINDS=clause
 PIN="taskset -c 64-127"

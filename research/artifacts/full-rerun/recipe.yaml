@@ -1,0 +1,70 @@
+# FULL-RERUN (roadmap step 7): everything the paper cites, rerun at one tag, into one results.parquet. README.md has the why, the
+# sizing and the trims. Every leg runs from evaluation/ of a worktree at the tag, with its own venv, CUDA_VISIBLE_DEVICES=0,
+# TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/fr-<leg>, HF_HOME=/scratch/hf, under `flock /scratch/gpu0.lock`, as
+# `$VENV/bin/python -m bench.cli ...` (never `uv run`, which masks bench's exit code); then `bench upload --verify` to
+# `fr/<stage>/<leg>` and a hub-index row. One job per GPU; a timed comparison is read inside one leg on one pod.
+recipe: 1
+tag: final-freeze                       # set at the freeze (after-legs plan step 2); every later fix is a new tag + a rerun of what it touches
+profile: lean                           # full | lean (gen_suites.py --lean); the controller's choice after README § Sizing
+hub: {repo: pinkmeme/eval-results, prefix: fr/, aggregate: fr/results.parquet}
+image: {torch: 2.10.0+cu128, triton: 3.6.0, cuda: '12.8', python: '3.11'}
+venv:
+  build: "UV_PROJECT_ENVIRONMENT=/venvs/fr uv sync --frozen --all-packages --all-groups --extra official"   # official-fork _C.so built per pod (not byte-reproducible: env.official_fork_build.so_sha256 per record)
+  official: scripts/build_official_o3.sh     # Meta's code as published, -O3 (final-pass suites, META-FORK grid)
+config_dir: "prep: cp evaluation/config/*.yaml (not suites.yaml) $CFG/; cat evaluation/config/suites.yaml research/artifacts/full-rerun/suites[-lean].yaml [$PICKS] > $CFG/suites.yaml"
+check: "python ../research/artifacts/full-rerun/check_suites.py $CFG $CFG/suites.yaml   # CPU, before every stage; exits 1 on a rule break"
+
+pods:
+  pod1: {host: e75980, gpus: [0], data: [pubmed-medcpt-dot, laion1m, laion3m, laion10m, laion30m]}
+  pode: {host: a100-x1-e, gpus: [0], data: [goodreads-work-id, arxiv-papers, laion30m, yambda-500m]}
+
+data:                                   # CPU, before stage 1; each pod builds what its legs read
+  - {pod: both, run: "eval-data synth-filter --dataset <ds> --draw <d>   # ds: goodreads (pode), arxiv (pode), laion30m (both), pubmed (pod1); d 0 (exists except pubmed), 1, 2"}
+  - {pod: pode, run: "eval-data synth-filter --dataset arxiv --correlated --draw <d>   # d 1, 2"}
+  - {pod: pod1, run: "eval-data subset laion30m laion<N>m --n-items <N>000000 --synth-only   # N 1, 3, 10: copies draws 1, 2 onto the nested subsets"}
+  - {pod: both, run: "bench check --dataset <every dataset the pod runs>"}
+
+stage1:                                 # quality-only curves and the legs that need no picks; `bench oracle` per suite and dataset first
+  pod1:
+    - {leg: curve-d768, suite: fr-curve-d768, datasets: [pubmed]}
+    - {leg: curve-d256, suite: fr-curve-d256, datasets: [laion1m, laion3m, laion10m]}
+    - {leg: curve-synth, suite: "fr-curve-synth-s<d>-d768 / -d256", datasets: ["pubmed-synth[-s<d>]", "laion{1,3,10}m-synth[-s<d>]"]}
+    - {leg: linr, suite: [fr-linr-bs64, fr-linr-bs256, fr-linr-k2048, fr-linr-synth-pubmed, fr-linr-bs64-laion], datasets: [pubmed, pubmed-synth, laion1m, laion3m, laion10m, laion30m], interleave: true}
+    - {leg: v3pool, suite: [fr-v3pool, fr-v3pool-laion], datasets: [pubmed, laion1m, laion3m, laion10m]}
+    - {leg: bloomwidth, suite: fr-bloomwidth, datasets: [pubmed]}
+  pode:
+    - {leg: curve-d128, suite: fr-curve-d128, datasets: [goodreads, arxiv]}
+    - {leg: curve-d256-30m, suite: fr-curve-d256, datasets: [laion30m]}
+    - {leg: curve-synth, suite: "fr-curve-synth-s<d>-d128 / -d256", datasets: ["goodreads-synth[-s<d>]", "arxiv-synth[-s<d>]", "arxiv-corr-synth[-s<d>]", "laion30m-synth[-s<d>]"]}
+    - {leg: linr, suite: [fr-linr-bs64, fr-linr-bs256, fr-linr-k2048, fr-linr-corr], datasets: [goodreads, arxiv, arxiv-corr-synth], interleave: true}
+    - {leg: v3pool, suite: [fr-v3pool, fr-v3pool-laion], datasets: [goodreads, arxiv, laion30m]}
+    - {leg: bloomwidth, suite: fr-bloomwidth, datasets: [goodreads, arxiv]}
+    - {leg: yambda, suite: fr-yambda, datasets: [yambda-500m]}
+
+picks:                                  # CPU, after both pods' stage-1 uploads: seed 0's curves and V3 pools -> the timed suites
+  run: "python research/artifacts/full-rerun/pick.py <stage-1 results.parquet of both pods> > $PICKS   # then check_suites.py; $PICKS goes up with fr/picks/"
+
+stage2:                                 # timed, --interleave, bs 1 / 16 / 64; a dataset's timed legs on the pod that holds it
+  pod1:
+    - {leg: timed-bloom, suite: [fr-timed-bloom-d768, fr-timed-bloom-d256, fr-timed-bloom-k1000-d768, fr-timed-bloom-k1000-d256, fr-timed-bloom-k2048-d768], datasets: [pubmed, laion1m, laion3m, laion10m], oom_fallback: "rerun failed cells one algo per process (--interleave --resume --algo), as B2"}
+    - {leg: timed-bloom-synth, suite: "fr-timed-bloom-synth-s<d>-d768 / -d256", datasets: ["pubmed-synth[-s<d>]", "laion10m-synth[-s<d>]"]}
+    - {leg: final-pass, suite: [filter, v3bits, c3-real], datasets: [pubmed]}
+    - {leg: final-pass-n, suite: [nsweep, nsweep-synth, nsweep-codesign, laion30m, laion30m-synth, laion30m-x, codesign-laion30m, c7-scorepath, seeds-c1-laion30m, seeds-c7], note: "every N-sweep leg on one pod: the C1 / C5 ratios across N are read inside it"}
+  pode:
+    - {leg: timed-bloom, suite: [fr-timed-bloom-d128, fr-timed-bloom-d256, fr-timed-bloom-k1000-d128, fr-timed-bloom-k1000-d256, fr-timed-bloom-k2048-d128], datasets: [goodreads, arxiv, laion30m], oom_fallback: as pod1}
+    - {leg: timed-bloom-synth, suite: "fr-timed-bloom-synth-s<d>-d128 / -d256", datasets: ["goodreads-synth[-s<d>]", "arxiv-synth[-s<d>]", "laion30m-synth[-s<d>]"]}
+    - {leg: final-pass, suite: [filter, synth, c3, c3-real, codesign, bloomwidth, bloomwidth-timed, v3bits, seeds-c1], datasets: [goodreads, arxiv, goodreads-synth, arxiv-synth, arxiv-corr-synth, laion30m-synth]}
+    - {leg: timed-clause, suite: "fr-timed-clause-d<dim>", profile: full, note: "SilverTorch's exact clause mode, a reference row; trim 2 drops it"}
+  trims_lean: "filter at seed 0 (--seed 0), no deep / h2h (not cited)"
+
+untimed:                                # after stage 2, at the timed points, outside every timed call (user, 2026-10-13); each output to fr/untimed/<step>
+  - {step: grade_bloom, pod: both, run: "python ../research/artifacts/results-draft/grade_bloom.py $CFG <timed bloom suite> <points.json from $PICKS> grade_<pod>_s<seed>.csv", seeds: [0, 1, 2], note: "false positives counted after timing: rejects / survivors, recall recheck off vs on"}
+  - {step: fp_adapted, pod: pod1, run: "python ../research/artifacts/results-draft/fp_adapted.py $CFG/suites.yaml fp_adapted.csv"}
+  - {step: ceiling_adapted, pod: both, run: "python ../research/artifacts/results-draft/ceiling_adapted.py $CFG ceiling/ <groups of the pod's datasets>"}
+  - {step: meta-fork-grid, pod: both, run: "research/artifacts/meta-fork/run_grid.sh at the tag (X, R, S, capture, speed; fp16 score path, recheck off for speed; PubMed on the dot build)"}
+  - {step: effective-pool, pod: cpu, run: "results.parquet columns candidate_pool / pool_passing_mean (no script)"}
+  - {step: gls_adapted, pod: cpu, run: "python research/artifacts/results-draft/gls_adapted.py <fr hub tree> gls/   # repoint its numbers/* inputs at fr/stage1"}
+  - {step: product_recall, pod: cpu, run: "python research/artifacts/results-draft/product_recall.py <fr hub tree> product_recall/   # same"}
+  - {step: score_gaps, pod: cpu, run: "python research/artifacts/results-draft/score_gaps.py score_gaps.json   # PubMed's geometry changes on dot"}
+
+gate: "every planned cell ok (OOM fallbacks superseded), D1-G's four checks, 0 manifest gaps, check_suites.py 0 problems"

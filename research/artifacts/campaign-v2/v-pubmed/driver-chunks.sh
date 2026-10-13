@@ -32,7 +32,7 @@ yield_gpu
 t0=$(date +%s); $PIN $PY -m bench.cli oracle --dataset pubmed --dim 768 --suite filter > "$L/oracle.log" 2>&1
 rc=$?; echo "$(date -Is) oracle rc=$rc s=$(( $(date +%s) - t0 ))"; [ $rc -eq 0 ] || exit $rc
 
-$PY $W/docs/artifacts/campaign-v2/v-pubmed/chunks.py 2>/dev/null | grep -- "--algo" | sed 's/^ *[0-9]* cells  //' > "$L/chunks.txt"
+$PY $W/research/artifacts/campaign-v2/v-pubmed/chunks.py 2>/dev/null | grep -- "--algo" | sed 's/^ *[0-9]* cells  //' > "$L/chunks.txt"
 n=0
 while read -r args; do
   n=$(( n + 1 ))

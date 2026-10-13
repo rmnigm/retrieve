@@ -9,8 +9,8 @@ saved reference outputs (``torch.equal`` on scores, ids equal at every finite sl
 to ties after the ``-1`` sentinel), and the saved state dicts loaded into the moved modules
 (``torch.equal`` on ids and scores). Results go to ``results.json`` next to the tensors.
 
-    cd retrieve && PYTHONPATH=. python ../docs/artifacts/library-api-refactor/l1/premove_check.py capture --dir <dir>
-    cd retrieve && PYTHONPATH=. python ../docs/artifacts/library-api-refactor/l1/premove_check.py compare --dir <dir>
+    cd retrieve && PYTHONPATH=. python ../research/artifacts/library-api-refactor/l1/premove_check.py capture --dir <dir>
+    cd retrieve && PYTHONPATH=. python ../research/artifacts/library-api-refactor/l1/premove_check.py compare --dir <dir>
 """
 
 from __future__ import annotations

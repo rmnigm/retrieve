@@ -6,7 +6,10 @@ Seeds (user, 2026-10-12; controller C3 / C4, 2026-10-13): 0-2 wherever an index 
 is random (SilverTorch, LiNR V3, every synth dataset); 1 for the exact LiNR legs. A synth dataset's draw d is the config
 `<ds>-synth-s<d>` (draw 0 is `<ds>-synth`) and runs at job seed d, so one suite per draw.
 
-usage: gen_suites.py > suites.yaml
+`--lean` (README § Sizing, the first trims): the curves and the V3 pool legs at seed 0 / draw 0 only. The picks read seed 0
+either way, and the timed suites still run every seed and draw, so the seeds then sit on the timed points alone.
+
+usage: gen_suites.py [--lean] > suites.yaml
 """
 
 import sys
@@ -23,6 +26,7 @@ P = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384]
 BIG = [4096, 16384, 65536]
 RATES4 = ["p0001", "p001", "p01", "p1"]
 SEEDS = [0, 1, 2]
+CURVE_SEEDS = [0] if "--lean" in sys.argv[1:] else SEEDS
 BENCH = {  # dataset: (dim, n_lists, clause sweeps, bloom sweeps)
     "goodreads": (128, [4096], ["c0_genre", "c1_lang_reverse", "all4"], ["c0_genre"]),
     "arxiv": (
@@ -155,8 +159,8 @@ def curve_suites(spec, name, seeds_of):
 blocks = {
     "bloom": {"m_bits": 1024, "k_hash": 5},
     # stage 1: the curves every timed point is picked from (seed 0's) and C6 / F2 reads (all seeds)
-    **curve_suites(BENCH, "fr-curve", lambda ds: [("", SEEDS, {d: d for d in ds})]),
-    **curve_suites(SYNTH, "fr-curve-synth", lambda ds: [(f"-s{s}", [s], {d: draw(d, s) for d in ds}) for s in SEEDS]),
+    **curve_suites(BENCH, "fr-curve", lambda ds: [("", CURVE_SEEDS, {d: d for d in ds})]),
+    **curve_suites(SYNTH, "fr-curve-synth", lambda ds: [(f"-s{s}", [s], {d: draw(d, s) for d in ds}) for s in CURVE_SEEDS]),
     # LiNR exact: one seed (C3)
     "fr-linr-bs64": suite(REAL, [128, 768], [V1, V2], [100, 1000], [64], [0], STUDY, interleave=BY_ALGO),
     # bs 256: V2 on PubMed is out (C2: 11 h for c3_journal_reverse, a TIMEOUT on all5); V1 alone there
@@ -177,7 +181,7 @@ blocks = {
         name: suite(
             ds, dims,
             [{"algo": "linr_v3", "backends": ["triton"], "query": {"candidate_pool_frac": [0.005, 0.01, 0.02, 0.05, 0.1, 0.2]}}],
-            ks, [1, 16], SEEDS, STUDY,
+            ks, [1, 16], CURVE_SEEDS, STUDY,
         )
         for name, ds, dims, ks in (("fr-v3pool", REAL, [128, 768], [100, 1000]), ("fr-v3pool-laion", LAION, [256], [100]))
     },
