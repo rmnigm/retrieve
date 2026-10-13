@@ -17,7 +17,10 @@ CACHE = Path(os.environ["KMEANS_CACHE"])
 
 class CachedKMeans(KMeans):
     def fit(self, embs):
-        c = torch.load(CACHE / f"{self.init}-{self.n_iter}-{self.n_lists}-s{self.seed}.pt", map_location=embs.device)
+        c = torch.load(
+            CACHE / f"{self.init}-{self.n_iter}-{self.n_lists}-s{self.seed}.pt",
+            map_location=embs.device,
+        )
         return c, self.assign(embs, c)
 
 

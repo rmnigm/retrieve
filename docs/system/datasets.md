@@ -1169,7 +1169,7 @@ parent's configs on the new data dir). It exists for the fixed-d N-sweep: LAION 
 
 `eval-data synth-filter --dataset <name> [--rates …]
 [--draw 0]` (any dataset with a `config/<name>.yaml`; built for
-goodreads, arxiv, yfcc10m and laion30m) ([`synth_filter.py`](../../evaluation/eval_datasets/synth_filter.py))
+goodreads, arxiv, yfcc10m, laion30m and the PubMed dot-product build, `config/pubmed-synth.yaml`) ([`synth_filter.py`](../../evaluation/eval_datasets/synth_filter.py))
 gives a dataset a controllable pass rate on its real embeddings. It draws
 one `u_i ~ U(0, 1)` (float64) per catalog item from
 `torch.Generator().manual_seed(20261008 + draw)`, in item-row order: N is the row

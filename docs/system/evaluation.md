@@ -393,10 +393,11 @@ Twelve files under [`evaluation/config/`](../../evaluation/config/):
 [`openalex.yaml`](../../evaluation/config/openalex.yaml) and
 [`kuairand.yaml`](../../evaluation/config/kuairand.yaml), the
 synthetic-selectivity siblings `goodreads-synth.yaml`, `arxiv-synth.yaml`,
-`yfcc10m-synth.yaml` and `laion30m-synth.yaml` plus arXiv's cluster-correlated `arxiv-corr-synth.yaml`
-([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv and
+`pubmed-synth.yaml` (the dot-product build), `yfcc10m-synth.yaml` and `laion{1,3,10,30}m-synth.yaml` plus arXiv's
+cluster-correlated `arxiv-corr-synth.yaml`, and each one's second and third draw `<name>-synth-s1.yaml` /
+`-s2.yaml` ([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv and
 pubmed in the `filter` suite, pubmed at 768; yambda-500m is unfiltered and
-read by the A5-yambda suite in `research/artifacts/yambda/`; yfcc10m, yfcc10m-synth, openalex,
+read by the A5-yambda suite in `research/artifacts/yambda/` and FULL-RERUN's `fr-yambda`; yfcc10m, yfcc10m-synth, openalex,
 yambda-5b and kuairand are out of the study and in no suite), and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
 10000` and the goodreads/arXiv sweeps, ks and batch sizes match the
@@ -759,7 +760,7 @@ died — and raises on a malformed line anywhere else.
 
 ### Self-match
 
-On arXiv and PubMed (and arxiv-synth, arxiv-corr-synth, which share arXiv's queries) a query is a
+On arXiv and PubMed (and arxiv-synth, arxiv-corr-synth, pubmed-synth and their draws, which share the parent's queries) a query is a
 catalogue item's own text and its single held-out target is that item, which stays in the index
 ([datasets](datasets.md#arxiv)), so the exact oracle's top-1 is the query itself and so is every
 method's when it finds it. Those dataset files set `self_match: true` (`Dataset.self_match`,
@@ -919,10 +920,12 @@ between eager and compiled.
 `candidate_pool_frac` (a `linr_v3` query param, in the key) is resolved
 per sweep by `run.resolve_pool`, before the build and before
 `set_query_params`, to `candidate_pool = max(POOL_MIN = 2000, round(frac
-× mean pass count over the sweep's oracle rows))`. On uniform synth every
+× mean pass count over the sweep's oracle rows))` (`run.passing_mean`). On uniform synth every
 query passes the same items, so the mean is the achieved pass count (N·p in
 expectation); on arxiv-corr-synth it is the mean of the queries' cluster sizes. The key keeps the fraction, the module gets the int, and
-the record's `candidate_pool` carries it.
+the record's `candidate_pool` carries it, with the mean it is a fraction of as
+`pool_passing_mean`, so the effective pool reads as `candidate_pool / pool_passing_mean` of the
+passing set (above 1 when the floor exceeds it); both are `results.parquet` columns.
 
 ## Output: one JSONL record per cell
 
@@ -953,6 +956,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `build_s` | float | construction + `register_index`, sync on each side (same value on every cell of one build) |
 | `compile_s` | float / null | a `compile` arm's first forward (one quality chunk), apart from `build_s` ([compiled arms](#compiled-arms)); `null` elsewhere |
 | `candidate_pool` | int / null | the `candidate_pool` the module ran with when `params` sets one: the literal, or the value `candidate_pool_frac` resolved to ([pool fractions](#pool-fractions)) |
+| `pool_passing_mean` | float / null | on a `candidate_pool_frac` cell, the mean exact pass count over the sweep's oracle rows that the fraction is of ([pool fractions](#pool-fractions)) |
 | `index_mib` | float | Σ buffers of the algo module, filter submodule included |
 | `filter_mib` | float | Σ buffers of the filter submodule alone (`0.0` without one; `silvertorch` carries its attrs inside `index_mib`) |
 | `seed_scope` | str | `pool` on the seed-free arms (`SEED_FREE_QUALITY`: the seed moves only the perf pool), `pool+build` on SilverTorch and `linr_v3`; for `linr_v3` at `k_bits = D` the label overstates the seed's reach, because its quality is seed-free ([Quality cache](#quality-cache)) |

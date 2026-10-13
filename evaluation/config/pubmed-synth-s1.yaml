@@ -1,0 +1,16 @@
+# Draw 1 of pubmed-synth (seed 20261008 + 1; docs/system/datasets.md § Synthetic selectivity attrs): pubmed-synth.yaml with draw 1's attrs; run at job seed 1.
+# PubMed on synthetic selectivity attrs (docs/system/datasets.md § Synthetic selectivity attrs), the
+# dot-product build: the parent's data_dir, content, normalize, users_limit and self_match; the attrs are
+# `eval-data synth-filter --dataset pubmed`'s. Clause j passes item i iff u_i < rates[j], rates
+# `synth_filter.RATES` (0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0); the query side is all ones.
+data_dir: data/pubmed-medcpt-dot             # MedCPT as shipped, not normalised
+content_dir: content_d768                 # relative to data_dir
+normalize: false                          # MedCPT scores by dot product (user, 2026-10-13)
+dims: [768]
+users_limit: 10000
+self_match: true                          # queries are catalogue items (docs/system/evaluation.md § Self-match)
+filters:
+  attrs: item_attrs_synth_s1.pt             # relative to data_dir
+  query_attrs: query_attrs_synth.pt
+  clause: {p0001: [0], p0003: [1], p001: [2], p003: [3], p005: [4], p01: [5], p02: [6], p03: [7], p05: [8], p1: [9]}
+  bloom: {p0001: [0], p0003: [1], p001: [2], p003: [3], p005: [4], p01: [5], p02: [6], p03: [7], p05: [8], p1: [9]}

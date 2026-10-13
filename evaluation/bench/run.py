@@ -192,9 +192,13 @@ def resolve_pool(params: dict, assets: dict) -> dict:
     if "candidate_pool_frac" not in params:
         return params
     p = dict(params)
-    mean = assets["blob"]["pass_counts"][assets["oracle_rows"]].double().mean().item()
-    p["candidate_pool"] = max(POOL_MIN, round(p.pop("candidate_pool_frac") * mean))
+    p["candidate_pool"] = max(POOL_MIN, round(p.pop("candidate_pool_frac") * passing_mean(assets)))
     return p
+
+
+def passing_mean(assets: dict) -> float:
+    """The mean exact pass count over the sweep's oracle rows: what a pool fraction is of."""
+    return assets["blob"]["pass_counts"][assets["oracle_rows"]].double().mean().item()
 
 
 def compile_warmup(module: nn.Module, inp: dict, assets: dict, device: torch.device) -> float:
@@ -649,6 +653,7 @@ def _new_record(
         "build_s": built["build_s"],
         "compile_s": built["compile_s"],
         "candidate_pool": resolved.get("candidate_pool"),
+        "pool_passing_mean": passing_mean(assets) if "candidate_pool_frac" in params else None,
         "index_mib": built["index_mib"],
         "filter_mib": built["filter_mib"],
         "seed_scope": "pool" if job.algo in SEED_FREE_QUALITY else "pool+build",

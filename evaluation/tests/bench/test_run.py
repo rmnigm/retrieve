@@ -545,6 +545,7 @@ def test_pool_fraction_end_to_end(tiny_configs, tmp_path, monkeypatch):
         ({"candidate_pool_frac": 0.5}, 4),
         ({"candidate_pool_frac": 1.0}, 8),
     ]
+    assert [r["pool_passing_mean"] for r in recs] == [8.0, 8.0]  # what the fraction is of
     assert recs[1]["quality"]["oracle"]["recall@4"] == pytest.approx(1.0)  # the whole pass set
 
 
