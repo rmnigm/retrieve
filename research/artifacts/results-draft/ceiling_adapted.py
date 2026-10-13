@@ -6,9 +6,13 @@ centroids; recall_oracle@100 over the kept queries, the probed and filter-passin
   per_row  per-row item int8 scales on the same int32-equivalent path (ST-6)
   fp16     fp16 query · fp16 items over the same probed lists: the IVF ceiling without quantisation
 The exact filter mask is ExactAttributeFilter(backend="torch"); no Triton kernel scores or filters. Quality only, no timing.
-usage (from a fork tree's evaluation/): ceiling_adapted.py CONFIG_DIR OUT_DIR [GROUP ...]"""
+usage (from a fork tree's evaluation/): [SEED=s] [SUITE=name] ceiling_adapted.py CONFIG_DIR OUT_DIR [GROUP ...]
+  SEED (default 0) is the index build's seed; SUITE (default n-ceil-adapted; FULL-RERUN: fr-ceil-adapted) the suite whose clause
+  jobs give the inputs."""
 
+import dataclasses
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -32,7 +36,8 @@ GROUPS = {  # name: (dataset config, n_lists, n_probe, sweeps), the campaign-fin
     "laion30m": ("laion30m", 16384, 4096, ["c0_domain", "tags4"]),
     "laion30m-synth": ("laion30m-synth", 16384, 4096, ["p001", "p01", "p1"]),
 }
-SUITE = "n-ceil-adapted"
+SUITE = os.environ.get("SUITE", "n-ceil-adapted")
+SEED = int(os.environ.get("SEED", "0"))
 cfg, out_dir = Path(sys.argv[1]), Path(sys.argv[2])
 names = sys.argv[3:] or list(GROUPS)
 dev = torch.device("cuda")
@@ -57,7 +62,8 @@ for name in names:
         for j in load_matrix(cfg / f"{ds}.yaml", cfg / "suites.yaml", SUITE)
         if j.dim == dim
     ]
-    measure.setup(0)
+    jobs = [dataclasses.replace(j, seed=SEED) for j in jobs]
+    measure.setup(SEED)
     inp = inputs.load_inputs(jobs[0].data, dev, with_filters=True)
     params = {"n_lists": n_lists, "n_probe": n_probe}
     m = None

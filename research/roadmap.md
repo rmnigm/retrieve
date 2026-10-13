@@ -242,11 +242,12 @@ dot-product build (MedCPT as trained) with the query's own document excluded (se
 SilverTorch runs its bloom filter with no recheck in timed code, fp16 score path (Meta's default); LiNR runs the exact filter only.
 
 Seeds and error bars (user, 2026-10-11) are part of this run: 0-2 where a build, a pool or a synthetic draw is random, one
-for exact LiNR; LiNR V2 at bs 256 on PubMed stays out (controller C2). Before it starts: the profile and trims fit to the
-credit (the sizing in [full-rerun](artifacts/full-rerun/README.md#sizing) exceeds it).
+for exact LiNR; LiNR V2 at bs 256 on PubMed stays out (controller C2). Profile full, seed-major (user GO, 2026-10-13);
+the credit covers about half of the seed-0 pass ([full-rerun § Sizing](artifacts/full-rerun/README.md#sizing)).
 
 *Gate*: every planned cell `ok`, D1-G's four checks, 0 manifest gaps.
-*Estimate*: [full-rerun § Sizing](artifacts/full-rerun/README.md#sizing): about 194 GPU-h full, 106 lean.
+*Estimate*: [full-rerun § Sizing](artifacts/full-rerun/README.md#sizing): about 244 GPU-h for the full profile (the user's
+GO, 2026-10-13), 114 for its seed-0 pass; run seed-major, so a stop leaves a complete set at fewer seeds.
 
 ### 8. F4: package the artifacts
 

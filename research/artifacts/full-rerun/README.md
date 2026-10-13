@@ -1,69 +1,64 @@
-# FULL-RERUN: every cited number at one tag
+# FULL-RERUN: every cited number at one tag, every random thing seeded
 
-Roadmap step 7. The rerun regenerates every number the paper cites, at one frozen tag, into one `results.parquet`. It runs
+Roadmap step 7. It regenerates every number the paper cites, at the tag `final-freeze`, into one `results.parquet`. It runs
 under the user's rulings of 2026-10-12/13 ([decisions](../../decisions.md)):
 
 - YFCC is out.
 - LiNR runs the exact filter only.
-- SilverTorch is Meta's code, adapted, on its bloom filter with the recheck off in timed code. The false positives are
-  counted afterwards, untimed. The score path is fp16.
+- SilverTorch is Meta's code, adapted, on its bloom filter with the recheck off in timed code. False positives are counted
+  afterwards, untimed. The score path is fp16.
 - PubMed runs on the dot-product build with the query's own document excluded.
 - LiNR V3's effective pool is reported.
 - Yambda-500m is the fifth dataset.
 
-[`recipe.yaml`](recipe.yaml) lists every leg per pod, the data steps, the stages and the untimed steps. Nothing here is
-citable until the gate in the recipe is green in [validation](../../validation.md).
+The user's GO (2026-10-13) sets the profile to **full**: three seeds wherever randomness matters, one for exact LiNR and the
+oracle, no reuse of earlier records. The run is ordered **seed-major**: seed 0 of every leg first, then seed 1, then seed 2, so a
+stop leaves a complete set at fewer seeds. Nothing here is citable until the gate in [`recipe.yaml`](recipe.yaml) is green in
+[validation](../../validation.md).
 
 | file | what |
 |---|---|
-| [`gen_suites.py`](gen_suites.py) → [`suites.yaml`](suites.yaml), [`suites-lean.yaml`](suites-lean.yaml) | stage 1: the adapted SilverTorch probe curves (clause, and bloom with the recheck off), the exact LiNR legs, V3 pools, the bloom width grid, Yambda |
-| [`pick.py`](pick.py) → the timed suites (stage 2) | from seed 0's curves: bloom at k 100 (with V3 at matched recall), 1000 and 2048, per synth draw, and the clause reference row |
-| [`check_suites.py`](check_suites.py) | CPU dry resolve of every suite plus the arm rules (recheck off, no LiNR bloom, no YFCC, no V2 bs 256 on PubMed) |
-| [`sizing.py`](sizing.py) | GPU-h per leg and pod, the table below |
+| [`recipe.yaml`](recipe.yaml) | the plan: pods, seeds, the per-seed order, the gate |
+| [`runbook-pod1.md`](runbook-pod1.md), [`runbook-pode.md`](runbook-pode.md) | the exact commands per pod: venv, data, launch, monitoring, kill and retry |
+| [`queue.sh`](queue.sh) | one sequential driver per GPU, seed-major; calls the scripts below |
+| [`run_leg.sh`](run_leg.sh) | one leg at one seed: resolved-arm check, `bench check` / `oracle` / `run` under the GPU lock, retry, upload to `fr/<leg>-<pod>-s<seed>` |
+| [`gen_suites.py`](gen_suites.py) → [`suites.yaml`](suites.yaml) | stage 1: probe curves (clause, and bloom with the recheck off), the exact LiNR legs, V3 pools, the bloom width grid, Yambda, `fr-ceil-adapted` (the ceiling script's inputs). `--lean` → [`suites-lean.yaml`](suites-lean.yaml) is not the run's |
+| [`pick.py`](pick.py), [`make_picks.sh`](make_picks.sh) | stage 2's timed suites from seed 0's curves: bloom at k 100 (with V3 at matched recall), 1000 and 2048, per synth draw, the clause reference row |
+| [`prep_config.py`](prep_config.py) | a config dir: the dataset yamls, and one suites file merged from the final pass's, stage 1's and the picks; final-pass suites with a SilverTorch or V3 arm are raised to seeds 0-2 |
+| [`check_suites.py`](check_suites.py) | CPU dry resolve plus the arm rules (recheck off, no LiNR bloom, no YFCC, no V2 bs 256 on PubMed) |
+| [`untimed.sh`](untimed.sh), [`points.py`](points.py), [`metafork_grid.sh`](metafork_grid.sh) | the untimed steps: grade_bloom at the timed points, the C6 ceiling split, fp_adapted, score_gaps, and the META-FORK grid (int32 and fp16) |
+| [`sizing.py`](sizing.py) | GPU-h per leg and pod |
 
-**Stages.**
-1. Curves (quality only) and the legs that need no picks.
-2. `pick.py` on seed 0's stage-1 records (controller C4).
-3. The timed suites at every seed.
-4. The final pass's suites (`evaluation/config/suites.yaml`: LiNR C1-C3, Meta's code as published for C5 and C7).
-5. The untimed steps.
+**Seeds.**
+- A SilverTorch build (k-means), a LiNR V3 pool (OPORP), a synthetic draw and the timing run at seeds 0, 1 and 2.
+- Synthetic draw `d` is the config `<ds>-synth-s<d>`, run at job seed `d` ([datasets](../../../docs/system/datasets.md#synthetic-selectivity-attrs)).
+- Exact LiNR and the oracle run once.
+- An exact arm inside a seeded interleave group is timed at every seed, and its quality is copied (`SEED_FREE_QUALITY`).
+- The untimed grade_bloom and ceiling steps take the seed (`SEED=`).
+- fp_adapted (the bloom index has no k-means) and score_gaps are seed-free.
+- The META-FORK grid is seed 0.
 
-**Seeds** (controller C3):
-- 0-2 where something is random: a SilverTorch build, a LiNR V3 pool, a synthetic draw.
-- One seed for exact LiNR, except where it shares an interleave group with a seeded arm. There it is timed at every seed, and
-  its quality is copied (`SEED_FREE_QUALITY`).
-- Synthetic draw `d` is the config `<ds>-synth-s<d>` at job seed `d` ([datasets](../../../docs/system/datasets.md#synthetic-selectivity-attrs)).
-
-**Not in the rerun:**
-- LiNR V2 at bs 256 on PubMed (controller C2): the earlier TIMEOUT and the 2.55 s record stand.
-- NUMBERS' own suites (`../numbers/`): these legs replace them. Their clause-mode bloom arms ran with the recheck on, which
-  no longer matches the study.
+**Not in the rerun:** LiNR V2 at bs 256 on PubMed (controller C2: the earlier TIMEOUT and the 2.55 s record stand), and NUMBERS'
+own suites (`../numbers/`).
 
 ## Sizing
 
 From `sizing.py`. The basis is one seed's cost from the measured walls of the 2026-10-12/13 legs, the final pass's
-`elapsed_s` (merged-4016, out-of-study arms dropped) and the NUMBERS estimates, times 1.2. Rough figures.
+`elapsed_s` (merged-4016, out-of-study arms dropped) and the NUMBERS estimates, times 1.2. The figures are rough. The new legs
+(PubMed synth, LAION synth bloom, k 2048 bloom) and the META-FORK grid have no measured basis.
 
-| profile | pod 1 GPU-h | pod e GPU-h | balanced wall | at 3.71 USD / h for both pods |
+| profile | pod 1 GPU-h | pod e GPU-h | wall (both pods at once) | at 3.71 USD / h for both pods |
 |---|---|---|---|---|
-| full (curves, V3 pools at 3 seeds; clause reference row) | 106 | 88 | ≈ 97 h | ≈ 360 USD |
-| lean (curves, V3 pools at seed 0; no clause row; final pass trimmed) | 58 | 48 | ≈ 53 h | ≈ 197 USD |
+| **full, the run** | 119 | 125 | ≈ 125 h | ≈ 463 USD |
+| its seed-0 pass | 58 | 56 | ≈ 58 h | ≈ 215 USD |
 | credit | | | ≈ 31 h | 115 USD |
 
-Neither profile fits the credit. Balancing the two pods means copying `pubmed-medcpt-dot` (~17 GB) and the LAION subsets to
-pod e.
+The credit covers about half of the seed-0 pass. Each pod reaches about this far:
+1. Stage 1: ~20 h.
+2. The picks.
+3. The timed bloom suites: ~6 h.
+4. The untimed steps.
+5. Part of the final pass's suites.
 
-Trims, in order. Each line gives what it removes and the GPU-h it saves:
-1. Curves and V3 pools at seed 0 (`--lean`): the picks read seed 0 anyway. Saves ~60.
-2. The clause reference row. Saves ~18.
-3. Final pass: `filter` at seed 0, no `deep` / `h2h` (not cited). Saves ~11.
-4. k 1000 and k 2048 bloom timed at seed 0. Saves ~7.
-5. Synth timed at draw 0 only. Saves ~7.
-6. META-FORK grid: X / R from the accepted gate if the fork tree is unchanged at the tag; only the speed column is rerun. Saves ~2.
-7. Bloom timed (k 100) at 2 seeds. Saves ~5.
-
-After trims 1-7 the total is about 83 GPU-h, about 42 h on two balanced pods: still over the credit.
-
-Beyond that, the only large lever is to reuse the exact LiNR and postfilter records (the final pass's, library `e16512f5`,
-and NUMBERS' L legs) instead of rerunning them. That saves ~30 more, to about 50 GPU-h, which fits. It breaks "one tag for
-everything" and is the user's call.
+Not reached on the credit: the rest of the final pass at seed 0, the META-FORK grid, the clause reference row, and seeds 1-2.
+The user is told the top-up: ≈ 100 USD for the rest of seed 0, and ≈ 350 USD for the full run.

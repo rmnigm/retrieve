@@ -22,13 +22,13 @@ LEGS = {
         "pubmed-synth new (~3.5); LAION 10 / 30 M synth bloom new",
     ),
     "fr-linr-* (exact, one seed)": (
-        (6.3, 1.2),
+        (2.6, 4.9),
         1,
         1,
-        "L1 without V2 bs 256 PubMed, L1b, L3, L4, PubMed synth crossover (~3.7)",
+        "L1 without V2 bs 256 PubMed, L1b, L3, L4; PubMed synth crossover (~3.7) on pod e",
     ),
-    "fr-v3pool*": ((3.0, 2.0), 3, 1, "L2 + L2b"),
-    "fr-bloomwidth": ((0.3, 0.05), 1, 1, "A4"),
+    "fr-v3pool*": ((2.0, 3.0), 3, 1, "L2 + L2b; PubMed's on pod e"),
+    "fr-bloomwidth": ((0.0, 0.35), 1, 1, "A4, on pod e"),
     "fr-yambda": ((0.0, 0.1), 3, 3, "A5 (6 min) + oracles"),
     "fr-timed-bloom (k 100, + V3)": ((1.9, 2.4), 3, 3, "B2 4.2 h measured"),
     "fr-timed-bloom-k1000": ((0.5, 1.5), 3, 3, "B2 k 1000 1.5 h measured (pod e)"),
@@ -41,9 +41,15 @@ LEGS = {
     ),
     "fr-timed-clause (reference row)": (
         (8.0, 7.0),
-        1,
+        3,
         0,
         "A2 legs at k 100; trim 2 drops it",
+    ),
+    "final-pass random suites, seeds 1-2 (prep_config.py)": (
+        (0.8, 4.7),
+        2,
+        2,
+        "official / V3 suites raised to 3 seeds: synth, codesign*, c7, v3bits, deep, h2h, bloomwidth*",
     ),
     "final-pass suites": ((17.4, 8.6), 1, 1, "merged-4016 elapsed_s, kept arms 26.0 h"),
     "final-pass trims (filter seed 0, no deep / h2h)": ((-5.5, -3.3), 0, 1, "trim 3"),
@@ -65,7 +71,7 @@ LEGS = {
 def table(col):
     rows, tot = [], [0.0, 0.0]
     for leg, ((p1, pe), full, lean, note) in LEGS.items():
-        n = full if col == "full" else lean
+        n = {"full": full, "lean": lean, "seed 0 pass": min(full, 1)}[col]
         a, b = p1 * n * OVERHEAD, pe * n * OVERHEAD
         if n:
             rows.append(f"| {leg} | {n} | {a:.1f} | {b:.1f} | {note} |")
@@ -78,7 +84,7 @@ budget = CREDIT_USD / USD_PER_POD_HOUR
 print(
     f"Credit: {CREDIT_USD} USD / {USD_PER_POD_HOUR} USD an hour for both pods = {budget:.0f} h of wall per pod.\n"
 )
-for col in ("full", "lean"):
+for col in ("full", "seed 0 pass", "lean"):
     rows, (a, b) = table(col)
     print(
         f"**{col}**\n\n| leg | seeds | pod 1 GPU-h | pod e GPU-h | basis |\n|---|---|---|---|---|"

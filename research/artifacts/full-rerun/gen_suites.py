@@ -194,6 +194,13 @@ blocks = {
         {"goodreads": ["c0_genre"], "arxiv": ["all4", "c0_maincat", "c3_nversions"], "pubmed": ["c0_mesh"]},
         kinds=("bloom",), perf=False,
     ),
+    # read by results-draft/ceiling_adapted.py (SUITE=fr-ceil-adapted) for its inputs and clause sweeps; never run by bench
+    "fr-ceil-adapted": suite(
+        ["goodreads", "goodreads-synth", "arxiv", "arxiv-synth", "pubmed", "laion1m", "laion3m", "laion30m", "laion30m-synth"],
+        [128, 256, 768],
+        [{"algo": "silvertorch", "backends": ["official-fork"], "build": {"n_lists": [4096]}, "query": {"n_probe": [8]}}],
+        [100], [16], SEEDS, {}, perf=False,
+    ),  # fmt: skip
     # Yambda (user, 2026-10-13): adapted SilverTorch only, unfiltered, the exact scan as the reference
     "fr-yambda": suite(
         ["yambda-500m"], [64, 128, 256],

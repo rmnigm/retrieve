@@ -7,11 +7,14 @@ Recorded per point: rejects / survivors and rejects / (probed - exact), mean ove
 records (B1 and the clause curves), not from here. Nothing here is timed. The probed clusters are the fp32 centroid top-n_probe, which can differ
 at ties from the kernel's own probe selection. The bloom and exact masks are computed once per query chunk for every n_probe.
 
-usage (from a tree's evaluation/): grade_bloom.py CONFIG_DIR SUITE POINTS_JSON OUT_CSV
+usage (from a tree's evaluation/): [SEED=s] grade_bloom.py CONFIG_DIR SUITE POINTS_JSON OUT_CSV
+  SEED (default 0): the index build's seed, as the timed leg's job seed
   POINTS_JSON: [[dataset, sweep, n_lists, [n_probe, ...]], ...]"""
 
 import csv
+import dataclasses
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -23,6 +26,7 @@ from retrieve.ops import official as official_mod
 
 DIM = {"goodreads": 128, "arxiv": 128, "pubmed": 768}
 cfg_dir, suite, out = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[4])
+SEED = int(os.environ.get("SEED", "0"))
 points = json.loads(Path(sys.argv[3]).read_text())
 dev = torch.device("cuda")
 ocfg = official_mod.DEFAULT_CONFIG
@@ -32,8 +36,12 @@ for ds, sw, nl, probes in points:
     by_ds.setdefault(ds, []).append((sw, nl, probes))
 for ds, items in by_ds.items():
     dim = DIM.get(ds.removesuffix("-synth"), 256)
-    jobs = [j for j in load_matrix(cfg_dir / f"{ds}.yaml", cfg_dir / "suites.yaml", suite) if j.dim == dim and j.filter_kind == "bloom"]
-    measure.setup(0)
+    jobs = [
+        dataclasses.replace(j, seed=SEED)
+        for j in load_matrix(cfg_dir / f"{ds}.yaml", cfg_dir / "suites.yaml", suite)
+        if j.dim == dim and j.filter_kind == "bloom"
+    ]
+    measure.setup(SEED)
     inp = inputs.load_inputs(jobs[0].data, dev, with_filters=True)
     exact = ExactAttributeFilter(backend="torch")
     exact.register_index(inp["item_attrs"], clause_is_reverse=inp["clause_is_reverse"])

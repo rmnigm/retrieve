@@ -4,7 +4,8 @@ counts per suite, and the study's arm rules on every resolved job. Exits 1 on a 
 Rules: SilverTorch bloom on the adapted backend runs with the recheck off (user, 2026-10-12); no LiNR arm filters with a
 bloom (user, 2026-10-13); no YFCC dataset (user, 2026-10-13); no LiNR V2 at bs 256 on PubMed (controller C2, 2026-10-13).
 
-usage: check_suites.py CONFIG_DIR SUITES_YAML [...]   (CONFIG_DIR: the dataset yamls; the suites files are merged)
+usage: check_suites.py CONFIG_DIR SUITES_YAML [...] [--only SUITE[,SUITE...]]
+  CONFIG_DIR: the dataset yamls; the suites files are merged; --only checks those suites (run_leg.sh, before each suite)
 """
 
 import sys
@@ -16,7 +17,11 @@ import yaml
 
 from bench.config import load_matrix
 
-cfg, files = Path(sys.argv[1]), [Path(p) for p in sys.argv[2:]]
+args = sys.argv[1:]
+only = set(args.pop(args.index("--only") + 1).split(",")) if "--only" in args else None
+if only is not None:
+    args.remove("--only")
+cfg, files = Path(args[0]), [Path(p) for p in args[1:]]
 merged = {}
 for f in files:
     merged.update(yaml.safe_load(f.read_text()))
@@ -25,7 +30,11 @@ with tempfile.TemporaryDirectory() as tmp:
     suites_yaml = Path(tmp) / "suites.yaml"
     suites_yaml.write_text(yaml.safe_dump(merged))
     for name, s in merged.items():
-        if not isinstance(s, dict) or "datasets" not in s:
+        if (
+            not isinstance(s, dict)
+            or "datasets" not in s
+            or (only and name not in only)
+        ):
             continue
         jobs = cells = 0
         for ds in s["datasets"]:

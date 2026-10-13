@@ -7,7 +7,7 @@ every seed (synth draw d at seed d). Per (dataset, dim, kind, sweep, n_lists) th
   of `fr-v3pool*` reaching recall@100 0.90 / 0.95; a target no pool reaches within 20 % gets no V3 point).
 - `fr-timed-bloom-k2048-d<dim>`: the papers' own k on one sweep per real dataset, at the union of its k 100 / k 1000 picks.
 - `fr-timed-bloom-synth-s<d>-d<dim>`: the synth datasets with a bloom curve, draw d at seed d.
-- `fr-timed-clause-d<dim>`: SilverTorch's exact clause mode (our adaptation, a reference row only) at its k 100 picks, seed 0.
+- `fr-timed-clause-d<dim>`: SilverTorch's exact clause mode (our adaptation, a reference row only) at its k 100 picks, every seed.
 Every suite is bs 1 / 16 / 64, interleaved by (algo, n_lists).
 
 usage: pick.py STAGE1_PARQUET [...] > suites-timed.yaml
@@ -171,7 +171,7 @@ for dim, keys in by_dim(b100, True).items():
         )
 c100 = points.get((100, "clause"), {})
 for dim, keys in by_dim(c100, False).items():
-    out[f"fr-timed-clause-d{dim}"] = suite(dim, keys, [100], c100, "clause", [0])
+    out[f"fr-timed-clause-d{dim}"] = suite(dim, keys, [100], c100, "clause", SEEDS)
 yaml.dump(out, sys.stdout, sort_keys=False, width=140, Dumper=NoAlias)
 n = {f"{k}/{kind}": sum(map(len, v.values())) for (k, kind), v in points.items()}
 print(

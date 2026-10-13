@@ -5,9 +5,11 @@ the bloom does not depend on it); its full survivor mask comes from ``bloom_inde
 FPR = (bloom survivors - exact passes) / (N - exact passes), with the exact pass counts from the sweep's oracle blob; a survivor count below
 the exact count (a false negative) would be a bug and is counted. Quality only, no timing, no recheck anywhere.
 
-usage (from a tree's evaluation/): fp_adapted.py SUITES_YAML OUT_CSV"""
+usage (from a tree's evaluation/): [SUITE=name] fp_adapted.py SUITES_YAML OUT_CSV
+  SUITE (default n-bloomwidth; FULL-RERUN: fr-bloomwidth) names the width grid's jobs; the dataset yamls sit beside SUITES_YAML."""
 
 import csv
+import os
 import sys
 from pathlib import Path
 
@@ -20,11 +22,12 @@ SWEEPS = {"goodreads": ["c0_genre"], "arxiv": ["all4", "c0_maincat", "c3_nversio
 DIM = {"goodreads": 128, "arxiv": 128, "pubmed": 768}
 WIDTHS, KS = [64, 128, 256, 512, 1024, 2048], [3, 5]
 suites, out = Path(sys.argv[1]), Path(sys.argv[2])
+SUITE = os.environ.get("SUITE", "n-bloomwidth")
 cfg = official_mod.DEFAULT_CONFIG
 dev = torch.device("cuda")
 rows_out = []
 for ds, sweeps in SWEEPS.items():
-    jobs = [j for j in load_matrix(Path("config") / f"{ds}.yaml", suites, "n-bloomwidth") if j.dim == DIM[ds]]
+    jobs = [j for j in load_matrix(suites.parent / f"{ds}.yaml", suites, SUITE) if j.dim == DIM[ds]]
     measure.setup(0)
     inp = inputs.load_inputs(jobs[0].data, dev, with_filters=True)
     n = inp["n_items"]

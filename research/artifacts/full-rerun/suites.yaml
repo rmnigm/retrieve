@@ -3416,6 +3416,42 @@ fr-bloomwidth:
       - 5
       recheck:
       - false
+fr-ceil-adapted:
+  perf: false
+  datasets:
+  - goodreads
+  - goodreads-synth
+  - arxiv
+  - arxiv-synth
+  - pubmed
+  - laion1m
+  - laion3m
+  - laion30m
+  - laion30m-synth
+  dims:
+  - 128
+  - 256
+  - 768
+  filter_kinds:
+  - clause
+  ks:
+  - 100
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  - 1
+  - 2
+  arms:
+  - algo: silvertorch
+    backends:
+    - official-fork
+    build:
+      n_lists:
+      - 4096
+    query:
+      n_probe:
+      - 8
 fr-yambda:
   perf: false
   datasets:
