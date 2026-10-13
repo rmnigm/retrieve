@@ -388,8 +388,9 @@ Twelve files under [`evaluation/config/`](../../evaluation/config/):
 synthetic-selectivity siblings `goodreads-synth.yaml`, `arxiv-synth.yaml`,
 `yfcc10m-synth.yaml` and `laion30m-synth.yaml` plus arXiv's cluster-correlated `arxiv-corr-synth.yaml`
 ([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv and
-pubmed in the `filter` suite, pubmed at 768; yfcc10m, yfcc10m-synth, openalex,
-yambda and kuairand are out of the study and in no suite), and
+pubmed in the `filter` suite, pubmed at 768; yambda-500m is unfiltered and
+read by the A5-yambda suite in `research/artifacts/yambda/`; yfcc10m, yfcc10m-synth, openalex,
+yambda-5b and kuairand are out of the study and in no suite), and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
 10000` and the goodreads/arXiv sweeps, ks and batch sizes match the
 [golden cells](../../evaluation/golden/README.md), so the two stay
