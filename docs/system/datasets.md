@@ -25,7 +25,7 @@ gets is decided by whether it sets `checkpoint`:
 
 | shape | datasets | query embeddings come from | filters |
 |---|---|---|---|
-| **sequential** | goodreads; out of the study: yambda-500m, yambda-5b, kuairand | a trained SASRec checkpoint ([which one](checkpoints.md#what-the-harness-reads)), encoded at eval time | goodreads, kuairand |
+| **sequential** | goodreads, yambda-500m (unfiltered); out of the study: yambda-5b, kuairand | a trained SASRec checkpoint ([which one](checkpoints.md#what-the-harness-reads)), encoded at eval time | goodreads, kuairand |
 | **text** | arxiv, arxiv-synth, arxiv-corr-synth, yfcc10m, pubmed, laion30m, openalex | pre-encoded embeddings on disk | yes |
 
 A third variant, **synthetic**, is a text dataset grown to arbitrary `N`
@@ -157,8 +157,14 @@ parquet schema (nested `primary_topic.field.id` etc.) and runs `prep` →
 
 ### yambda
 
-Yambda is out of the study ([decisions](../../research/decisions.md#datasets)); its
-ETL, configs and checkpoints stay.
+yambda-500m is in the study unfiltered only: it has no attributes, so its
+config has no `filters` block and every cell is `none`; `users_limit: 10000`
+keeps the first 10,000 of 45,932 test users ([decisions](../../research/decisions.md#datasets)).
+The harness reads the E1c checkpoints `checkpoints/sasrec-ssm-logq-d{64,128,256}`
+and `test.parquet`, which is the Hub's `trainer/test.parquet` (the split
+the checkpoints were scored on; the Hub's root `test.parquet` has the
+same rows without timestamps). yambda-5b is out of the study; its ETL,
+config and checkpoints stay.
 
 `uv run eval-data yambda prep --variant {50m,500m,5b} --output-dir data/yambda/<v>`
 

@@ -455,10 +455,16 @@ now on; the [roadmap](roadmap.md) holds the steps.
   stay; it is in no suite. A PubMed synthetic-filter leg joins FULL-RERUN.
 - **Dropped**: OpenAlex and Semantic Scholar SPECTER2 (user, 2026-10-08;
   [backlog](backlog.md#datasets-not-in-the-study)); Amazon Reviews 2023; Cohere Wikipedia (scale without
-  meaningful filters, closed query encoder); yambda-500m and yambda-5b
-  (user: no attributes, so no filtered cells); KuaiRand-27K (user: does
-  not fit the study). Their checkpoints and trainer results stay as they
-  are.
+  meaningful filters, closed query encoder); yambda-5b (no attributes, and
+  its checkpoints are gSASRec, not E1c); KuaiRand-27K (user: does not fit
+  the study). Their checkpoints and trainer results stay as they are.
+- **Yambda-500m in, unfiltered** (user, 2026-10-13): how recall against the
+  exact top-k tracks end-task recall (held-out Listen+ events), across
+  dims. SilverTorch adapted only, `filter_kind none` (Yambda has no
+  attributes), an n_lists / n_probe sweep at d64 / d128 / d256 on the E1c
+  checkpoints, the first 10,000 test users; an exact scan as the
+  reference. The abstract's "five public datasets" counts it in place of
+  YFCC.
 - **LAION as a 30 M scale point, `filter` only** (user, 2026-10-10;
   roadmap V-LAION30): Re-LAION-2B-en-research-safe captions encoded by us
   (nomic-embed-text-v1.5, Matryoshka d256, a native width of that
@@ -517,8 +523,7 @@ benchmarks.
   otherwise never trained on ([temporal drift](validation.md#kuairand-temporal-drift)). d128 was
   not run ([OOM](validation.md#final-models-the-e1c-recipe)). KuaiRand is out of the study
   (Datasets above); the refit stands as a trainer result only.
-- **The harness uses the E1c checkpoints** (user): goodreads `sasrec-ssm-logq-d{dim}` (yambda-500m's
-  config reads its own, but yambda is out of the study). Records made on a gSASRec checkpoint are kept as that experiment, not deleted and not
+- **The harness uses the E1c checkpoints** (user): goodreads and yambda-500m `sasrec-ssm-logq-d{dim}`. Records made on a gSASRec checkpoint are kept as that experiment, not deleted and not
   mixed with the new ones; the golden baseline stays on `gsasrec-d128-drop0.5-id`, because it compares
   two harnesses on fixed inputs ([what must be redone](validation.md#encoder-switch-evals-to-redo)).
 - **Out of scope for this line:** a LLaMA block, row-wise Adagrad, a bf16 table,
