@@ -7,4 +7,5 @@ mkdir -p "$OUT"
 for f in "$TREE"/evaluation/config/*.yaml; do [ "$(basename "$f")" = suites.yaml ] || cp "$f" "$OUT/"; done
 cat "$HERE/suites.yaml" > "$OUT/suites.yaml"
 [ -f "$HERE/suites-timed.yaml" ] && cat "$HERE/suites-timed.yaml" >> "$OUT/suites.yaml"
+[ -f "$HERE/suites-bloom-timed.yaml" ] && cat "$HERE/suites-bloom-timed.yaml" >> "$OUT/suites.yaml"
 echo "$OUT/suites.yaml: $(grep -c '^[a-z0-9-]*:' "$OUT/suites.yaml") top-level blocks"
