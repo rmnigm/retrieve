@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
+import pytest
 import torch
 import yaml
 
 from eval_datasets import layout, synth_filter
 from eval_datasets.ingest import ingest, nearest_items
-from eval_datasets.subset import build, subset_rows, write_configs
+from eval_datasets.subset import build, subset_rows, sync_synth, write_configs
 
 
 def _parent(tmp_path):
@@ -64,3 +65,20 @@ def test_rows_nest_and_item_files_are_the_parents_rows(tmp_path):
     assert side["n_items"] == 40 and side["pass_counts"][-1] == 40
     write_configs("par", "sub", cfg)
     assert yaml.safe_load((cfg / "sub.yaml").read_text())["data_dir"] == "data/sub"
+
+
+def test_a_later_synth_draw_syncs_onto_the_subset(tmp_path):
+    parent, cfg = _parent(tmp_path)
+    out = tmp_path / "data" / "sub"
+    build(parent, out, 40, seed=3, shard_rows=10)
+    synth_filter.build(parent, draw=2)
+    assert sync_synth(parent, out, seed=3) == [0, 2]
+    f = layout.synth_draw_name(synth_filter.ITEM_ATTRS, 2)
+    assert torch.equal(torch.load(out / f), torch.load(parent / f)[subset_rows(60, 40, seed=3)])
+    assert f in (out / "MANIFEST.sha256").read_text()
+    layout.check_synth_rates(out / f)
+    with pytest.raises(ValueError, match="does not give the subset's rows"):
+        sync_synth(parent, out, seed=4)
+    (cfg / "par-synth-s2.yaml").write_text("data_dir: data/par\n")
+    write_configs("par", "sub", cfg)
+    assert yaml.safe_load((cfg / "sub-synth-s2.yaml").read_text())["data_dir"] == "data/sub"

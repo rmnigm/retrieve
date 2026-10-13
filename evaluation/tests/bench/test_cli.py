@@ -284,14 +284,15 @@ def test_cli_run_checkpoint_override_lands_as_inputs(tiny_configs, tmp_path, mon
 def test_bench_oracle_prebuilds_every_sweep_and_run_builds_none(
     tiny_configs, tmp_path, monkeypatch
 ):
-    """G-oracle (CPU): ``bench oracle`` writes the blob of every filter sweep the suite reads
-    (clause c0, c0c1 at k_max 4), no timing; a following ``bench run`` finds them all."""
+    """G-oracle (CPU): ``bench oracle`` writes the blob of every sweep the suite reads (clause
+    c0, c0c1 and the unfiltered full scan at k_max 4), no timing; a following ``bench run``
+    finds them all."""
     ds, _ = tiny_configs
     common = ["--config-dir", str(ds.parent)]
     r = CliRunner().invoke(cli.main, ["oracle", "--dataset", "tiny", "--suite", "e2e", *common])
     assert r.exit_code == 0, r.output
     gt = load_matrix(ds, ds.parent / "suites.yaml", "e2e")[0].data.gt_dir
-    assert sorted(p.name.split("_")[2] for p in gt.glob("oracle_v4_*.pt")) == ["c0", "c0c1"]
+    assert sorted(p.name.split("_")[2] for p in gt.glob("oracle_v4_*.pt")) == ["c0", "c0c1", "full"]
 
     def boom(*a, **k):
         raise AssertionError("bench run rebuilt a prebuilt oracle")

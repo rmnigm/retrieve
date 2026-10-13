@@ -61,14 +61,18 @@ def test_build_writes_the_four_files_and_leaves_the_real_attrs(tmp_path, legacy)
     assert torch.equal(loaded, item) and rev is None
 
 
-def test_same_seed_is_byte_identical(tmp_path):
+def test_same_draw_is_byte_identical_and_draws_sit_side_by_side(tmp_path):
     names = (sf.ITEM_ATTRS, sf.U_FILE, sf.QUERY_ATTRS, sf.SIDECAR)
     a, b = (write_tiny_dataset(tmp_path / x, n=40, u=9) for x in "ab")
     sf.build(a)
     sf.build(b)
     assert all((a / f).read_bytes() == (b / f).read_bytes() for f in names)
-    sf.build(b, seed=1)
-    assert (a / sf.U_FILE).read_bytes() != (b / sf.U_FILE).read_bytes()
+    meta = sf.build(b, draw=1)
+    assert meta["seed"] == sf.SEED + 1 and meta["draw"] == 1
+    assert all((a / f).read_bytes() == (b / f).read_bytes() for f in names)  # draw 0 untouched
+    u1 = (b / layout.synth_draw_name(sf.U_FILE, 1)).read_bytes()
+    assert u1 != (a / sf.U_FILE).read_bytes()
+    layout.check_synth_rates(b / layout.synth_draw_name(sf.ITEM_ATTRS, 1))
 
 
 def test_cli_resolves_data_dir_from_the_dataset_yaml(tmp_path):

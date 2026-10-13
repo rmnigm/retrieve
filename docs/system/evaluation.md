@@ -654,9 +654,10 @@ dataset. A backend is the thing under test, so it gets
 the process: no dynamo cache, allocator arena or CUDA-graph pool outlives
 it, at the cost of a dataset reload and a CUDA context init per group.
 `bench oracle --dataset D --suite S` builds (or finds) the [oracle
-blob](#oracle-blob-v4) of every filter sweep the suite's jobs read, one per
-`(dim, sweep, k_max)`, in its own process, with no module and no timing
-(`run.prebuild_oracles`); it exits 1 when the narrows select no filter sweep.
+blob](#oracle-blob-v4) of every sweep the suite's jobs read, one per
+`(dim, sweep, k_max)` (a `none` cell's is the unfiltered exact top-k, shared by every suite on
+the same inputs), in its own process, with no module and no timing
+(`run.prebuild_oracles`); it exits 1 when the narrows select no sweep.
 Run it before a campaign: `bench run` still builds a missing blob, but warns
 that it should have been prebuilt.
 `bench check --dataset D` runs `eval_datasets.layout.validate_layout` on
@@ -698,9 +699,10 @@ latency_kw=None, device=None) -> Counter` runs the jobs in order:
 2. per `(dataset, dim)`: `inputs.load_inputs` (with attrs when any job of
    the group is a filter cell); the previous inputs are freed first;
 3. per `(filter_kind, sweep, filter backend, k_max, bloom params)`:
-   `sweep_qa` → `build_filters` → on filter cells `exact_filter` +
+   `sweep_qa` → `build_filters` → `exact_filter` (none on a `none` cell) +
    `oracle.load_or_build` (blob v4 at `k_max = max(ks)`, `k_max + 1` on a
-   [self-excluded](#self-match) cell) and on bloom cells
+   [self-excluded](#self-match) cell; a `none` cell's blob is unfiltered and keyed with
+   `run.NO_ATTRS`, so it does not depend on the dataset's attrs) and on bloom cells
    `pass_counts` → `bloom_fp_rate`; the row masks: `keep` (not
    skip-masked), `oracle_rows` (kept with ≥ 1 survivor), `heldout_rows` (kept, ≥ 1 target, and on filter cells
    `target_in_filter`);
@@ -763,7 +765,7 @@ catalogue item's own text and its single held-out target is that item, which sta
 method's when it finds it. Those dataset files set `self_match: true` (`Dataset.self_match`,
 default false; LAION, YFCC and OpenAlex queries are never in the catalogue, Goodreads' are user
 histories). On such a dataset every **filter** cell is self-excluded (`Job.self_excluded`; a
-`none` cell has no oracle side and is unchanged):
+`none` cell's oracle keeps the own item and its key is unchanged):
 
 - the self id of query `u` is its held-out target `targets[u, 0]`;
 - the oracle is requested at `k_max + 1` with `slice_wider=True`: a cached blob of the same
@@ -941,7 +943,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `path` | str | `PATHS[(algo, filter_kind, backend)]` |
 | `n_items`, `n_queries` | int | catalogue size, queries after `users_limit` |
 | `n_kept` | int | queries not skip-masked (every query on `none` cells) |
-| `n_queries_oracle` | int / null | kept queries with ≥ 1 survivor (the oracle metrics' `n`); `null` on `none` cells |
+| `n_queries_oracle` | int | kept queries with ≥ 1 survivor (the oracle metrics' `n`; every kept query on `none` cells) |
 | `n_queries_heldout` | int | queries the held-out metrics cover (kept, ≥ 1 target, `target_in_filter` on filter cells) |
 | `n_targets_in_filter` | int | held-out targets those queries are scored against: every valid target on `none` cells, only the ones the exact mask admits on filter cells |
 | `pass_rate` | float | exact mask pass rate over kept queries (`1.0` on `none`) |
@@ -957,7 +959,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `interleave` | dict / null | `{group, arms, position}` when the cell ran in an [interleave group](#interleaved-groups); `null` otherwise |
 | `quality_source` | dict / null | `null` when this record computed its quality; `{seed, code_version}` of the record the [quality cache](#quality-cache) copied it from |
 | `per_query` | str / null | the [per-query sidecar](#per-query-sidecar) relative to the results root; `null` without quality |
-| `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; on filter cells also `oracle: {…}` (ranked-prefix targets); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); on a [self-excluded](#self-match) cell `self_excluded: true` and `self_top1_share`; on every cell of a `self_match` dataset `heldout_label: "self_retrieval"` (its held-out recall is self-retrieval, not end-task recall); `null` with `--skip-quality` |
+| `quality` | dict / null | `heldout: {recall@k, ndcg@k, precision@k, mrr@k for k in ks, n}`, each metric `null` when `n == 0`; `oracle: {…}` (ranked-prefix targets; the unfiltered exact top-k on `none` cells); `jaccard_vs_first@k` per `k`, `score_max_abs_diff`, `parity` (`reference` = this record wrote the spill file, `vs_<backend>` = compared against it, `shape_mismatch:…`); on a [self-excluded](#self-match) cell `self_excluded: true` and `self_top1_share`; on every cell of a `self_match` dataset `heldout_label: "self_retrieval"` (its held-out recall is self-retrieval, not end-task recall); `null` with `--skip-quality` |
 | `perf` | list / null | one entry per `(bs, k, mode)` (table below); `null` with `--skip-perf` and on a quality-only suite (`perf: false`) |
 | `unstable` | bool | any perf entry `unstable` (window spread > 5 %), or `clocks_drift` |
 | `memory_reserved_mib` | float / null | `torch.cuda.memory_reserved()` after the cell — the leak detector across a group's cells |
@@ -1004,8 +1006,8 @@ relative to the results root (`run.per_query_path`), written through
 | array | dtype | value |
 |---|---|---|
 | `rows` | int32 | the query's index in the `users_limit`-trimmed query set; one entry per kept query |
-| `pass_count` | int64 | items the exact mask passes for that query (the oracle blob's `pass_counts`); `-1` on `none` cells |
-| `recall_oracle@{k}` | float32 | per-query recall against the oracle prefix, for every `k` in the record's `ks`; NaN where the row has no oracle (no survivor, or a `none` cell) |
+| `pass_count` | int64 | items the exact mask passes for that query (the oracle blob's `pass_counts`); `n_items` on `none` cells |
+| `recall_oracle@{k}` | float32 | per-query recall against the oracle prefix, for every `k` in the record's `ks`; NaN where the row has no oracle (no survivor) |
 | `heldout_recall@{k}` | float32 | per-query held-out recall over the reachable targets; NaN where the row has none |
 
 The values are the per-row recalls `metrics.accumulate` sums into the

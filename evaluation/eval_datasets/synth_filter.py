@@ -4,6 +4,8 @@ order; item ``i`` passes the clause of rate ``p`` iff ``u_i < p``, so pass sets 
 rates. ``--correlated``: per rate a coarse spherical k-means with ``round(1/p)`` centroids; the
 item's value is its cluster, the query's its nearest centroid (by inner product, the k-means's
 own rule), so the pass set sits around the query.
+Draws: draw ``d`` uses seed ``SEED + d`` and writes its own files (``layout.synth_draw_name``:
+draw 0 keeps the plain names, draw d > 0 adds ``_s<d>``), so the draws sit side by side.
 Written beside the dataset's real attrs, never over them: ``item_attrs_narrow.pt`` keys every
 existing oracle and record through its digest."""
 
@@ -11,6 +13,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from functools import partial
 from pathlib import Path
 
 import click
@@ -45,10 +48,12 @@ def synth_flags(u: torch.Tensor, rates: Sequence[float]) -> torch.Tensor:
     return (u[:, None] < torch.tensor(rates, dtype=torch.float64)).long().unsqueeze(-1)
 
 
-def build(data_dir: Path, rates: Sequence[float] = RATES, seed: int = SEED) -> dict:
-    """Write the four synth files into ``data_dir``; N is the real attrs' row count with the
-    legacy pad row dropped (``layout.load_item_attrs``'s N), U the full ``eval_split`` rows."""
-    data_dir = Path(data_dir)
+def build(data_dir: Path, rates: Sequence[float] = RATES, draw: int = 0) -> dict:
+    """Write draw ``draw``'s synth files into ``data_dir`` (the query side, all ones, is shared by
+    every draw); N is the real attrs' row count with the legacy pad row dropped
+    (``layout.load_item_attrs``'s N), U the full ``eval_split`` rows."""
+    data_dir, seed = Path(data_dir), SEED + draw
+    at = partial(layout.synth_draw_name, draw=draw)
     real = torch.load(str(data_dir / "item_attrs_narrow.pt"), weights_only=True, mmap=True)
     n = int(drop_legacy_padding_row(real, kind="attrs", what="item_attrs_narrow.pt").shape[0])
     del real
@@ -59,20 +64,21 @@ def build(data_dir: Path, rates: Sequence[float] = RATES, seed: int = SEED) -> d
     flags = synth_flags(u, rates)
     counts = flags[:, :, 0].sum(dim=0).tolist()
     for name, t in (
-        (U_FILE, u),
-        (ITEM_ATTRS, flags),
+        (at(U_FILE), u),
+        (at(ITEM_ATTRS), flags),
         (QUERY_ATTRS, torch.ones(n_queries, len(rates), dtype=torch.long)),
     ):
         atomic_write(data_dir / name, lambda fh, t=t: torch.save(t, fh))
     meta = {
         "rates": list(rates),
+        "draw": draw,
         "seed": seed,
         "n_items": n,
         "n_queries": n_queries,
         "pass_counts": counts,
         "pass_rates": [c / n for c in counts],
     }
-    (data_dir / SIDECAR).write_text(json.dumps(meta, indent=1) + "\n")
+    (data_dir / at(SIDECAR)).write_text(json.dumps(meta, indent=1) + "\n")
     logger.info("{}: N={} U={} pass counts {}", data_dir, n, n_queries, counts)
     return meta
 
@@ -84,12 +90,13 @@ def _pass_stats(x: torch.Tensor) -> dict:
 
 
 def build_correlated(
-    data_dir: Path, content_dir: Path, rates: Sequence[float] = CORR_RATES, seed: int = SEED
+    data_dir: Path, content_dir: Path, rates: Sequence[float] = CORR_RATES, draw: int = 0
 ) -> dict:
-    """Write the three correlated files into ``data_dir`` from the item and query embeddings
-    the harness loads (``layout.load_text_items`` / ``load_text_queries`` of ``content_dir``);
-    a query's pass rate is its cluster's size over N."""
-    data_dir, content_dir = Path(data_dir), Path(content_dir)
+    """Write draw ``draw``'s three correlated files into ``data_dir`` from the item and query
+    embeddings the harness loads (``layout.load_text_items`` / ``load_text_queries`` of
+    ``content_dir``); a query's pass rate is its cluster's size over N."""
+    data_dir, content_dir, seed = Path(data_dir), Path(content_dir), SEED + draw
+    at = partial(layout.synth_draw_name, draw=draw)
     items = layout.load_text_items(content_dir, torch.device("cpu"))
     real = torch.load(str(data_dir / "item_attrs_narrow.pt"), weights_only=True, mmap=True)
     real = drop_legacy_padding_row(real, kind="attrs", what="item_attrs_narrow.pt")
@@ -121,12 +128,13 @@ def build_correlated(
         )
         logger.info("corr p={}: k={} query pass rate {}", p, k, per_rate[-1]["query_pass_rate"])
     for name, t in (
-        (CORR_ITEM_ATTRS, torch.stack(item_vals, dim=1).unsqueeze(-1)),
-        (CORR_QUERY_ATTRS, torch.stack(query_vals, dim=1)),
+        (at(CORR_ITEM_ATTRS), torch.stack(item_vals, dim=1).unsqueeze(-1)),
+        (at(CORR_QUERY_ATTRS), torch.stack(query_vals, dim=1)),
     ):
         atomic_write(data_dir / name, lambda fh, t=t: torch.save(t, fh))
     meta = {
         "rates": list(rates),
+        "draw": draw,
         "seed": seed,
         "kmeans": {"kind": "spherical", "max_iter": CORR_ITERS},
         "content_dir": content_dir.name,
@@ -134,35 +142,36 @@ def build_correlated(
         "n_queries": int(queries.shape[0]),
         "per_rate": per_rate,
     }
-    (data_dir / CORR_SIDECAR).write_text(json.dumps(meta) + "\n")
+    (data_dir / at(CORR_SIDECAR)).write_text(json.dumps(meta) + "\n")
     return meta
 
 
 @click.command("synth-filter")
 @click.option("--dataset", required=True, help="config/<dataset>.yaml names the data_dir")
 @click.option("--rates", help=f"comma-separated; default {RATES}, --correlated {CORR_RATES}")
-@click.option("--seed", default=SEED, show_default=True, type=int)
+@click.option("--draw", default=0, show_default=True, type=int, help=f"seed {SEED} + draw")
 @click.option("--correlated", is_flag=True, help="cluster-correlated attrs (text datasets)")
 @click.option("--dim", default=128, show_default=True, help="--correlated: content_dir dim")
 @click.option("--config-dir", default=CONFIG_DIR, type=click.Path(path_type=Path))
 def synth_filter(
-    dataset: str, rates: str | None, seed: int, correlated: bool, dim: int, config_dir: Path
+    dataset: str, rates: str | None, draw: int, correlated: bool, dim: int, config_dir: Path
 ) -> None:
     """Write item_attrs_synth.pt, synth_u.pt, query_attrs_synth.pt and synth_filter.json, or
-    with --correlated item_attrs_corr.pt, query_attrs_corr.pt and synth_corr.json."""
+    with --correlated item_attrs_corr.pt, query_attrs_corr.pt and synth_corr.json (draw d > 0:
+    each name with _s<d>, the shared query_attrs_synth.pt aside)."""
     raw = yaml.safe_load((config_dir / f"{dataset}.yaml").read_text())
     data_dir = Path(raw["data_dir"])
     if not data_dir.is_absolute():
         data_dir = config_dir.parent / data_dir
     rs = [float(r) for r in rates.split(",")] if rates else None
     if not correlated:
-        click.echo(json.dumps(build(data_dir, rs or RATES, seed)))
+        click.echo(json.dumps(build(data_dir, rs or RATES, draw)))
         return
     content = raw.get("content_dir")
     if content is None:
         raise click.BadParameter(f"{dataset} has no content_dir", param_hint="--correlated")
     content = content[dim] if isinstance(content, dict) else content
-    meta = build_correlated(data_dir, data_dir / content, rs or CORR_RATES, seed)
+    meta = build_correlated(data_dir, data_dir / content, rs or CORR_RATES, draw)
     click.echo(json.dumps({k: v for k, v in meta.items() if k != "per_rate"}))
     for r in meta["per_rate"]:
         click.echo(json.dumps({k: v for k, v in r.items() if k != "centroids"}))
