@@ -4,7 +4,7 @@ and B=16 (do_bench medians). Every deterministic variant is also checked ``torch
 ``ops.reference.clause_compact`` on the full pipeline.
 
     cd retrieve && flock /workspace/gpu.lock uv run --no-sync python \
-        ../docs/artifacts/deterministic-compaction/epilogue_variants.py
+        ../research/artifacts/deterministic-compaction/epilogue_variants.py
 
 Variants (predicate identical, ``common.clause_pass``):
   atomic        the pre-L3 kernel: cumsum + atomic_add row base + store            (not deterministic)

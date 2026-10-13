@@ -7,4 +7,4 @@ CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/r1 /venvs/h2/bi
   --dataset goodreads --dim 128 --suite filter --algo linr_v1_filter_mask --backend triton \
   --filter-kind clause --sweep c0_genre --seed 0 --skip-perf --out $O --config-dir config \
   > $O.log 2>&1
-/venvs/h2/bin/python ../docs/artifacts/r1/sanity.py config/goodreads.yaml 128 $O/filter/goodreads-d128.jsonl
+/venvs/h2/bin/python ../research/artifacts/r1/sanity.py config/goodreads.yaml 128 $O/filter/goodreads-d128.jsonl

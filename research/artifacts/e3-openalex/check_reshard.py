@@ -1,7 +1,7 @@
 """`openalex reshard` check: every item vector of the smaller catalog is `torch.equal` to its
 source row in the larger one, matched through a join on work_id (not reshard's searchsorted).
 
-    cd evaluation && PYTHONPATH=. python ../docs/artifacts/e3-openalex/check_reshard.py \
+    cd evaluation && PYTHONPATH=. python ../research/artifacts/e3-openalex/check_reshard.py \
         /data/openalex /data/openalex-15m
 """
 

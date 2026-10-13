@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from functools import partial
 from pathlib import Path
 
 import click
@@ -91,16 +92,7 @@ def build(parent: Path, out: Path, n: int, seed: int = SEED, shard_rows: int = 1
     for f in COPIED:
         if (parent / f).exists():
             shutil.copyfile(parent / f, out / f)
-    synth = (parent / ITEM_ATTRS).exists()
-    if synth:
-        _save(out / ITEM_ATTRS, _load(parent / ITEM_ATTRS)[rows])
-        u = _load(parent / U_FILE)[rows]
-        _save(out / U_FILE, u)
-        side = json.loads((parent / SIDECAR).read_text())
-        counts = [int((u < r).sum()) for r in side["rates"]]
-        side |= {"n_items": n, "pass_counts": counts, "pass_rates": [c / n for c in counts],
-                 "subset_of": parent.name, "subset_seed": seed}  # fmt: skip
-        (out / SIDECAR).write_text(json.dumps(side, indent=1) + "\n")
+    synth = copy_synth(parent, out, rows, seed)
 
     # targets over the subset (ingest's rule); the parent's query attrs
     items = load_sharded(content / "shard_index.json", torch.device("cpu"), normalize=True)
@@ -124,16 +116,57 @@ def build(parent: Path, out: Path, n: int, seed: int = SEED, shard_rows: int = 1
         "targets": "exact unfiltered top-1 by inner product over the subset, fp32, ties to the "
                    "lowest id",
     })  # fmt: skip
+    write_manifest(out)
+    return {"n_items": n, "seed": seed, "rows_sha256": rows_sha, "problems": problems}
+
+
+def copy_synth(parent: Path, out: Path, rows: torch.Tensor, seed: int) -> list[int]:
+    """Every uniform synth draw of ``parent`` on the subset rows (each item keeps its ``u_i``);
+    the shared all-ones query side is in ``COPIED``. Returns the draws copied."""
+    n = int(rows.numel())
+    draws = layout.synth_draws(parent)
+    for draw in draws:
+        name = partial(layout.synth_draw_name, draw=draw)
+        _save(out / name(ITEM_ATTRS), _load(parent / name(ITEM_ATTRS))[rows])
+        u = _load(parent / name(U_FILE))[rows]
+        _save(out / name(U_FILE), u)
+        side = json.loads((parent / name(SIDECAR)).read_text())
+        counts = [int((u < r).sum()) for r in side["rates"]]
+        side |= {"n_items": n, "pass_counts": counts, "pass_rates": [c / n for c in counts],
+                 "subset_of": parent.name, "subset_seed": seed}  # fmt: skip
+        (out / name(SIDECAR)).write_text(json.dumps(side, indent=1) + "\n")
+    return draws
+
+
+def sync_synth(parent: Path, out: Path, seed: int = SEED) -> list[int]:
+    """Re-copy the parent's synth draws onto an existing subset (a draw built on the parent after
+    the subset): the rows are re-derived and must match the subset's recorded ``rows_sha256``."""
+    parent, out = Path(parent), Path(out)
+    (content,) = [p for p in out.iterdir() if (p / "shard_index.json").exists()]
+    (content_p,) = [p for p in parent.iterdir() if (p / "shard_index.json").exists()]
+    n = int(json.loads((content / "shard_index.json").read_text())["n_items"])
+    n_parent = int(json.loads((content_p / "shard_index.json").read_text())["n_items"])
+    rows = subset_rows(n_parent, n, seed)
+    want = json.loads((out / "prep_log.json").read_text())["subset"]["rows_sha256"]
+    if hashlib.sha256(rows.numpy().tobytes()).hexdigest() != want:
+        raise ValueError(f"{out}: seed {seed} does not give the subset's rows")
+    draws = copy_synth(parent, out, rows, seed)
+    write_manifest(out)
+    return draws
+
+
+def write_manifest(out: Path) -> None:
     files = sorted(p for p in out.rglob("*") if p.is_file() and p.name != "MANIFEST.sha256")
     (out / "MANIFEST.sha256").write_text(
         "".join(f"{file_hexdigest(p, 'sha256')}  {p.relative_to(out)}\n" for p in files)
     )
-    return {"n_items": n, "seed": seed, "rows_sha256": rows_sha, "problems": problems}
 
 
 def write_configs(parent: str, name: str, config_dir: Path = CONFIG_DIR) -> None:
-    """``<name>.yaml`` / ``<name>-synth.yaml``: the parent's configs on the subset's data dir."""
-    for suffix in ("", "-synth"):
+    """``<name>.yaml`` / ``<name>-synth*.yaml``: the parent's configs (every synth draw's) on the
+    subset's data dir."""
+    synth = sorted(p.stem[len(parent) :] for p in Path(config_dir).glob(f"{parent}-synth*.yaml"))
+    for suffix in ("", *synth):
         src = Path(config_dir) / f"{parent}{suffix}.yaml"
         if not src.exists():
             continue
@@ -154,7 +187,14 @@ def write_configs(parent: str, name: str, config_dir: Path = CONFIG_DIR) -> None
 @click.option("--n-items", required=True, type=int)
 @click.option("--seed", default=SEED, show_default=True, type=int)
 @click.option("--config-dir", default=CONFIG_DIR, type=click.Path(path_type=Path))
-def subset_cmd(parent: str, name: str, n_items: int, seed: int, config_dir: Path) -> None:
+@click.option("--synth-only", is_flag=True, help="re-copy the parent's synth draws onto data/NAME")
+def subset_cmd(
+    parent: str, name: str, n_items: int, seed: int, config_dir: Path, synth_only: bool
+) -> None:
     """Build data/NAME as a seeded N_ITEMS-row subset of data/PARENT, and its configs."""
-    click.echo(json.dumps(build(data_root() / parent, data_root() / name, n_items, seed)))
+    if synth_only:
+        draws = sync_synth(data_root() / parent, data_root() / name, seed)
+        click.echo(json.dumps({"synth_draws": draws}))
+    else:
+        click.echo(json.dumps(build(data_root() / parent, data_root() / name, n_items, seed)))
     write_configs(parent, name, config_dir)

@@ -1,7 +1,7 @@
 ---
 title: roadmap
 created: 2026-09-26
-updated: 2026-10-11
+updated: 2026-10-13
 type: summary
 tags: [roadmap]
 sources: [evaluation/config/suites.yaml, evaluation/bench/, infra/runpod/, research/validation.md, research/artifacts/hub-index.md]
@@ -22,8 +22,9 @@ official SilverTorch code, adapted by us, against LiNR V1-V3. The queue
 below finishes the adapted SilverTorch backend, measures it for the paper
 (LiNR's numbers until then come from the final pass, `campaign-final`,
 library `e16512f5`), lets the user write the paper, removes our Triton
-SilverTorch reimplementation from the code, and ends with one full rerun
-of everything at the last repo version.
+SilverTorch reimplementation from the code, and reruns everything at one
+frozen tag (FULL-RERUN, before RENAME and the Triton deletion: controller
+C1, 2026-10-13, for the user's review).
 
 **Rules.** No dates: every step is done, in the order given, and nothing
 is optional. Do not start a step whose dependencies are open. When a step
@@ -140,8 +141,10 @@ one pod.
 
 The order is the user's (2026-10-11): numbers for the paper first, from
 measurement legs on the adapted backend; the paper written on them; the
-code cleaned; and **the full rerun of everything, pinned to the last repo
-version, as the very last step**.
+code cleaned; and **the full rerun of everything, pinned to one tag**. The
+controller moved the rerun ahead of RENAME and TRITON-ST-DELETE (C1,
+2026-10-13, for the user's review): the code freezes now, and the cleanup
+follows the rerun.
 
 ### 1b. DOCS-SPLIT: the project pages carry no research residue
 
@@ -185,7 +188,7 @@ tables are regenerated from FULL-RERUN's parquet (step 7).
 
 ### 5. RENAME: the adapted backend becomes SilverTorch's default
 
-Needs 2 (beside 3-4, on its own branch). `backend="official-fork"` becomes
+Needs 2 and FULL-RERUN's run (beside 4, on its own branch). `backend="official-fork"` becomes
 the default `SilverTorch` backend under a name decided in this step; the
 package, distribution and op-namespace names (`silvertorch_fork`,
 `silvertorch-fork`, `stfork`) likewise. Records keep the names they were
@@ -218,12 +221,14 @@ LiNR's kernels stay.
 *Gate*: library and harness suites green, `interfaces.DISPATCH` without
 the deleted backends, `ruff`, links 0.
 
-### 7. FULL-RERUN: everything, pinned to the last repo version (the very last step)
+### 7. FULL-RERUN: everything, pinned to one frozen tag
 
-Needs 4 and 6. Tag the last repo version and rerun everything at it: LiNR,
-the adapted SilverTorch (under its final name) and the grid of NUMBERS,
-into one `results.parquet` with its recipe (a leg list per GPU like
-[campaign-final](artifacts/campaign-final/README.md)) and a manifest that
+Needs the freeze (tag `final-freeze` on `staging`, library + harness + suites; user's after-legs plan, controller C1
+2026-10-13): it runs **before** 5 RENAME and 6 TRITON-ST-DELETE, so its records carry `backend="official-fork"` and the
+report maps the name; every fix after the freeze is a new tag and a rerun of what it touches. Rerun everything at the tag:
+LiNR, the adapted SilverTorch and the grid of NUMBERS,
+into one `results.parquet` with its recipe ([full-rerun](artifacts/full-rerun/README.md): two stages, curves then picks
+then timed, legs per pod, the untimed steps, the sizing and the trims) and a manifest that
 names, per (dataset, suite, algo, backend), the accepted subtree. Then
 D1-G's checks (eager-vs-graph ids, a byte-identical quality subset per
 leg, batch scaling, `bench report --manifest`), T1 with C1-C7, T3 as Meta
@@ -236,13 +241,13 @@ User rulings it carries (2026-10-12/13, [decisions](decisions.md)): YFCC is out 
 dot-product build (MedCPT as trained) with the query's own document excluded (self-match), and gains a synthetic-filter leg;
 SilverTorch runs its bloom filter with no recheck in timed code, fp16 score path (Meta's default); LiNR runs the exact filter only.
 
-Before it starts: the scripts under `research/artifacts/` still name
-old pre-split artifact paths (about 127, from the wiki split): fix them; seeds and
-error bars (user, 2026-10-11) are part of this run.
+Seeds and error bars (user, 2026-10-11) are part of this run: 0-2 where a build, a pool or a synthetic draw is random, one
+for exact LiNR; LiNR V2 at bs 256 on PubMed stays out (controller C2). Profile full, seed-major (user GO, 2026-10-13);
+the credit covers about half of the seed-0 pass ([full-rerun § Sizing](artifacts/full-rerun/README.md#sizing)).
 
 *Gate*: every planned cell `ok`, D1-G's four checks, 0 manifest gaps.
-*Estimate*: sized at the step's start from NUMBERS' and the final pass's
-wall times.
+*Estimate*: [full-rerun § Sizing](artifacts/full-rerun/README.md#sizing): about 244 GPU-h for the full profile (the user's
+GO, 2026-10-13), 114 for its seed-0 pass; run seed-major, so a stop leaves a complete set at fewer seeds.
 
 ### 8. F4: package the artifacts
 
@@ -257,8 +262,8 @@ accounts and the release decisions.
 ## Dependencies
 
 ```
-3 QUALITY ─> 4 PAPER (user) ─┐
-   └─> 5 RENAME ─> 6 TRITON-ST-DELETE ──┴─> 7 FULL-RERUN (last) ─> 8 F4
+3 QUALITY ─> freeze ─> 7 FULL-RERUN ─> 4 PAPER tables (user) ─> 8 F4
+                          └─> 5 RENAME ─> 6 TRITON-ST-DELETE (after the rerun)
 1b DOCS-SPLIT (CPU, before 5)
 Needs the user: release decisions before F4
 ```

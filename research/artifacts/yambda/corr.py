@@ -53,7 +53,9 @@ for k in [100, 1000]:
         spearman=spearmanr(approx["oracle"], approx["heldout_over_exact"])[0],
     )
     for lo, hi in [(0.9, 1.01), (0.0, 0.7)]:
-        b = approx.filter(pl.col("oracle").is_between(lo, hi, closed="left"))["heldout_over_exact"]
+        b = approx.filter(pl.col("oracle").is_between(lo, hi, closed="left"))[
+            "heldout_over_exact"
+        ]
         if b.len():
             stats[f"k{k} oracle in [{lo}, {hi})"] = dict(
                 n=b.len(), min=b.min(), median=b.median(), max=b.max()

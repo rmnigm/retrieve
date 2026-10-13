@@ -35,7 +35,7 @@ Driver wall time 2.27 h + 0.31 h = **2.58 GPU-h** against the roadmap's 5.
 ```bash
 setsid nohup bash driver.sh > /scratch/v-gr-filter/driver.log 2>&1 &
 setsid nohup bash driver.sh 'linr_v3|triton' > /scratch/v-gr-filter/driver-v3.log 2>&1 &
-cd evaluation && python ../docs/artifacts/campaign-v2/v-gr-filter/summary.py /scratch/campaign-v2/results/filter/goodreads-d128.jsonl
+cd evaluation && python ../research/artifacts/campaign-v2/v-gr-filter/summary.py /scratch/campaign-v2/results/filter/goodreads-d128.jsonl
 ```
 
 ## Per arm (k 100, median over seeds; NOT CITABLE)

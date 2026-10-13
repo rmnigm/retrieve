@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One gate_fork block per line of the spec file: DATASET DIM MODE SWEEPS N_LISTS NPROBE BSS [extra args...]
 set -u
-A=/scratch/wt/meta-fork/docs/artifacts/meta-fork; L=${GRID:-/scratch/meta-fork/grid}; mkdir -p $L
+A=/scratch/wt/meta-fork/research/artifacts/meta-fork; L=${GRID:-/scratch/meta-fork/grid}; mkdir -p $L
 cd /scratch/wt/meta-fork-build/evaluation
 while read -r ds dim mode sweeps nl np bss extra; do
   [ -z "$ds" ] && continue

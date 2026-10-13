@@ -2,7 +2,7 @@
 # Roadmap E2: the PubMed + MedCPT 10 M slice as staged on 2026-09-26 (A100 box).
 # cwd evaluation/, RETRIEVE_DATA_ROOT=/data, evaluation/data -> /data.
 set -euo pipefail
-A=../docs/artifacts/e2-pubmed
+A=../research/artifacts/e2-pubmed
 P="uv run --no-sync python -m eval_datasets.etl.pubmed"
 $P plan --keep-items 10000000 --medline --report $A/plan-10m.json
 $P download --what pmids

@@ -9,7 +9,7 @@ PY=/venvs/retrieve/bin/python
 R=/scratch/ivf-tune/results
 L=/scratch/ivf-tune
 J=$R/ivf-tune/pubmed-d768.jsonl
-T="$PY $W/docs/artifacts/campaign-v2/ivf-tune/tune.py $J"
+T="$PY $W/research/artifacts/campaign-v2/ivf-tune/tune.py $J"
 export PYTHONPATH=$W/evaluation:$W/retrieve/src RETRIEVE_DATA_ROOT=/data HF_HOME=/scratch/hf
 export CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/ivf-tune
 PIN="flock /scratch/gpu0.lock taskset -c 0-95"

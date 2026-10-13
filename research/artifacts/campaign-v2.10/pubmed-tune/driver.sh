@@ -20,7 +20,7 @@ EXPECT=$($PY -c "import yaml; print(yaml.safe_load(open('campaign.yaml'))['defau
 yield_gpu() { while [ -e /scratch/gpu0.st-dloop-wants ] || [ -e /scratch/gpu0.st-dloop-phase ]; do sleep 20; done; }
 step() { local t0=$(date +%s) c="$*"; "$@"; local rc=$?; echo "$(date -Is) step ${c#$PIN } rc=$rc s=$(( $(date +%s) - t0 ))"; [ $rc -eq 0 ] || exit $rc; }
 
-step $PY $W/docs/artifacts/campaign-v2.10/pubmed-tune/tune_config.py $C $M
+step $PY $W/research/artifacts/campaign-v2.10/pubmed-tune/tune_config.py $C $M
 yield_gpu
 cv=$($PIN $PY -m bench.cli env | $PY -c 'import json,sys; print(json.load(sys.stdin)["code_version"])')
 echo "$(date -Is) code_version $cv (campaign.yaml $EXPECT)"
@@ -31,7 +31,7 @@ SMI=$!
 trap 'kill $SMI 2>/dev/null' EXIT
 yield_gpu
 step $PIN $PY -m bench.cli oracle --dataset pubmed --dim 768 --suite tune-q --config-dir $C/nl1024
-step $PY $W/docs/artifacts/campaign-v2.10/pubmed-tune/oracle_compare.py /data/pubmed-medcpt/gt_d768 $M/gt_d768
+step $PY $W/research/artifacts/campaign-v2.10/pubmed-tune/oracle_compare.py /data/pubmed-medcpt/gt_d768 $M/gt_d768
 for nl in 1024 4096 16384 65536; do
   [ -e $L/tune.stop ] && { echo "$(date -Is) tune.stop: stopped before n_lists $nl"; break; }
   log="$R/_logs/tune-q_pubmed-d768_nl$nl.log"

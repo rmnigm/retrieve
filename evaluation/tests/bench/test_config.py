@@ -743,10 +743,11 @@ def test_exact_gate_is_yfcc_synths_below_k_1000():
 
 
 def test_normalize_is_off_for_pubmed_only(tmp_path):
-    """MedCPT scores by dot product (user 2026-10-13); every other dataset is L2-normalised."""
+    """MedCPT scores by dot product (user 2026-10-13): PubMed and its synth draws; every other
+    dataset is L2-normalised."""
     off = {f.stem for f in sorted(CFG.glob("*.yaml"))
            if f.stem != "suites" and not load_dataset(f, _ds_dim(f)).normalize}  # fmt: skip
-    assert off == {"pubmed"}
+    assert off == {"pubmed", "pubmed-synth", "pubmed-synth-s1", "pubmed-synth-s2"}
     bad = tmp_path / "x.yaml"
     bad.write_text("data_dir: d\ncheckpoint: c.pt\ndims: [8]\nnormalize: false\n")
     with pytest.raises(ConfigError, match="content_dir dataset only"):

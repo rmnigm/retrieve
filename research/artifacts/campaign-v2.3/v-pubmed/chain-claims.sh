@@ -5,5 +5,5 @@
 set -u
 export VPUBMED_CHUNKS=nost VPUBMED_SEEDS=0
 export VPUBMED_DONE=/scratch/campaign-v2.1/results/filter/pubmed-d768.jsonl:/scratch/campaign-v2.2/results/filter/pubmed-d768.jsonl:/scratch/campaign-v2.3/results/filter/pubmed-d768.jsonl
-bash /scratch/wt/v-pubmed-v23/docs/artifacts/campaign-v2.3/v-pubmed/driver-chunks.sh >> /scratch/v-pubmed/driver-chunks-v23.log 2>&1
+bash /scratch/wt/v-pubmed-v23/research/artifacts/campaign-v2.3/v-pubmed/driver-chunks.sh >> /scratch/v-pubmed/driver-chunks-v23.log 2>&1
 echo "$(date -Is) pubmed seed-0 rc=$?"

@@ -1168,23 +1168,28 @@ parent's configs on the new data dir). It exists for the fixed-d N-sweep: LAION 
 ### Synthetic selectivity attrs
 
 `eval-data synth-filter --dataset <name> [--rates …]
-[--seed 20261008]` (any dataset with a `config/<name>.yaml`; built for
-goodreads, arxiv, yfcc10m and laion30m) ([`synth_filter.py`](../../evaluation/eval_datasets/synth_filter.py))
+[--draw 0]` (any dataset with a `config/<name>.yaml`; built for
+goodreads, arxiv, yfcc10m, laion30m and the PubMed dot-product build, `config/pubmed-synth.yaml`) ([`synth_filter.py`](../../evaluation/eval_datasets/synth_filter.py))
 gives a dataset a controllable pass rate on its real embeddings. It draws
 one `u_i ~ U(0, 1)` (float64) per catalog item from
-`torch.Generator().manual_seed(seed)`, in item-row order: N is the row
+`torch.Generator().manual_seed(20261008 + draw)`, in item-row order: N is the row
 count of `item_attrs_narrow.pt` with the legacy pad row dropped, the N
 `layout.load_item_attrs` checks. Item `i` passes the clause of rate `p`
 iff `u_i < p`, so the pass sets nest across rates (the `p = 0.01` set is
 inside the `p = 0.03` set) and `p = 1.0` is the unfiltered point. It
-writes four files into the dataset's `data_dir`:
+writes four files into the dataset's `data_dir`; draw `d > 0` writes its
+own copies beside them (`layout.synth_draw_name`: `item_attrs_synth_s<d>.pt`,
+`synth_u_s<d>.pt`, `synth_filter_s<d>.json`; the all-ones query file is
+shared), so draw 0 keeps the names and digests every earlier record used.
+Each draw has its own config, `<name>-synth-s<d>.yaml`, whose
+`filters.attrs` names its file; a run pairs draw `d` with job seed `d`:
 
 | file | content |
 |---|---|
 | `item_attrs_synth.pt` | `[N, 10, 1]` int64, 1 = pass, 0 = fail; clause `j` is rate `j` of `layout.SYNTH_RATES` = `(0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0)` |
 | `synth_u.pt` | the `[N]` `u` vector |
 | `query_attrs_synth.pt` | `[U_full, 10]` int64, all ones, aligned 1:1 with the full test split like `eval_split.parquet` |
-| `synth_filter.json` | rates, seed, `n_items`, `n_queries`, achieved `pass_counts` / `pass_rates` per rate |
+| `synth_filter.json` | rates, draw, seed, `n_items`, `n_queries`, achieved `pass_counts` / `pass_rates` per rate |
 
 All ten columns are always written, and the harness refuses attrs whose `synth_filter.json` names another rate list (`layout.check_synth_rates`: the YAMLs index columns, so attrs built before SYNTH-TRIM's ten rates must be rebuilt). The YAMLs name every column (`p0001` … `p1`, `p005` = 0.05, `p02` = 0.2, `p05` = 0.5); the `synth` suite picks the rates per dataset:
 [`goodreads-synth.yaml`](../../evaluation/config/goodreads-synth.yaml),
@@ -1204,12 +1209,17 @@ campaign pod (it is not staged everywhere). laion30m's files are built
 the same way (seed 20261008, 30 M items, 10,000 queries); `laion1m`,
 `laion3m` and `laion10m` do not rebuild them: `eval-data subset` copies the
 parent's `item_attrs_synth.pt` and `synth_u.pt` rows ([Subsets](#subsets)),
-so each item keeps its pass / fail at every rate, and writes their
-`config/laion{1,3,10}m-synth.yaml`. The files are not on the Hub.
+so each item keeps its pass / fail at every rate, every draw the parent has,
+and writes their `config/laion{1,3,10}m-synth*.yaml`. A draw built on the
+parent after the subset is copied on with `eval-data subset laion30m laion10m
+--n-items 10000000 --synth-only` (`subset.sync_synth`: the rows are re-derived
+from the seed and must match the subset's recorded `rows_sha256`; the manifest
+is rewritten). The files are not on the Hub.
 
 **Cluster-correlated variant.** `eval-data synth-filter --dataset arxiv
---correlated [--rates 0.01,0.03,0.1] [--dim 128] [--seed 20261008]`
-(`build_correlated`) is the uniform variant's opposite: IVF's best case,
+--correlated [--rates 0.01,0.03,0.1] [--dim 128] [--draw 0]`
+(`build_correlated`, seed `20261008 + draw`, draw `d > 0` files suffixed
+`_s<d>` as above) is the uniform variant's opposite: IVF's best case,
 where the pass set sits around the query. For each rate `p` it runs a
 spherical k-means (`etl/synth_arxiv.spherical_kmeans`, random init from the
 seed, at most 25 Lloyd iterations, CPU) with `round(1/p)` centroids over the

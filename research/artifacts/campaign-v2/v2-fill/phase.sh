@@ -8,7 +8,7 @@ OUT=$1; mkdir -p "$OUT"
 # The phase flag lives exactly as long as this GPU block.
 touch /scratch/gpu0.st-dloop-phase
 trap 'rm -f /scratch/gpu0.st-dloop-phase /scratch/gpu0.st-dloop-wants' EXIT
-W=/scratch/wt/v2-fill ART=$W/docs/artifacts/campaign-v2/v2-fill
+W=/scratch/wt/v2-fill ART=$W/research/artifacts/campaign-v2/v2-fill
 export CUDA_VISIBLE_DEVICES=0 PY=/venvs/retrieve/bin/python
 gpu() {
   touch /scratch/gpu0.st-dloop-wants

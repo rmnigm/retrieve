@@ -50,9 +50,9 @@ YAML
     rc=$?
     echo "$(date -Is) n_lists $nl n_probe ${grid[*]} rc=$rc s=$(( $(date +%s) - t0 ))"
     [ $rc -eq 0 ] || exit $rc
-    $PY $W/docs/artifacts/campaign-v2/ivf-tune/tune.py "$R/ivf-tune/pubmed-d768.jsonl" --reached $nl && break
+    $PY $W/research/artifacts/campaign-v2/ivf-tune/tune.py "$R/ivf-tune/pubmed-d768.jsonl" --reached $nl && break
   done
 done
-$PY $W/docs/artifacts/campaign-v2/ivf-tune/tune.py "$R/ivf-tune/pubmed-d768.jsonl" | tee "$L/table.txt"
+$PY $W/research/artifacts/campaign-v2/ivf-tune/tune.py "$R/ivf-tune/pubmed-d768.jsonl" | tee "$L/table.txt"
 nvidia-smi -q -d CLOCK > "$L/logs/nvidia-smi-clock-end.txt"
 echo "$(date -Is) driver done"

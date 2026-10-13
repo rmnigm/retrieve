@@ -1,6 +1,6 @@
 """Scratch config dirs for the campaign-v2 freeze gate (brief gates 3-5).
 
-    uv run --directory evaluation python ../docs/artifacts/campaign-v2/freeze/suites_freeze.py \
+    uv run --directory evaluation python ../research/artifacts/campaign-v2/freeze/suites_freeze.py \
         {smoke|timed|golden} OUT_DIR
 
 Each mode writes ``OUT_DIR/suites.yaml`` and symlinks every ``config/<dataset>.yaml`` next to it,

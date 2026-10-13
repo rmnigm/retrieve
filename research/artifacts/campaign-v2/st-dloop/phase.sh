@@ -4,7 +4,7 @@
 # want-flag + flock; /scratch/gpu0.timed set around timed jobs. Usage: phase.sh <out_dir>
 set -u
 OUT=$1; mkdir -p "$OUT"
-NEW=/scratch/wt/st-dloop BASE=/scratch/wt/st-dloop-base V21=/scratch/st-dloop/v21 ART=$NEW/docs/artifacts/campaign-v2/st-dloop
+NEW=/scratch/wt/st-dloop BASE=/scratch/wt/st-dloop-base V21=/scratch/st-dloop/v21 ART=$NEW/research/artifacts/campaign-v2/st-dloop
 export CUDA_VISIBLE_DEVICES=0 RETRIEVE_DATA_ROOT=/data HF_HOME=/scratch/hf PY=/venvs/retrieve/bin/python
 gpu() {  # gpu <timed 0|1> <cmd...>
   local timed=$1; shift

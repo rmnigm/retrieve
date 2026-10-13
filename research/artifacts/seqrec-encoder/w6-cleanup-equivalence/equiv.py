@@ -3,7 +3,7 @@ per-step losses dumped as Python floats. RECIPE is `e1c` (the E1c config.json, o
 `defaults` the bare TrainConfig defaults) or `gbce` (the Gate B config.json). Val/test eval is
 stubbed: only the training losses are compared.
 
-    cd evaluation && uv run python ../docs/artifacts/seqrec-encoder/w6-cleanup-equivalence/equiv.py \
+    cd evaluation && uv run python ../research/artifacts/seqrec-encoder/w6-cleanup-equivalence/equiv.py \
         {e1c|e1c-defaults|gbce} OUT.json
 """
 

@@ -94,9 +94,10 @@ def test_end_to_end_records(tiny_configs, tmp_path):
                 assert e["reason"] == "cuda_unavailable"
                 assert all(e[key] is None for key in run.PERF_STAT_KEYS)
     none, c0, c0c1 = recs
-    # Unfiltered: held-out only, everything passes, no filter memory.
-    assert "oracle" not in none["quality"] and none["pass_rate"] == 1.0
-    assert none["n_kept"] == 8 == none["n_queries_heldout"] and none["n_queries_oracle"] is None
+    # Unfiltered: the oracle is the exact unfiltered top-k (exact V1 scores 1.0), everything
+    # passes, no filter memory.
+    assert none["quality"]["oracle"]["recall@4"] == 1.0 and none["pass_rate"] == 1.0
+    assert none["n_kept"] == 8 == none["n_queries_heldout"] == none["n_queries_oracle"]
     assert none["n_targets_in_filter"] == 8  # one target per query, every one reachable
     assert none["filter_mib"] == 0.0 and none["bloom"] is None
     metrics = {f"{m}@{k}" for m in ("recall", "ndcg", "precision", "mrr") for k in (2, 4)}
@@ -248,8 +249,8 @@ def test_quality_gate_kills_the_run_after_recording(tiny_configs, tmp_path, monk
     with pytest.raises(run.QualityGateError, match="recall_oracle@4"):
         run.run(jobs, out_dir=out, **KW)
     recs = _records(out / "e2e" / "tiny-d64.jsonl")
-    assert [r["status"] for r in recs] == ["ok", "failed"]  # none cell has no oracle gate
-    assert recs[1]["stage"] == "quality" and "QualityGateError" in recs[1]["error"]
+    assert [r["status"] for r in recs] == ["failed"]  # the none cell's unfiltered oracle gates too
+    assert recs[0]["stage"] == "quality" and "QualityGateError" in recs[0]["error"]
 
 
 def test_parity_spill_compares_the_second_backend(tiny_configs, tmp_path, monkeypatch):
@@ -362,7 +363,8 @@ def test_heldout_recall_counts_only_reachable_targets():
     # The oracle side is untouched by the masking.
     assert out["oracle"]["recall@4"] == pytest.approx(1.0)
     # On a ``none`` cell every target is reachable and every one counts.
-    assets_none = {**assets, "blob": None, "oracle_rows": None, "heldout_rows": keep}
+    unfiltered = {**blob, "targets_in_filter": torch.ones_like(blob["targets_in_filter"])}
+    assets_none = {**assets, "blob": unfiltered, "heldout_rows": keep}
     out, *_ = run.quality(_Fixed(), inputs, assets_none, [4], torch.device("cpu"))
     assert out["heldout"]["n"] == 3
     assert out["heldout"]["recall@4"] == pytest.approx((0.5 + 0.5 + 0.0) / 3)
@@ -380,8 +382,9 @@ def test_quality_holds_torch_cpu_threads_for_the_loop_and_restores_them():
     rows = 40  # three chunks
     inputs = {"queries": torch.zeros(rows, 2), "targets": torch.zeros(rows, 1, dtype=torch.long)}
     keep = torch.ones(rows, dtype=torch.bool)
-    assets = {"qa_s": None, "keep": keep, "blob": None, "oracle_rows": None, "heldout_rows": keep}
-    assets |= {"oracle_topk": None, "self_ids": None}
+    blob = {"targets_in_filter": torch.ones(rows, 1, dtype=torch.bool)}
+    assets = {"qa_s": None, "keep": keep, "blob": blob, "oracle_rows": keep, "heldout_rows": keep}
+    assets |= {"oracle_topk": torch.zeros(rows, 4, dtype=torch.long), "self_ids": None}
     before = torch.get_num_threads()
     torch.set_num_threads(max(2, before))
     try:
@@ -528,8 +531,6 @@ def test_resolve_pool_from_the_sweeps_pass_counts():
         assert p == {"candidate_pool": max(2000, round(frac * count))}
     assert run.resolve_pool({"candidate_pool_frac": 0.01}, assets)["candidate_pool"] == 2000
     assert run.resolve_pool({"n_probe": 8}, assets) == {"n_probe": 8}
-    with pytest.raises(ValueError, match="oracle pass counts"):
-        run.resolve_pool({"candidate_pool_frac": 0.1}, {"blob": None})
 
 
 def test_pool_fraction_end_to_end(tiny_configs, tmp_path, monkeypatch):
@@ -544,6 +545,7 @@ def test_pool_fraction_end_to_end(tiny_configs, tmp_path, monkeypatch):
         ({"candidate_pool_frac": 0.5}, 4),
         ({"candidate_pool_frac": 1.0}, 8),
     ]
+    assert [r["pool_passing_mean"] for r in recs] == [8.0, 8.0]  # what the fraction is of
     assert recs[1]["quality"]["oracle"]["recall@4"] == pytest.approx(1.0)  # the whole pass set
 
 
@@ -698,7 +700,8 @@ def test_per_query_sidecar_matches_the_record_and_ships(tiny_configs, tmp_path):
         assert r["per_query"].startswith(f"{r['suite']}/tiny-d64.perquery/")
         assert z["rows"].dtype == np.int32 and len(z["rows"]) == r["n_kept"]
         assert z["pass_count"].dtype == np.int64
-        assert (z["pass_count"] == -1).all() == (r["filter_kind"] == "none")
+        if r["filter_kind"] == "none":
+            assert (z["pass_count"] == r["n_items"]).all()
         for k in r["ks"]:
             for side, name in (("oracle", "recall_oracle"), ("heldout", "heldout_recall")):
                 v = z[f"{name}@{k}"]

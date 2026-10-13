@@ -8,7 +8,7 @@ set -u
 REPO=/scratch/wt/v1-fuse
 PY=/venvs/v1-fuse/bin/python
 OUT=/scratch/v1-fuse/out
-G=$REPO/docs/artifacts/campaign-v2/v1-fuse/v1fuse_gpu.py
+G=$REPO/research/artifacts/campaign-v2/v1-fuse/v1fuse_gpu.py
 AX_REC=/scratch/campaign-v2.1/results-arxiv-synth-synth/synth/arxiv-synth-d128.jsonl
 GR_REC=/scratch/v1-fuse/hub/gr-synth/synth/goodreads-synth-d128.jsonl
 export CUDA_VISIBLE_DEVICES=0 TORCHINDUCTOR_CACHE_DIR=/scratch/inductor/v1-fuse HF_HOME=/scratch/hf

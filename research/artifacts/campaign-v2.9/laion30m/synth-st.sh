@@ -8,7 +8,7 @@ for sw in p01 p02 p05 p1; do
   run "synth-st-$sw" run --dataset laion30m-synth --dim 256 --suite laion30m-synth --sweep $sw --algo silvertorch --out "$R" --resume
 done
 cp -a "$L/logs/clocks-gpu$GPU.csv" "$L"/logs/synth-st-*.log "$R/logs/"
-$PY "$W/docs/artifacts/campaign-v2.5/laion30m/cal_table.py" "$R" | tee "$R/table.md"
+$PY "$W/research/artifacts/campaign-v2.5/laion30m/cal_table.py" "$R" | tee "$R/table.md"
 run upload-synth upload --results "$R" --path-in-repo campaign-v2.9/laion30m-synth-laion30m-synth --verify
 grep -E "MANIFEST|round trip" "$L/logs/upload-synth.log"
 echo "$(date -Is) synth-st rc=0"

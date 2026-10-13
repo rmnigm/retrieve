@@ -2,7 +2,7 @@
 # Roadmap E3: the OpenAlex 15 M catalog as staged on 2026-09-26 (A100 box).
 # cwd evaluation/, RETRIEVE_DATA_ROOT=/data, evaluation/data -> /data.
 set -euo pipefail
-A=../docs/artifacts/e3-openalex
+A=../research/artifacts/e3-openalex
 O="python -m eval_datasets.etl.openalex"
 $O plan --sample-row-groups 64 --report $A/plan-2026-09-23.json > $A/plan-2026-09-23.log 2>&1
 $O download

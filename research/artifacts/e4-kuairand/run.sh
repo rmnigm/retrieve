@@ -11,4 +11,4 @@ for f in best_model.pt config.json eval_quality.json item_embs.pt item_id_map.js
 uv run eval-data publish-checkpoint kuairand gsasrec-d128-shared --source $P
 uv run bench run --dataset kuairand --dim 128 --suite filter --algo linr_v1_filter_mask \
     --backend triton --filter-kind clause --sweep t_cat1 --mode eager --skip-perf \
-    --output ../docs/artifacts/e4-kuairand/filter-kuairand-d128-cell.jsonl
+    --output ../research/artifacts/e4-kuairand/filter-kuairand-d128-cell.jsonl

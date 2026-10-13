@@ -94,7 +94,7 @@ imports `bench`); outputs are on the Hub as `artifacts/campaign-v2-reuse`
 ([hub-index](../hub-index.md)).
 
 ```bash
-cd evaluation && uv run python ../docs/artifacts/campaign-v2/reuse/reuse.py /scratch/cv2-inventory /scratch/p-reuse-out
+cd evaluation && uv run python ../research/artifacts/campaign-v2/reuse/reuse.py /scratch/cv2-inventory /scratch/p-reuse-out
 ```
 
 A manifest `match` names dataset, suite, algo, backend, filter kind and sweep, never `params` or

@@ -5,7 +5,7 @@
 # blobs restored; the rest of PubMed non-SilverTorch at v2.1 (VPUBMED_CHUNKS=nost, --resume); then V-SEEDS arXiv at v2.2
 # (arXiv f01255f1 blobs set aside, compared after). Stops on any non-zero step or oracle difference.
 set -u
-V22=/scratch/wt/v-pubmed-v22/docs/artifacts/campaign-v2.2
+V22=/scratch/wt/v-pubmed-v22/research/artifacts/campaign-v2.2
 SWAP="/venvs/retrieve/bin/python $V22/v-pubmed/oracle_swap.py"
 OLD=f01255f106214ec0f540352d0e2a5cd90b84b6a1
 AX=/data/arxiv-papers/gt_d128
@@ -21,8 +21,8 @@ step $SWAP compare $OLD
 step bash $V22/d3-pubmed-timed/driver.sh >> /scratch/d3-pubmed-timed-v22/driver.log 2>&1
 step $SWAP compare $OLD
 step $SWAP restore $OLD
-VPUBMED_CHUNKS=nost step bash /scratch/wt/v-pubmed/docs/artifacts/campaign-v2/v-pubmed/driver-chunks.sh >> /scratch/v-pubmed/driver-chunks.log 2>&1
+VPUBMED_CHUNKS=nost step bash /scratch/wt/v-pubmed/research/artifacts/campaign-v2/v-pubmed/driver-chunks.sh >> /scratch/v-pubmed/driver-chunks.log 2>&1
 step $SWAP aside $OLD $AX
-step bash /scratch/wt/v-seeds-ax/docs/artifacts/campaign-v2.1/v-seeds-ax/driver.sh >> /scratch/v-seeds-ax/driver.log 2>&1
+step bash /scratch/wt/v-seeds-ax/research/artifacts/campaign-v2.1/v-seeds-ax/driver.sh >> /scratch/v-seeds-ax/driver.log 2>&1
 step $SWAP compare $OLD $AX
 echo "$(date -Is) chain-v22 done"

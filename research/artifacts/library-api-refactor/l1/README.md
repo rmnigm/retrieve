@@ -21,5 +21,5 @@ Regenerate the tensors from the branch point:
 
 ```bash
 git worktree add /tmp/l1-base 4f52972 && cd /tmp/l1-base/retrieve
-PYTHONPATH=. python ../docs/artifacts/library-api-refactor/l1/premove_check.py capture --dir <dir>
+PYTHONPATH=. python ../research/artifacts/library-api-refactor/l1/premove_check.py capture --dir <dir>
 ```

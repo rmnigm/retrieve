@@ -3,7 +3,7 @@ harness, timed in interleaved windows, then torch.profiler per-kernel tables (na
 grid). Plus a component split at bs 16 (each op alone, CUDA-graphed) to locate the floor.
 
     cd evaluation && CUDA_VISIBLE_DEVICES=0 uv run python \
-        ../docs/artifacts/campaign-v2/v2-prof/profile_v2.py /scratch/v2-prof/profile.json
+        ../research/artifacts/campaign-v2/v2-prof/profile_v2.py /scratch/v2-prof/profile.json
 """
 
 from __future__ import annotations

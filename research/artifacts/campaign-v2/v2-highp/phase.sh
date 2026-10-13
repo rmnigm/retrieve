@@ -5,7 +5,7 @@
 # Usage: phase.sh <out_dir>
 set -u
 OUT=$1; mkdir -p "$OUT"
-W=/scratch/wt/v2-highp BASE=/scratch/wt/v22 ART=$W/docs/artifacts/campaign-v2/v2-highp
+W=/scratch/wt/v2-highp BASE=/scratch/wt/v22 ART=$W/research/artifacts/campaign-v2/v2-highp
 export CUDA_VISIBLE_DEVICES=0 PY=/venvs/retrieve/bin/python RETRIEVE_DATA_ROOT=/data HF_HOME=/scratch/hf
 gpu() {
   touch /scratch/gpu0.st-dloop-wants

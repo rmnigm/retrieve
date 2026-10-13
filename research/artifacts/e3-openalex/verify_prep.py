@@ -4,7 +4,7 @@ same-field / strictly-earlier-era flag from papers.parquet, and the target's mem
 Also checks the held-out papers are not in the catalog and papers.parquet is in item-id order.
 
     cd evaluation && RETRIEVE_DATA_ROOT=... PYTHONPATH=. \
-        python ../docs/artifacts/e3-openalex/verify_prep.py <output-dir>
+        python ../research/artifacts/e3-openalex/verify_prep.py <output-dir>
 """
 
 import json

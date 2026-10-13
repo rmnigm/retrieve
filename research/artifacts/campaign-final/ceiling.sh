@@ -37,7 +37,7 @@ for ds, suite, sw, nl, npb in json.load(open(sys.argv[1]))[sys.argv[2]]: print(d
 PY
 while read -r ds suite sw nl npb; do
   t0=$(date +%s)
-  "$PY" "$REPO/docs/artifacts/campaign-v2.11/ceiling-int8-laion30m/ceiling_check.py" "$ds" "$suite" "$sw" "$nl" "$npb" \
+  "$PY" "$REPO/research/artifacts/campaign-v2.11/ceiling-int8-laion30m/ceiling_check.py" "$ds" "$suite" "$sw" "$nl" "$npb" \
     "$OUT/ceiling-$ds-$sw.json" > "$OUT/ceiling-$ds-$sw.log" 2>&1 < /dev/null
   echo "$(date -Is) $ds/$sw rc=0 s=$(( $(date +%s) - t0 ))"
 done < "$OUT/points.txt"

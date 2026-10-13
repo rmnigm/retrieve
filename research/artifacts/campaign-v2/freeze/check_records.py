@@ -1,6 +1,6 @@
 """Gates 4-5 of the campaign-v2 freeze: every expected smoke cell has a record and none failed.
 
-    uv run --directory evaluation python ../docs/artifacts/campaign-v2/freeze/check_records.py \
+    uv run --directory evaluation python ../research/artifacts/campaign-v2/freeze/check_records.py \
         RESULTS_DIR CONFIG_DIR [--timed]
 
 Expected cells come from ``load_matrix`` over CONFIG_DIR's suites (written by suites_freeze.py)

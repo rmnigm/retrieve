@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import BinaryIO
@@ -32,6 +33,20 @@ EXPECTED_QUERY_PREFIX = "search_query: "
 # Uniform synth attrs (synth_filter): column j is rate j; the -synth YAMLs index these columns.
 SYNTH_RATES = (0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0)
 SYNTH_ITEM_ATTRS, SYNTH_SIDECAR = "item_attrs_synth.pt", "synth_filter.json"
+_SYNTH_DRAW = re.compile(r"item_attrs_synth(?:_s(\d+))?\.pt")
+
+
+def synth_draw_name(name: str, draw: int) -> str:
+    """Draw ``draw``'s copy of a synth file: draw 0 keeps ``name`` (its digest keys every earlier
+    record), draw d > 0 is ``<stem>_s<d><suffix>``."""
+    p = Path(name)
+    return name if draw == 0 else f"{p.stem}_s{draw}{p.suffix}"
+
+
+def synth_draws(data_dir: Path) -> list[int]:
+    """The uniform synth draws built in ``data_dir``, by their item attrs files."""
+    found = (_SYNTH_DRAW.fullmatch(p.name) for p in Path(data_dir).glob("item_attrs_synth*.pt"))
+    return sorted(int(m[1] or 0) for m in found if m)
 
 
 def atomic_write(path: Path, write: Callable[[BinaryIO], None]) -> None:
@@ -209,10 +224,12 @@ def load_query_attrs(path: Path, n_queries: int) -> torch.Tensor:
 
 
 def check_synth_rates(attrs: Path) -> None:
-    """Refuse uniform synth attrs built for another rate list than ``SYNTH_RATES``."""
-    if attrs.name != SYNTH_ITEM_ATTRS:
+    """Refuse uniform synth attrs (any draw) built for another rate list than ``SYNTH_RATES``."""
+    m = _SYNTH_DRAW.fullmatch(attrs.name)
+    if m is None:
         return
-    built = json.loads((attrs.parent / SYNTH_SIDECAR).read_text())["rates"]
+    sidecar = synth_draw_name(SYNTH_SIDECAR, int(m[1] or 0))
+    built = json.loads((attrs.parent / sidecar).read_text())["rates"]
     if tuple(built) != SYNTH_RATES:
         raise ValueError(
             f"{attrs}: built for rates {built}, not {SYNTH_RATES}: rerun eval-data synth-filter"

@@ -10,3 +10,4 @@ filters:
   attrs: item_attrs_synth.pt
   query_attrs: query_attrs_synth.pt
   clause: {p0001: [0], p0003: [1], p001: [2], p003: [3], p005: [4], p01: [5], p02: [6], p03: [7], p05: [8], p1: [9]}
+  bloom: {p0001: [0], p0003: [1], p001: [2], p003: [3], p005: [4], p01: [5], p02: [6], p03: [7], p05: [8], p1: [9]}

@@ -61,10 +61,10 @@ JIT-builds against the same nvcc):
 export CUDA_HOME=/usr/local/cuda-12.8 PATH=/usr/local/cuda-12.8/bin:$PATH
 uv run --directory retrieve pytest tests/ -q --durations=15 -rs          # wp3/full_suite_run3.txt
 uv run --directory retrieve pytest tests/parity/test_official.py -q -s   # wp3/test_official_run3.txt
-uv run --directory retrieve python ../docs/artifacts/official-silvertorch/wp3/argsort_stable_probe.py \
-    --json ../docs/artifacts/official-silvertorch/wp3/argsort_stable_probe.json
-uv run --directory retrieve python ../docs/artifacts/official-silvertorch/wp3/parity_gate_probe.py \
-    --out ../docs/artifacts/official-silvertorch/wp3
+uv run --directory retrieve python ../research/artifacts/official-silvertorch/wp3/argsort_stable_probe.py \
+    --json ../research/artifacts/official-silvertorch/wp3/argsort_stable_probe.json
+uv run --directory retrieve python ../research/artifacts/official-silvertorch/wp3/parity_gate_probe.py \
+    --out ../research/artifacts/official-silvertorch/wp3
 ```
 
 Then A3's probes (each graph probe runs in its own subprocess — a failed capture

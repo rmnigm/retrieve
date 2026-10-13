@@ -4,6 +4,9 @@ The legs that produce the paper's numbers. The study pits SilverTorch, Meta's of
 V1-V3. [`plan.yaml`](plan.yaml) lists every leg: id, GPU queue, dependency, command, upload path, estimate. Raw outputs go to the Hub
 under `numbers/<leg>` ([hub-index](../hub-index.md)). Nothing here is citable until its gate is green in [validation](../../validation.md).
 
+The suites here keep what ran: their SilverTorch bloom arms outside `n-bloom-*` ran with the recheck on, which the study no
+longer uses (user, 2026-10-12). [FULL-RERUN](../full-rerun/README.md) replaces these legs and does not read them.
+
 | file | what |
 |---|---|
 | [`gen_suites.py`](gen_suites.py) → `suites.yaml` | the LiNR-only suites, the k 1000 check and the quality-only probe curves of the adapted code |

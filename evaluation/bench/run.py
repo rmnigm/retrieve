@@ -44,6 +44,7 @@ PER_K_QUALITY = ("postfilter",)
 ARM_FREE_SLACK_MIB = 256
 CLOCK_DRIFT = 0.05  # §2.1: an under-load sample > 5 % off the process's first one
 POOL_MIN = 2000  # the floor of a resolved candidate_pool_frac
+NO_ATTRS = oracle.attrs_digest(None, None)  # a none cell's oracle ignores the attrs
 # An exception whose message carries one of these has killed the CUDA context: recorded, then
 # re-raised so the child exits and ``bench campaign`` moves on.
 STICKY_CUDA = ("CUDA error", "illegal memory access", "device-side assert")
@@ -78,8 +79,8 @@ def is_sticky(exc: BaseException) -> bool:
 
 def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device) -> dict:
     """Sweep attrs + skip mask, the standalone filter for this cell's filter backend, the
-    exact oracle blob (filter cells), bloom pass counts (bloom cells) and the row masks the
-    quality pass scores: ``keep`` (not skip-masked), ``oracle_rows`` (kept and ≥ 1
+    exact oracle blob (unfiltered on ``none`` cells), bloom pass counts (bloom cells) and the
+    row masks the quality pass scores: ``keep`` (not skip-masked), ``oracle_rows`` (kept and ≥ 1
     survivor), ``heldout_rows`` (kept, ≥ 1 target and,
     on filter cells, ``target_in_filter``), and ``n_targets_in_filter`` — the held-out
     targets those rows score (on filter cells only the ones the exact mask admits).
@@ -92,13 +93,11 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
     filter_mod = filters.get(algos.filter_backend(job.backend))
     keep = ~skip if skip is not None else torch.ones(n, dtype=torch.bool)
     heldout = keep & (inp["n_targets"] > 0)
-    blob = None
-    bloom_fp = None
-    oracle_rows = oracle_topk = self_ids = self_top1 = None
+    bloom_fp = self_ids = self_top1 = None
+    blob = sweep_oracle(job, inp, k_max, device, filters, qa_s, skip, warn_missing=True)
+    oracle_topk = blob["topk"]
     if fk != "none":
-        blob = sweep_oracle(job, inp, k_max, device, filters, qa_s, skip, warn_missing=True)
         heldout &= blob["target_in_filter"]
-        oracle_topk = blob["topk"]
         if job.self_excluded:
             self_ids = inp["targets"][:, 0]
             reach = keep & blob["target_in_filter"]
@@ -106,12 +105,12 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
             logger.info("  self-match {}/{}: oracle top-1 is the query's own item on {:.4f} of "
                         "{} rows", job.dataset, job.sweep, self_top1, int(reach.sum()))  # fmt: skip
             oracle_topk = drop_self(oracle_topk, self_ids)
-        oracle_rows = keep & (oracle_topk[:, 0] != -1)
-        if fk == "bloom":
-            assert filter_mod is not None
-            counts = oracle.pass_counts(filter_mod, qa_s, skip, inp["n_items"], device=device)
-            bloom_fp = oracle.bloom_fp_rate(counts, blob["pass_counts"], inp["n_items"])
-    n_tif = (inp["n_targets"] if blob is None else blob["targets_in_filter"])[heldout].sum()
+    oracle_rows = keep & (oracle_topk[:, 0] != -1)
+    if fk == "bloom":
+        assert filter_mod is not None
+        counts = oracle.pass_counts(filter_mod, qa_s, skip, inp["n_items"], device=device)
+        bloom_fp = oracle.bloom_fp_rate(counts, blob["pass_counts"], inp["n_items"])
+    n_tif = blob["targets_in_filter"][heldout].sum()
     return {
         "qa_s": qa_s,
         "skip": skip,
@@ -124,7 +123,7 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
         "oracle_rows": oracle_rows,
         "heldout_rows": heldout,
         "n_targets_in_filter": int(n_tif),
-        "pass_rate": blob["pass_rate"] if blob is not None else 1.0,
+        "pass_rate": blob["pass_rate"],
         "bloom_fp_rate": bloom_fp,
     }
 
@@ -140,8 +139,9 @@ def sweep_oracle(
     *,
     warn_missing: bool,
 ) -> dict[str, Any]:
-    """The blob v4 of a filter job's sweep at ``k_max`` (``oracle.load_or_build``) under the
-    exact mask (``inputs.exact_filter`` over the cell's standalone ``filters``); ``qa_s, skip``
+    """The blob v4 of a job's sweep at ``k_max`` (``oracle.load_or_build``) under the exact
+    mask (``inputs.exact_filter`` over the cell's standalone ``filters``; none on a ``none``
+    cell, whose blob ignores the attrs so every suite of the inputs shares it); ``qa_s, skip``
     are the sweep's ``inputs.sweep_qa``. A self-excluded cell's blob is at ``k_max + 1``, cut
     from a wider cached one when there is one."""
     return oracle.load_or_build(
@@ -155,7 +155,7 @@ def sweep_oracle(
         skip_mask=skip,
         clauses=job.clauses,
         filter_mod=inputs.exact_filter(job.filter_kind, filters, inp, job.backend),
-        attrs_digest=inp["attrs_digest"],
+        attrs_digest=inp["attrs_digest"] if job.filter_kind != "none" else NO_ATTRS,
         device=device,
         warn_missing=warn_missing,
         slice_wider=job.self_excluded,
@@ -163,17 +163,17 @@ def sweep_oracle(
 
 
 def prebuild_oracles(jobs: Sequence[Job], device: torch.device | None = None) -> Counter:
-    """``bench oracle``: every blob ``jobs`` read (one per filter ``(dataset, dim, sweep,
+    """``bench oracle``: every blob ``jobs`` read (one per ``(dataset, dim, filter kind, sweep,
     k_max)``), built or found, in this process, no timing. Returns ``Counter(sweeps=…)``."""
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     measure.setup(0)
     counts: Counter = Counter()
     by_inputs: dict[tuple, dict[tuple, Job]] = {}
     for j in jobs:
-        if j.filter_kind != "none":
-            by_inputs.setdefault((j.dataset, j.dim), {})[j.filter_kind, j.sweep, max(j.ks)] = j
+        by_inputs.setdefault((j.dataset, j.dim), {})[j.filter_kind, j.sweep, max(j.ks)] = j
     for group in by_inputs.values():
-        inp = inputs.load_inputs(next(iter(group.values())).data, device, with_filters=True)
+        filtered = any(fk != "none" for fk, _, _ in group)
+        inp = inputs.load_inputs(next(iter(group.values())).data, device, with_filters=filtered)
         for j in group.values():
             fk = "clause" if j.filter_kind == "clause" else "none"  # bloom builds its exact one
             filters = inputs.build_filters(fk, inp, [j.backend], bloom=j.bloom)
@@ -192,11 +192,13 @@ def resolve_pool(params: dict, assets: dict) -> dict:
     if "candidate_pool_frac" not in params:
         return params
     p = dict(params)
-    if assets["blob"] is None:
-        raise ValueError("candidate_pool_frac needs a filter cell's oracle pass counts")
-    mean = assets["blob"]["pass_counts"][assets["oracle_rows"]].double().mean().item()
-    p["candidate_pool"] = max(POOL_MIN, round(p.pop("candidate_pool_frac") * mean))
+    p["candidate_pool"] = max(POOL_MIN, round(p.pop("candidate_pool_frac") * passing_mean(assets)))
     return p
+
+
+def passing_mean(assets: dict) -> float:
+    """The mean exact pass count over the sweep's oracle rows: what a pool fraction is of."""
+    return assets["blob"]["pass_counts"][assets["oracle_rows"]].double().mean().item()
 
 
 def compile_warmup(module: nn.Module, inp: dict, assets: dict, device: torch.device) -> float:
@@ -255,7 +257,7 @@ def quality(
     rows = assets["keep"].nonzero().reshape(-1)
     blob = assets["blob"]
     k_out = max(ks)
-    acc_o = accumulator(list(ks), device) if blob is not None else None
+    acc_o = accumulator(list(ks), device)
     acc_h = accumulator(list(ks), device)
     nan = partial(torch.full, (rows.numel(),), float("nan"), device=device)
     per_q = {f"{name}@{k}": nan() for name in ("recall_oracle", "heldout_recall") for k in ks}
@@ -266,9 +268,9 @@ def quality(
     queries = inp["queries"].to(device)
     qa_all = assets["qa_s"].to(device) if assets["qa_s"] is not None else None
     targets = inp["targets"].to(device)
-    topk = assets["oracle_topk"].to(device) if blob is not None else None
+    topk = assets["oracle_topk"].to(device)
     self_ids = assets["self_ids"].to(device) if assets["self_ids"] is not None else None
-    in_filter = blob["targets_in_filter"].to(device) if blob is not None else None
+    in_filter = blob["targets_in_filter"].to(device)
     threads = torch.get_num_threads()
     torch.set_num_threads(QUALITY_CPU_THREADS)
     try:
@@ -283,33 +285,29 @@ def quality(
             # a compiled arm's outputs live in CUDA-graph buffers the next call overwrites
             ids_all.append(ids.clone())
             sc_all.append(scores.float().clone())
-            if acc_o is not None:
-                m = assets["oracle_rows"][sel]
-                if bool(m.any()):
-                    idx = m.nonzero().reshape(-1).to(device, non_blocking=True)
-                    r = accumulate(
-                        acc_o,
-                        ids_o.index_select(0, idx),
-                        topk.index_select(0, sel_d.index_select(0, idx)),
-                        ranked=True,
-                    )
-                    for k, v in r.items():
-                        per_q[f"recall_oracle@{k}"].index_copy_(0, idx + s, v)
+            m = assets["oracle_rows"][sel]
+            if bool(m.any()):
+                idx = m.nonzero().reshape(-1).to(device, non_blocking=True)
+                r = accumulate(
+                    acc_o,
+                    ids_o.index_select(0, idx),
+                    topk.index_select(0, sel_d.index_select(0, idx)),
+                    ranked=True,
+                )
+                for k, v in r.items():
+                    per_q[f"recall_oracle@{k}"].index_copy_(0, idx + s, v)
             m = assets["heldout_rows"][sel]
             if bool(m.any()):
                 idx = m.nonzero().reshape(-1).to(device, non_blocking=True)
                 held = sel_d.index_select(0, idx)
                 t = targets.index_select(0, held)
-                if in_filter is not None:  # reachable targets only
-                    t = t.masked_fill(~in_filter.index_select(0, held), -1)
+                t = t.masked_fill(~in_filter.index_select(0, held), -1)  # reachable targets only
                 r = accumulate(acc_h, ids.index_select(0, idx), t, (t != -1).sum(dim=1))
                 for k, v in r.items():
                     per_q[f"heldout_recall@{k}"].index_copy_(0, idx + s, v)
     finally:
         torch.set_num_threads(threads)
-    out: dict[str, Any] = {"heldout": finalize(acc_h)}
-    if acc_o is not None:
-        out["oracle"] = finalize(acc_o)
+    out: dict[str, Any] = {"heldout": finalize(acc_h), "oracle": finalize(acc_o)}
     if self_ids is not None:
         out["self_excluded"] = True
         out["self_top1_share"] = assets["self_top1_share"]
@@ -330,8 +328,7 @@ def write_per_query(root: Path, rel: str, assets: dict, per_q: dict[str, torch.T
     into the ``users_limit``-trimmed queries), ``pass_count`` (``-1`` without a filter) and
     the per-query recall arrays, one row per kept query."""
     rows = assets["keep"].nonzero().reshape(-1)
-    blob = assets["blob"]
-    counts = blob["pass_counts"][rows] if blob is not None else torch.full_like(rows, -1)
+    counts = assets["blob"]["pass_counts"][rows]
     arrays = {n: t.numpy().astype(np.float32) for n, t in per_q.items()}
     atomic_write(
         Path(root) / rel,
@@ -646,9 +643,7 @@ def _new_record(
         "n_kept": int(assets["keep"].sum()),
         "n_queries_heldout": int(assets["heldout_rows"].sum()),
         "n_targets_in_filter": assets["n_targets_in_filter"],
-        "n_queries_oracle": int(assets["oracle_rows"].sum())
-        if assets["oracle_rows"] is not None
-        else None,
+        "n_queries_oracle": int(assets["oracle_rows"].sum()),
         "pass_rate": assets["pass_rate"],
         "bloom_fp_rate": assets["bloom_fp_rate"],
         "bloom": dict(job.bloom) if job.filter_kind == "bloom" else None,
@@ -658,6 +653,7 @@ def _new_record(
         "build_s": built["build_s"],
         "compile_s": built["compile_s"],
         "candidate_pool": resolved.get("candidate_pool"),
+        "pool_passing_mean": passing_mean(assets) if "candidate_pool_frac" in params else None,
         "index_mib": built["index_mib"],
         "filter_mib": built["filter_mib"],
         "seed_scope": "pool" if job.algo in SEED_FREE_QUALITY else "pool+build",

@@ -3,7 +3,7 @@ spawned worker processes, as the real run does it, on randomly chosen row groups
 pinned manifest — the input to the full-stream wall-time estimate. Nothing is written.
 
     cd evaluation && RETRIEVE_DATA_ROOT=... PYTHONPATH=. \
-        python ../docs/artifacts/e3-openalex/stream_probe.py <workers> <row_groups> <sample_rate>
+        python ../research/artifacts/e3-openalex/stream_probe.py <workers> <row_groups> <sample_rate>
 """
 
 import json

@@ -104,7 +104,7 @@ decisions.
   LiNR from `campaign-final`. The full rerun of everything (LiNR, the
   adapted SilverTorch, the grid), pinned to the last repo version, into one
   parquet with its recipe, D1-G, T1 and T3, is the very last step
-  ([FULL-RERUN](roadmap.md#7-full-rerun-everything-pinned-to-the-last-repo-version-the-very-last-step));
+  ([FULL-RERUN](roadmap.md#7-full-rerun-everything-pinned-to-one-frozen-tag));
   the paper's final tables are regenerated from it.
 - **No dates.** Every roadmap step is done, in order; nothing is optional
   or conditional on a deadline. The GPU is the bottleneck, so GPU steps

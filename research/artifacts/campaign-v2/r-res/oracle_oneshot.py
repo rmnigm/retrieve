@@ -3,7 +3,7 @@ the old harness's way — one ``q @ E^T`` over all N items per 64-query batch, o
 ``torch.topk`` — via ``oracle.compute(item_chunk=N)``, compares it with the cached item-chunked
 v4 blob, and rescores the freeze's SilverTorch spill (n_probe 24, seed 0) against both.
 
-    cd evaluation && python ../docs/artifacts/campaign-v2/r-res/oracle_oneshot.py FREEZE_DIR
+    cd evaluation && python ../research/artifacts/campaign-v2/r-res/oracle_oneshot.py FREEZE_DIR
 """
 
 import sys

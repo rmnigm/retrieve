@@ -6,7 +6,7 @@ share of rows whose top-``k`` ids are identical as sets and in order, the mean J
 max |score diff| over finite pairs. No tolerance is applied: the numbers are reported as found.
 
     CUDA_VISIBLE_DEVICES=0 uv run --directory evaluation python \\
-        ../docs/artifacts/cv2-harness-data/compile_parity.py --dataset goodreads \\
+        ../research/artifacts/cv2-harness-data/compile_parity.py --dataset goodreads \\
         --algo silvertorch --filter-kind clause --sweep c0_genre --param n_probe=24
 """
 

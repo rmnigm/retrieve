@@ -27,7 +27,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 EVAL=$ROOT/evaluation
-C4=${C4:-$ROOT/docs/artifacts/evaluation-harness-v2/c4}
+C4=${C4:-$ROOT/research/artifacts/evaluation-harness-v2/c4}
 OUT=${OUT:-$C4/results}
 PY=${PY:-/venvs/integration/bin/python}
 STAGES=${STAGES:-"goodreads arxiv gate resume"}
@@ -81,7 +81,7 @@ for stage in $STAGES; do
       ;;
     gate)
       set +e
-      python3 "$ROOT/docs/artifacts/evaluation-harness-v2/c4_gate.py" \
+      python3 "$ROOT/research/artifacts/evaluation-harness-v2/c4_gate.py" \
         "$OUT/filter/goodreads-d128.jsonl" "$OUT/filter/arxiv-d128.jsonl" \
         --golden "$EVAL/golden" --golden-sm-mhz "$GOLDEN_SM_MHZ" | tee "$C4/gate.txt"
       say "gate exit=${PIPESTATUS[0]}"

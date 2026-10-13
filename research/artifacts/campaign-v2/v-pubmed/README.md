@@ -34,7 +34,7 @@ Every GPU command runs as `flock /scratch/gpu0.lock taskset -c 0-95 …` (GPU 0 
 Not bracketed: n95 is above 128.
 
 ```bash
-cd evaluation && RETRIEVE_DATA_ROOT=/data bash ../docs/artifacts/campaign-v2/v-pubmed/restage.sh
+cd evaluation && RETRIEVE_DATA_ROOT=/data bash ../research/artifacts/campaign-v2/v-pubmed/restage.sh
 setsid nohup bash research/artifacts/campaign-v2/v-pubmed/identity.sh > /scratch/v-pubmed/identity.log 2>&1 &
 setsid nohup bash research/artifacts/campaign-v2/v-pubmed/driver.sh n95 > /scratch/v-pubmed/driver-n95.log 2>&1 &
 python research/artifacts/campaign-v2/v-pubmed/n95.py /scratch/campaign-v2/results/n95/pubmed-d768.jsonl

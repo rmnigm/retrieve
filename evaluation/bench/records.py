@@ -40,8 +40,8 @@ KEY_FIELDS = (
 _RECORD_COLUMNS = (
     "status", "path", "n_items", "n_queries", "n_kept", "n_queries_heldout", "n_queries_oracle",
     "n_targets_in_filter", "pass_rate", "bloom_fp_rate", "k_max", "build_s", "index_mib",
-    "filter_mib", "unstable", "memory_reserved_mib", "elapsed_s",
-    "schema_version", "stage", "error", "partial_reasons", "seed_scope", "per_query",
+    "filter_mib", "candidate_pool", "pool_passing_mean", "unstable", "memory_reserved_mib",
+    "elapsed_s", "schema_version", "stage", "error", "partial_reasons", "seed_scope", "per_query",
 )  # fmt: skip
 # results.parquet is shipped as a paper artifact, so it has to carry why a row is incomplete,
 # not only that it is: `stage`/`error` on a failure, `partial_reasons` on a narrowed cell,

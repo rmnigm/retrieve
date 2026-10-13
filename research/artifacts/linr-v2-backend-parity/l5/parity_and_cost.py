@@ -8,9 +8,9 @@ C. `do_bench` of both bodies on the cell's real shapes, same session, same clock
 D. The compiled PTX's arithmetic op counts (and the PTX itself, `--ptx-out`).
 
     cd /workspace/wt/l5/retrieve && flock /workspace/gpu.lock uv run --no-sync python \
-        ../docs/artifacts/linr-v2-backend-parity/l5/parity_and_cost.py \
-        --out ../docs/artifacts/linr-v2-backend-parity/l5/parity_and_cost.json \
-        --ptx-out ../docs/artifacts/linr-v2-backend-parity/l5/fused_masked_knn_topk_fp32.ptx
+        ../research/artifacts/linr-v2-backend-parity/l5/parity_and_cost.py \
+        --out ../research/artifacts/linr-v2-backend-parity/l5/parity_and_cost.json \
+        --ptx-out ../research/artifacts/linr-v2-backend-parity/l5/fused_masked_knn_topk_fp32.ptx
 """
 
 from __future__ import annotations

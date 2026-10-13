@@ -14,7 +14,7 @@ mkdir -p "$BASE/legs" "$BASE/logs" "$OUT"
 cd "$REPO/evaluation"
 
 # every campaign-v2* leg in hub-index, plus the d1 legs the manifest reuses (arxiv) or the estimates read
-legs=$(grep -o '^| `campaign-v2[^`]*`' "$REPO/docs/artifacts/hub-index.md" | tr -d '|` ')
+legs=$(grep -o '^| `campaign-v2[^`]*`' "$REPO/research/artifacts/hub-index.md" | tr -d '|` ')
 legs="$legs d1/arxiv d1/arxiv-deep d1/yfcc10m d1/pubmed ${EXTRA_LEGS:-}"   # EXTRA_LEGS: record trees under artifacts/, or legs not yet in hub-index
 for leg in $legs; do
   d=$BASE/legs/${leg//\//__}

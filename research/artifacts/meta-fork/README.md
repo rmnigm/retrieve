@@ -33,7 +33,7 @@ GPU blocks through `gpu.sh`, each under 15 min. The scripts are run from this di
 `PYTHONPATH`, so one checkout of them serves every commit:
 
 ```bash
-A=/scratch/wt/meta-fork/docs/artifacts/meta-fork; PY=/venvs/meta-fork/bin/python; T=/scratch/wt/meta-fork-build
+A=/scratch/wt/meta-fork/research/artifacts/meta-fork; PY=/venvs/meta-fork/bin/python; T=/scratch/wt/meta-fork-build
 $A/build.sh <commit> /scratch/meta-fork/logs
 $A/gpu.sh 0 /scratch/meta-fork/logs/c0_coexist.log $PY $A/c0_coexist.py
 $A/gpu.sh 0 /scratch/meta-fork/logs/pytest_fork.log $PY -m pytest $T/official-fork/silvertorch_fork -q -p no:cacheprovider

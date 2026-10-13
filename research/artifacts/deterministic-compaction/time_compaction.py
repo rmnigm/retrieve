@@ -4,8 +4,8 @@ Run twice from the retrieve/ package dir with the same venv, once on the old ker
 the new one, and diff the two JSONs::
 
     cd /workspace/wt/l3/retrieve && flock /workspace/gpu.lock uv run --no-sync python \
-        ../docs/artifacts/deterministic-compaction/time_compaction.py \
-        --out ../docs/artifacts/deterministic-compaction/timing-before.json
+        ../research/artifacts/deterministic-compaction/time_compaction.py \
+        --out ../research/artifacts/deterministic-compaction/timing-before.json
 
 Kernel timing is ``ops.tune._bench`` (``do_bench`` median, 500 reps) on the tuner's own synthetic
 regimes plus the real goodreads ``item_attrs_narrow`` with ``c0_genre``-shaped queries (only clause

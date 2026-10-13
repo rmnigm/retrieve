@@ -2,7 +2,7 @@
 (2022-05-06, the day before the test day, never trained on), scored on test through evaluate; plus
 the overlap of test targets with val-day targets and with train.
 
-    cd evaluation && uv run python ../docs/artifacts/seqrec-encoder/k64-diagnosis/recency.py OUT.json
+    cd evaluation && uv run python ../research/artifacts/seqrec-encoder/k64-diagnosis/recency.py OUT.json
 """
 
 import json
