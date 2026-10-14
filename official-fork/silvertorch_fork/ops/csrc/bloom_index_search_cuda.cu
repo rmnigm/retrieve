@@ -1958,7 +1958,7 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> bloom_partial_payloads_prepared_cud
     const Tensor& remaining_length_cumsum,
     const Tensor& warp_size_cumsum,
     int64_t max_tensor_size_per_row,
-    const std::optional<std::tuple<Tensor, Tensor, Tensor>>& recheck) {
+    const std::optional<ExactClauses>& recheck) {
   const int64_t rows = cluster_ids.size(0);
   const int64_t per_row = cluster_ids.size(1);
   const int64_t n_clusters = rows * per_row;
@@ -1982,16 +1982,7 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> bloom_partial_payloads_prepared_cud
   auto stream = at::cuda::getCurrentCUDAStream();
   const EncodedQueryPlans encoded = encoded_plans(plans, plan_count);
   if (recheck) {
-    const auto& [attrs, reverse, query_attrs] = *recheck;
-    TORCH_CHECK(attrs.dim() == 3 && attrs.scalar_type() == at::kLong && attrs.is_contiguous());
-    TORCH_CHECK(reverse.scalar_type() == at::kBool && reverse.is_contiguous());
-    TORCH_CHECK(query_attrs.scalar_type() == at::kLong && query_attrs.is_contiguous());
-    const ExactClauses clauses{
-        attrs.const_data_ptr<int64_t>(),
-        attrs.size(1),
-        attrs.size(2),
-        reverse.const_data_ptr<bool>(),
-        query_attrs.const_data_ptr<int64_t>()};
+    const ExactClauses clauses = *recheck;
 #define LAUNCH_RECHECK_PAYLOADS(STACK_SIZE)                                       \
   {                                                                               \
     const int64_t warp_blocks = std::max<int64_t>(                                \
