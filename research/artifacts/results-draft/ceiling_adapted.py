@@ -19,7 +19,7 @@ from pathlib import Path
 import torch
 from bench import inputs, measure, run
 from bench.config import load_matrix
-from bench.metrics import accumulate, accumulator, finalize
+from bench.metrics import accumulate, accumulator, drop_self, finalize
 from retrieve import ExactAttributeFilter
 from retrieve.indexing.quantize import quantize_int8
 
@@ -72,9 +72,9 @@ for name in names:
     for sweep in sweeps:
         job = next(j for j in jobs if j.sweep == sweep and j.filter_kind == "clause")
         assets = run.sweep_assets(job, inp, max(job.ks), dev)
+        extra = int(job.self_excluded)  # self-match: score k + 1, drop the own item
         if m is None:
-            m = run.build_module(job, inp, assets, 100, params)
-            m.k = 100
+            m = run.build_module(job, inp, assets, 100 + extra, params)
             perm = m.sort_perm
             n = perm.numel()
             codes_r = torch.empty_like(m.item_codes)
@@ -85,6 +85,7 @@ for name in names:
             cluster_of = torch.repeat_interleave(
                 torch.arange(m.n_lists, device=dev), m.cluster_offsets.diff()
             )
+        m.k = 100 + extra
         shipped = run.quality(m, inp, assets, [100], dev)[0]["oracle"]["recall@100"]
         acc = {v: accumulator([100], dev) for v in ("global", "per_row", "fp16")}
         rows = assets["keep"].nonzero().reshape(-1)
@@ -130,13 +131,16 @@ for name in names:
                     "fp16": lambda: mm(q16, lambda b, e: inp["item_embs"][perm[b:e]]),
                 }
                 idx = orow.nonzero().reshape(-1).to(dev)
-                targets = assets["blob"]["topk"][sel][orow][:, :100].to(dev)
+                targets = assets["oracle_topk"][sel][orow][:, :100].to(dev)
+                own = assets["self_ids"][sel].to(dev) if extra else None
                 for v, score in variants.items():
                     sc = score().masked_fill_(~allowed, float("-inf"))
-                    top, pos = torch.topk(sc, 100, dim=1)
+                    top, pos = torch.topk(sc, 100 + extra, dim=1)
                     ids = torch.where(
                         torch.isfinite(top), perm[pos], torch.full_like(pos, -1)
                     )
+                    if extra:
+                        ids = drop_self(ids, own)
                     accumulate(acc[v], ids.index_select(0, idx), targets, ranked=True)
                     del sc
         res = {
