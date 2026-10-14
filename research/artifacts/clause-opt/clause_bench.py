@@ -39,8 +39,9 @@ def kernel_group(name: str) -> str:
     return "scorer" if "process_cluster" in name else "other"
 
 
-def build(ds, inp, n_lists, k, seed, recheck):
-    params = {"n_lists": n_lists, "n_probe": 1}
+def build(ds, inp, n_lists, n_probe, k, seed, recheck):
+    # registered at the largest n_probe: k may exceed the largest cluster
+    params = {"n_lists": n_lists, "n_probe": n_probe}
     t0 = time.perf_counter()
     exact = algos.build(
         "silvertorch", inp["item_embs"], k=k, backend="official-fork", filter_kind="clause",
@@ -162,7 +163,7 @@ def main():
     ds = load_dataset(a.config_dir / f"{a.dataset}.yaml", a.dim)
     inp = inputs.load_inputs(ds, dev)
     recheck = [False] * prof + [True] * dump
-    exact, blooms = build(ds, inp, a.n_lists, max(a.k), a.seed, recheck)
+    exact, blooms = build(ds, inp, a.n_lists, max(a.n_probe), max(a.k), a.seed, recheck)
     mods = {
         "exact": exact,
         **{f"bloom{'_rc' if rc else ''}": m for rc, m in blooms.items()},

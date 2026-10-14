@@ -3,7 +3,7 @@
 # clause row's large build points (LAION 3M / 10M / 30M d256, PubMed d768; the picks' n_lists /
 # n_probe), final-freeze vs CLAUSE-OPT. Points already done (compare PASS in OUT) are skipped.
 #   flock /scratch/gpu0.lock bash pode_block.sh
-P=/scratch/wt/fr-clause/research/artifacts/clause-opt/point.sh
+P=$(cd "$(dirname "$0")" && pwd)/point.sh
 export OUT=/scratch/clause-opt/out-pode BASE_TREE=/scratch/wt/clause-base BASE_VENV=/venvs/clause-base
 export OPT_TREE=/scratch/wt/fr-clause OPT_VENV=/venvs/fr-clause
 mkdir -p $OUT
