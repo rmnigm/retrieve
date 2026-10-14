@@ -13,7 +13,7 @@ for t in fr-clause clause-base; do
   ln -sfn /data /scratch/wt/$t/evaluation/data
   ln -sfn /workspace/data /scratch/wt/$t/data
   (cd /scratch/wt/$t && UV_PROJECT_ENVIRONMENT=/venvs/$t UV_CACHE_DIR=/scratch/uvcache/$t \
-    TORCH_CUDA_ARCH_LIST="8.0" CUDA_HOME=/usr/local/cuda MAX_JOBS=16 \
+    TORCH_CUDA_ARCH_LIST="8.0" CUDA_HOME=/usr/local/cuda MAX_JOBS=8 nice -n 19 \
     uv sync --frozen --all-packages --all-groups --extra official > /scratch/wt/$t.sync.log 2>&1)
 done
 SO=official-fork/silvertorch_fork/_C.cpython-311-x86_64-linux-gnu.so
