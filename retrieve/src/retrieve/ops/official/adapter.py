@@ -63,6 +63,33 @@ def attrs_to_features(attrs: Tensor) -> tuple[Tensor, Tensor, Tensor]:
     return feature_ids, offsets.contiguous(), values.contiguous()
 
 
+INT32 = torch.iinfo(torch.int32)
+
+
+def fork_clause_attrs(attrs: Tensor) -> tuple[Tensor, Tensor]:
+    """``[N, C, A]`` cluster-sorted narrow attrs (values ``>= -1``, ``-1`` pad) → the fork's exact
+    layout (CHANGES.md C14, kernels.md § official-fork): ``slots`` int32 ``[R, N]``, clause
+    ``c``'s values in rows ``clause_slots[c]:clause_slots[c + 1]``, each doc's values sorted
+    descending so its pads come last, every clause as wide as its widest doc; ``clause_slots``
+    int64 ``[C + 1]``."""
+    if attrs.numel() and (int(attrs.min()) < -1 or int(attrs.max()) > INT32.max):
+        raise ValueError("the fork's exact filter takes attr values in [-1, 2**31 - 1]")
+    attrs = attrs.sort(dim=2, descending=True).values
+    widths = (attrs != -1).sum(dim=2).amax(dim=0)
+    slots = torch.cat([attrs[:, c, :w].T for c, w in enumerate(widths.tolist())])
+    clause_slots = torch.zeros(attrs.shape[1] + 1, dtype=torch.int64, device=attrs.device)
+    clause_slots[1:] = widths.cumsum(0)
+    return slots.to(torch.int32).contiguous(), clause_slots
+
+
+def fork_query_attrs(query_clause_attrs: Tensor) -> Tensor:
+    """``[B, C]`` query attrs → int32 for the fork's exact filter: a value no doc can hold
+    (outside ``[-1, 2**31 - 1]``, see :func:`fork_clause_attrs`) becomes ``INT32.min``, which
+    matches nothing either."""
+    q = query_clause_attrs.long()
+    return torch.where((q >= -1) & (q <= INT32.max), q, INT32.min).to(torch.int32).contiguous()
+
+
 def build_bloom_index(
     attrs: Tensor,
     *,
@@ -493,11 +520,12 @@ def fork_search(
     divisor: int | None = None,
     filtering_bit_mask: Tensor | None = None,
     bloom: ForkBloom | None = None,
-    exact: tuple[Tensor, Tensor, Tensor] | None = None,
+    exact: tuple[Tensor, Tensor, Tensor, Tensor] | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Phases 2+3 on the fork in one call, ``torch.ops.stfork.search``: query int8, the probed
-    clusters, the filter (the bloom over prepared plans; ``exact`` = the cluster-sorted
-    ``(item_clause_attrs, clause_is_reverse, query_clause_attrs)``, tested over the probed docs
+    clusters, the filter (the bloom over prepared plans; ``exact`` = ``(slots, clause_slots,
+    clause_is_reverse, query_clause_attrs)`` from :func:`fork_clause_attrs` /
+    :func:`fork_query_attrs`, tested over the probed docs
     only, alone or as the bloom's recheck; or a full-``N`` ``filtering_bit_mask``), payloads +
     scorer, top-k on the
     raw scores and the ``[B, k]`` epilogue of :func:`official_probe_score` → ``(ids int64 [B, k],
@@ -525,7 +553,7 @@ def fork_search(
         None if b is None else b.plan_index,
         0 if b is None else int(b.k),
         0 if b is None else int(b.hash_k),
-        *(exact if exact is not None else (None, None, None)),
+        *(exact if exact is not None else (None, None, None, None)),
     )
 
 

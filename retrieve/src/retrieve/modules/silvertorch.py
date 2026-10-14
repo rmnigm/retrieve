@@ -37,11 +37,12 @@ FilterMode = Literal["none", "bloom", "exact"]
 class PreparedFilter(NamedTuple):
     """A batch's filter, prepared outside ``forward`` by ``SilverTorch.prepare_queries`` (the
     query-side work of the filter: hashing, expression parsing). Exactly one form is set:
-    ``query_bits`` ``[B, C·k_hash]`` (bloom on triton / torch), ``query_attrs`` ``[B, C]`` int64
-    (exact, every backend), the official parser's CPU ``plans_data`` / ``plans_offsets`` (bloom
-    on official; Meta's search decodes plans on the host, kernels.md § official), or the fork's
-    device ``plan_blob`` with its ``plan_slots`` / ``plan_stack`` (bloom on official-fork, read in
-    place by its prepared searches; kernels.md § official-fork). On the partial bloom path the
+    ``query_bits`` ``[B, C·k_hash]`` (bloom on triton / torch), ``query_attrs`` ``[B, C]`` (exact,
+    every backend; int64, int32 on official-fork), the official parser's CPU ``plans_data`` /
+    ``plans_offsets`` (bloom on official; Meta's search decodes plans on the host, kernels.md §
+    official), or the fork's device ``plan_blob`` with its ``plan_slots`` / ``plan_stack`` (bloom
+    on official-fork, read in place by its prepared searches; kernels.md § official-fork). On the
+    partial bloom path the
     plans are one per distinct expression and ``plan_index`` ``[B]`` (device int64) maps each row
     to its plan. ``sparse`` (bloom, triton / torch): every row's pass-rate bound is
     under ``SPARSE_PASS_BOUND``, so the scorer may take its two-pass at any width (kernels.md §
@@ -335,10 +336,8 @@ class SilverTorch(RetrievalModule):
             self.register_buffer("bundle_b_offsets", bundle_b_offsets)
             if attrs is not None and cfg.recheck_for(self.backend):
                 # the exact recheck of the bloom's survivors (official-fork, C13)
-                self.register_buffer("item_clause_attrs", attrs)
-                self.register_buffer(
-                    "clause_is_reverse",
-                    torch.zeros(attrs.shape[1], dtype=torch.bool, device=device),
+                self._register_exact_buffers(
+                    attrs, torch.zeros(attrs.shape[1], dtype=torch.bool, device=device)
                 )
         elif self.filter_mode == "bloom":
             seeds = generate_seeds(self.k_hash, device=device)
@@ -364,8 +363,16 @@ class SilverTorch(RetrievalModule):
             assert attrs is not None  # narrowed by _validate_register_args
             if clause_is_reverse is None:
                 clause_is_reverse = torch.zeros(attrs.shape[1], dtype=torch.bool, device=device)
-            self.register_buffer("item_clause_attrs", attrs)
-            self.register_buffer("clause_is_reverse", clause_is_reverse)
+            self._register_exact_buffers(attrs, clause_is_reverse)
+
+    def _register_exact_buffers(self, attrs: Tensor, clause_is_reverse: Tensor) -> None:
+        """``item_clause_attrs`` (+ ``clause_slots`` on official-fork, whose exact kernels read
+        the clause-major int32 layout of ``fork_clause_attrs``) and ``clause_is_reverse``."""
+        if self.backend == "official-fork":
+            attrs, clause_slots = official_mod.fork_clause_attrs(attrs)
+            self.register_buffer("clause_slots", clause_slots)
+        self.register_buffer("item_clause_attrs", attrs)
+        self.register_buffer("clause_is_reverse", clause_is_reverse)
 
     def compile(self, *args, **kwargs):
         """``nn.Module.compile`` — refused on the official backend (eager-only)."""
@@ -385,7 +392,7 @@ class SilverTorch(RetrievalModule):
         if self.filter_mode == "none":
             raise ValueError("prepare_queries needs filter_mode='bloom' or filter_mode='exact'")
         if self.filter_mode == "exact":
-            return PreparedFilter(query_attrs=query_clause_attrs.long().contiguous())
+            return PreparedFilter(query_attrs=self._exact_query_attrs(query_clause_attrs))
         if not self.is_official:
             bits = self._query_bit_positions(query_clause_attrs)
             bound = torch.where(bits >= 0, self.bloom_bit_freq[bits.clamp_min(0)], 1.0).amin(1)
@@ -411,6 +418,11 @@ class SilverTorch(RetrievalModule):
         )
         return PreparedFilter(plans_data=data, plans_offsets=offsets, plan_index=index)
 
+    def _exact_query_attrs(self, query_clause_attrs: Tensor) -> Tensor:
+        if self.backend == "official-fork":
+            return official_mod.fork_query_attrs(query_clause_attrs)
+        return query_clause_attrs.long().contiguous()
+
     def _prepare_device_plans(
         self, expressions: list[str], query_clause_attrs: Tensor
     ) -> PreparedFilter:
@@ -430,7 +442,7 @@ class SilverTorch(RetrievalModule):
         )
         recheck = cfg.recheck_for(self.backend)
         return PreparedFilter(
-            query_attrs=query_clause_attrs.long().contiguous() if recheck else None,
+            query_attrs=self._exact_query_attrs(query_clause_attrs) if recheck else None,
             plan_index=index,
             plan_blob=plans.blob,
             plan_slots=plans.slots,
@@ -605,7 +617,7 @@ class SilverTorch(RetrievalModule):
         exact = None
         bloom = None
         if self.filter_mode == "exact" and prepared is not None:
-            exact = (self.item_clause_attrs, self.clause_is_reverse, prepared.query_attrs)
+            exact = self._fork_exact(prepared.query_attrs)
         elif self.filter_mode == "bloom" and prepared is not None:
             plans = official_mod.DevicePlans(
                 prepared.plan_blob, prepared.plan_slots, prepared.plan_stack
@@ -619,7 +631,7 @@ class SilverTorch(RetrievalModule):
                 cfg.n_stored_hashes,
             )
             if prepared.query_attrs is not None:
-                exact = (self.item_clause_attrs, self.clause_is_reverse, prepared.query_attrs)
+                exact = self._fork_exact(prepared.query_attrs)
         return official_mod.fork_search(
             query,
             probe_ids,
@@ -635,6 +647,9 @@ class SilverTorch(RetrievalModule):
             bloom=bloom,
             exact=exact,
         )
+
+    def _fork_exact(self, query_attrs: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        return (self.item_clause_attrs, self.clause_slots, self.clause_is_reverse, query_attrs)
 
     def _forward_candidates(
         self,

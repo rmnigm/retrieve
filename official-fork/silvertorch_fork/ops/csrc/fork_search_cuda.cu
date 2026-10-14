@@ -916,7 +916,7 @@ std::tuple<Tensor, Tensor> raw_topk(const Tensor& raw, const Tensor& idx, int64_
 // C9: the exact filter over the probed docs only (our clause_subset_match: a clause passes when
 // any of the doc's values equals the query's, negated for a reverse clause; an inactive clause,
 // query value -1, always passes), evaluated into the scorer's payloads like C8's bloom.
-using st::ops::fork_filters::exact_pass;
+using st::ops::fork_filters::ExactClauses;
 using st::ops::fused_kmean_ann::RemainingPayload;
 using st::ops::fused_kmean_ann::WarpPayload;
 
@@ -956,11 +956,7 @@ __device__ __forceinline__ bool pre_mask_bit(
 }
 template <bool PER_CLUSTER>
 __device__ __forceinline__ void exact_warp_payload_body(
-    const int64_t* __restrict__ attrs,
-    int64_t n_clauses,
-    int64_t a_max,
-    const bool* __restrict__ reverse,
-    const int64_t* __restrict__ query_attrs,
+    ExactClauses clauses,
     const uint64_t* __restrict__ pre_mask,
     int64_t pre_mask_columns,
     const int64_t* __restrict__ cluster_offsets,
@@ -984,8 +980,8 @@ __device__ __forceinline__ void exact_warp_payload_body(
       const int32_t doc_start =
           static_cast<int32_t>(cluster_offsets[cluster_ids[ci]]) + doc_offset;
       const int64_t doc = doc_start + lane;
-      const bool pass = pre_mask_bit(pre_mask, pre_mask_columns, row, doc) &&
-          exact_pass(attrs, n_clauses, a_max, reverse, query_attrs + row * n_clauses, doc);
+      const bool pass =
+          pre_mask_bit(pre_mask, pre_mask_columns, row, doc) && clauses.pass(row, doc);
       const uint32_t mask = __brev(__ballot_sync(0xffffffff, pass));
       if (lane == 0) {
         WarpPayload p;
@@ -1021,11 +1017,7 @@ __device__ __forceinline__ void exact_warp_payload_body(
 
 // One warp per probed cluster: lane j writes the payload of the cluster's tail doc j (< 32).
 __device__ __forceinline__ void exact_remaining_payload_body(
-    const int64_t* __restrict__ attrs,
-    int64_t n_clauses,
-    int64_t a_max,
-    const bool* __restrict__ reverse,
-    const int64_t* __restrict__ query_attrs,
+    ExactClauses clauses,
     const uint64_t* __restrict__ pre_mask,
     int64_t pre_mask_columns,
     const int64_t* __restrict__ cluster_offsets,
@@ -1059,8 +1051,8 @@ __device__ __forceinline__ void exact_remaining_payload_body(
     p.write_index = static_cast<int32_t>(row * max_tensor_size_per_row) +
         warp_rounded_length_cumsum[row * clusters_per_row + clusters_per_row - 1] +
         (out_offset - row_first) + lane;
-    p.filtering_mask = pre_mask_bit(pre_mask, pre_mask_columns, row, doc) &&
-        exact_pass(attrs, n_clauses, a_max, reverse, query_attrs + row * n_clauses, doc);
+    p.filtering_mask =
+        pre_mask_bit(pre_mask, pre_mask_columns, row, doc) && clauses.pass(row, doc);
     reinterpret_cast<int4*>(payloads)[out_offset + lane] = p.payload;
   }
 }
@@ -1068,11 +1060,7 @@ __device__ __forceinline__ void exact_remaining_payload_body(
 // The full-warp and remainder payloads in one launch (K fix 18, as bloom_payloads_kernel).
 template <bool PER_CLUSTER>
 __global__ void exact_payloads_kernel(
-    const int64_t* __restrict__ attrs,
-    int64_t n_clauses,
-    int64_t a_max,
-    const bool* __restrict__ reverse,
-    const int64_t* __restrict__ query_attrs,
+    ExactClauses clauses,
     const uint64_t* __restrict__ pre_mask,
     int64_t pre_mask_columns,
     const int64_t* __restrict__ cluster_offsets,
@@ -1089,22 +1077,45 @@ __global__ void exact_payloads_kernel(
     int64_t warp_blocks) {
   if (blockIdx.x < warp_blocks) {
     exact_warp_payload_body<PER_CLUSTER>(
-        attrs, n_clauses, a_max, reverse, query_attrs, pre_mask, pre_mask_columns,
+        clauses, pre_mask, pre_mask_columns,
         cluster_offsets, cluster_ids, clusters_per_row, n_clusters, warp_rounded_length_cumsum,
         warp_size_cumsum, max_tensor_size_per_row, warp_payloads, blockIdx.x, warp_blocks);
   } else {
     exact_remaining_payload_body(
-        attrs, n_clauses, a_max, reverse, query_attrs, pre_mask, pre_mask_columns,
+        clauses, pre_mask, pre_mask_columns,
         cluster_offsets, cluster_ids, cluster_length, clusters_per_row, n_clusters,
         warp_rounded_length_cumsum, remaining_length_cumsum, max_tensor_size_per_row,
         remaining_payloads, blockIdx.x - warp_blocks, gridDim.x - warp_blocks);
   }
 }
 
-std::tuple<Tensor, int64_t, Tensor, int64_t> exact_payloads(
+// The exact test's inputs (C14: fork_clause_attrs' int32 [R, N] slots, int64 [C + 1] clause
+// slot offsets; int32 [B, C] query attrs), checked once here.
+ExactClauses exact_clauses(
     const Tensor& item_clause_attrs,
+    const Tensor& clause_slots,
     const Tensor& clause_is_reverse,
-    const Tensor& query_clause_attrs,
+    const Tensor& query_clause_attrs) {
+  TORCH_CHECK(item_clause_attrs.dim() == 2 && item_clause_attrs.scalar_type() == at::kInt);
+  TORCH_CHECK(clause_slots.dim() == 1 && clause_slots.scalar_type() == at::kLong);
+  TORCH_CHECK(query_clause_attrs.dim() == 2 && query_clause_attrs.scalar_type() == at::kInt);
+  TORCH_CHECK(clause_is_reverse.scalar_type() == at::kBool);
+  TORCH_CHECK(
+      item_clause_attrs.is_contiguous() && clause_slots.is_contiguous() &&
+      clause_is_reverse.is_contiguous() && query_clause_attrs.is_contiguous());
+  const int64_t n_clauses = query_clause_attrs.size(1);
+  TORCH_CHECK(clause_slots.size(0) == n_clauses + 1 && clause_is_reverse.numel() == n_clauses);
+  return {
+      item_clause_attrs.const_data_ptr<int32_t>(),
+      clause_slots.const_data_ptr<int64_t>(),
+      n_clauses,
+      item_clause_attrs.size(1),
+      clause_is_reverse.const_data_ptr<bool>(),
+      query_clause_attrs.const_data_ptr<int32_t>()};
+}
+
+std::tuple<Tensor, int64_t, Tensor, int64_t> exact_payloads(
+    const ExactClauses& clauses,
     const Tensor& cluster_offsets,
     const Tensor& cluster_ids,
     const Tensor& cluster_length,
@@ -1113,10 +1124,6 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> exact_payloads(
     const Tensor& warp_size_cumsum,
     int64_t max_tensor_size_per_row,
     const std::optional<Tensor>& pre_mask) {
-  TORCH_CHECK(item_clause_attrs.dim() == 3 && item_clause_attrs.scalar_type() == at::kLong);
-  TORCH_CHECK(query_clause_attrs.dim() == 2 && query_clause_attrs.scalar_type() == at::kLong);
-  TORCH_CHECK(clause_is_reverse.scalar_type() == at::kBool);
-  TORCH_CHECK(query_clause_attrs.size(1) == item_clause_attrs.size(1));
   const int64_t rows = cluster_ids.size(0);
   const int64_t per_row = cluster_ids.size(1);
   const int64_t n_clusters = rows * per_row;
@@ -1131,9 +1138,6 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> exact_payloads(
   if (n_clusters == 0) {
     return {warp_payloads, warps, remaining_payloads, remainders};
   }
-  Tensor attrs = item_clause_attrs.contiguous();
-  Tensor rev = clause_is_reverse.contiguous();
-  Tensor q = query_clause_attrs.contiguous();
   const uint64_t* pre = pre_mask
       ? reinterpret_cast<const uint64_t*>(pre_mask->const_data_ptr<int64_t>())
       : nullptr;
@@ -1149,11 +1153,7 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> exact_payloads(
     const int64_t warp_blocks = std::max<int64_t>(1, std::min(max_grid, (threads + 255) / 256));
     exact_payloads_kernel<kPerCluster>
         <<<warp_blocks + remaining_blocks, 256, 0, stream>>>(
-            attrs.const_data_ptr<int64_t>(),
-            attrs.size(1),
-            attrs.size(2),
-            rev.const_data_ptr<bool>(),
-            q.const_data_ptr<int64_t>(),
+            clauses,
             pre,
             pre_columns,
             cluster_offsets.const_data_ptr<int64_t>(),
@@ -1274,6 +1274,7 @@ std::tuple<Tensor, Tensor> search_cuda(
     int64_t bloom_k,
     int64_t hash_k,
     const std::optional<Tensor>& item_clause_attrs,
+    const std::optional<Tensor>& clause_slots,
     const std::optional<Tensor>& clause_is_reverse,
     const std::optional<Tensor>& query_clause_attrs) {
   TORCH_CHECK(item_codes.scalar_type() == at::kChar && item_codes.size(1) == query.size(1));
@@ -1283,7 +1284,15 @@ std::tuple<Tensor, Tensor> search_cuda(
       !(filtering_bit_mask.has_value() && (plans.has_value() || exact)),
       "search takes one filter: plans (+ query_clause_attrs to recheck), query_clause_attrs or "
       "filtering_bit_mask");
-  TORCH_CHECK(!exact || (item_clause_attrs.has_value() && clause_is_reverse.has_value()));
+  TORCH_CHECK(
+      !exact ||
+      (item_clause_attrs.has_value() && clause_slots.has_value() &&
+       clause_is_reverse.has_value()));
+  std::optional<ExactClauses> clauses;
+  if (exact) {
+    clauses = exact_clauses(
+        *item_clause_attrs, *clause_slots, *clause_is_reverse, *query_clause_attrs);
+  }
   at::cuda::CUDAGuard device_guard(query.device());
 
   Tensor offsets = cluster_offsets.to(at::kLong).contiguous();
@@ -1301,13 +1310,6 @@ std::tuple<Tensor, Tensor> search_cuda(
     // the bloom over the probed clusters' columns only (C8): what the scorer reads of Meta's
     // full-N mask, so the full path's result too, without its scan of all N (K fix 17)
     TORCH_CHECK(bloom_index.has_value() && bloom_bundle_b_offsets.has_value());
-    std::optional<std::tuple<Tensor, Tensor, Tensor>> recheck;
-    if (exact) {
-      recheck = std::make_tuple(
-          item_clause_attrs->contiguous(),
-          clause_is_reverse->contiguous(),
-          query_clause_attrs->contiguous());
-    }
     payloads = st::ops::bloom_search::bloom_partial_payloads_prepared_cuda(
         *bloom_index,
         *bloom_bundle_b_offsets,
@@ -1324,14 +1326,12 @@ std::tuple<Tensor, Tensor> search_cuda(
         prep.remaining_length_cumsum,
         prep.warp_size_cumsum,
         width,
-        recheck);
+        clauses);
   }
   if (!payloads && exact) {
     // the exact test; a given full-N mask pre-filters it
     payloads = exact_payloads(
-        *item_clause_attrs,
-        *clause_is_reverse,
-        *query_clause_attrs,
+        *clauses,
         offsets,
         cluster_ids,
         cluster_length,
