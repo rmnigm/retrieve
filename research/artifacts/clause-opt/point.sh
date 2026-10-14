@@ -10,11 +10,11 @@ OUT=${OUT:-/scratch/clause-opt/out}
 mkdir -p $OUT
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0} TORCHINDUCTOR_CACHE_DIR=/scratch/clause-opt/inductor
 COMMON="--dataset $DS --dim $DIM --n-lists $NL --n-probe $NP --sweeps $SW --bs $BS"
-for t in base opt; do
+for t in ${DUMP-base opt}; do
   (cd /scratch/wt/clause-$t/evaluation && /venvs/clause-$t/bin/python $A/clause_bench.py $COMMON \
     --k 100 1000 --mode dump --out $OUT/$TAG-$t.pt) > $OUT/$TAG-dump-$t.log 2>&1 || { tail -n 20 $OUT/$TAG-dump-$t.log; exit 1; }
 done
-/venvs/clause-opt/bin/python $A/compare.py $OUT/$TAG-base.pt $OUT/$TAG-opt.pt | tail -n 4
+[ -n "${DUMP-x}" ] && /venvs/clause-opt/bin/python $A/compare.py $OUT/$TAG-base.pt $OUT/$TAG-opt.pt | tail -n 4
 for t in ${PROFILE:-base opt}; do
   (cd /scratch/wt/clause-$t/evaluation && /venvs/clause-$t/bin/python $A/clause_bench.py $COMMON \
     --k 100 --mode profile --json $OUT/$TAG-prof-$t.json) > $OUT/$TAG-prof-$t.log 2>&1 || tail -n 20 $OUT/$TAG-prof-$t.log
