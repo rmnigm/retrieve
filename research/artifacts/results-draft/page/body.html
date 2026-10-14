@@ -1,9 +1,9 @@
 <div class="wrap">
 <header style="display:flex;flex-direction:column;gap:14px">
-  <span class="eyebrow">Reproducibility paper · results · 12 Oct 2026</span>
-  <h1>Where SilverTorch can reach the recall you ask for, it beats exact LiNR at every size</h1>
-  <p class="lede">Two families of filtered GPU retrieval on one A100: <span class="key"><i class="sw" style="background:var(--st)"></i>SilverTorch</span> (Meta's official code, adapted by us) probes a few clusters of an int8 index; <span class="key"><i class="sw" style="background:var(--linr)"></i>LiNR</span> (V1 mask-then-score, V2 gather-then-score, our implementation from the paper) scans every item exactly. Every SilverTorch point here was timed in the same process as LiNR, from 0.8 M to 30 M items.</p>
-  <div class="banner"><span>ⓘ</span><span><b>Citable, seed 0.</b> Both measurement gates are green. <b>Recall</b> here means fidelity to exact search: the share of the exact filtered top-k (highest inner products over the whole catalogue, fp32, same filter) that a method returns. It is not the papers' end-task recall, but on Goodreads the two move together (Pearson 0.88–0.94). Cells unstable in every run are marked †.</span></div>
+  <span class="eyebrow">Reproducibility paper · results · preliminary · 14 Oct 2026</span>
+  <h1>Where SilverTorch reaches the recall you ask for, it beats LiNR in all but one cell</h1>
+  <p class="lede">Two families of filtered GPU retrieval on one A100: <span class="key"><i class="sw" style="background:var(--st)"></i>SilverTorch</span> (Meta's official code, adapted by us) probes a few clusters of an int8 index and filters them with its bloom filter, false positives allowed; <span class="key"><i class="sw" style="background:var(--linr)"></i>LiNR</span> (V1 mask-then-score, V2 gather-then-score, V3 a 1-bit prefilter, our implementation from the paper) filters exactly. Every SilverTorch point was timed in the same process as LiNR, on five datasets from 0.8 M to 30 M items.</p>
+  <div class="banner"><span>ⓘ</span><span><b>Preliminary, not citable.</b> These are the final rerun's numbers at seed 0, rebuilt as its runs land; the rerun's gate is not passed yet. <b>Recall</b> here means fidelity to exact search: the share of the exact filtered top-k (highest inner products over the whole catalogue, same filter) that a method returns, so a bloom false positive in the top-k counts as a miss. It is not the papers' end-task recall, but on Goodreads the two move together (Pearson 0.87–0.93 per filter). Cells unstable in every run are marked †.</span></div>
 </header>
 
 <section>
@@ -11,55 +11,69 @@
   <h2>Give SilverTorch the probes it needs, and it still wins wherever it can get there</h2>
   <div class="controls" id="ctl-size"></div>
   <div class="chart"><svg id="c-size" viewBox="0 0 700 600" role="img" aria-label="Speed-up of SilverTorch at its tuned point over the best exact LiNR variant, per real filter, ordered by index size"></svg></div>
-  <p class="note"><b>How to read it:</b> each row is a real filter, smallest index at the top. A dot is how many times faster SilverTorch is than the faster of LiNR V1 and V2 at the fastest setting that reaches the recall target, at one query (hollow), 16 and 64. Hatched rows do not reach the target within a 25 % scan of the clusters, so there is no SilverTorch point to compare. This is SilverTorch at recall 0.90 / 0.95 against exact LiNR, not matched recall; the matched-recall row with LiNR V3 is pending.</p>
+  <p class="note"><b>How to read it:</b> each row is a real filter, smallest index at the top. A dot is how many times faster SilverTorch is than the faster of LiNR V1 and V2 at the fastest setting that reaches the recall target, against the fastest LiNR at that recall: exact V1 or V2, or V3 at its smallest pool reaching the target. One query (hollow), 16 and 64. Hatched rows do not reach the target within a 25 % scan of the clusters. LAION's domain filter is where SilverTorch falls short.</p>
 </section>
 
 <section>
   <span class="eyebrow">2 · The paper's production setting</span>
-  <h2>At 24 probes SilverTorch is always faster, but it returns a different answer</h2>
+  <h2>At 24 probes SilverTorch is 1–60× faster, but it returns a different answer</h2>
   <div class="chart"><svg id="c-prod" viewBox="0 0 700 330" role="img" aria-label="Speed-up of SilverTorch over the best LiNR variant at 24 probes, and SilverTorch recall, per real filter"></svg></div>
-  <p class="note"><b>How to read it:</b> the same filters at SilverTorch's default of 24 probes. Left: times faster than the best exact LiNR at one query (hollow) and 16 (filled). Right: recall@100. The speed-up grows with N and batch; the recall falls with N and with filter selectivity. A reference row, not a comparison at equal quality.</p>
+  <p class="note"><b>How to read it:</b> the same filters at SilverTorch's default of 24 probes. Left: times faster than the best exact LiNR at one query (hollow), 16 and 64 (filled). Right: recall@100, 0.33–0.89. The speed-up grows with N and batch; the recall falls with N and with filter selectivity. A reference row, not a comparison at equal quality.</p>
 </section>
 
 <section>
   <span class="eyebrow">3 · The price of recall</span>
-  <h2>Higher targets cost probes; broad filters at large batches are where LiNR V1 fights back</h2>
+  <h2>Higher targets cost probes; broad filters at large batches are where LiNR V1 comes close</h2>
   <div class="controls" id="ctl-curve"></div>
   <div class="chart"><div class="legend" id="lg-curve"></div><svg id="c-curve" viewBox="0 0 700 360" role="img" aria-label="Latency against filter pass rate for LiNR V1, V2 and SilverTorch at 24 probes and at its tuned points"></svg></div>
-  <p class="note"><b>How to read it:</b> synthetic filters with a controlled pass rate. The blue lines are SilverTorch at 24 probes (light) and at the fastest setting reaching 0.90 and 0.95 (darker); a missing point means that target was not reached. At the most selective filter it often is not; at broad filters with a batch of 64, 0.95 can cost more than LiNR V1's full scan (LAION 3 M synth: 2.7×).</p>
+  <p class="note"><b>How to read it:</b> synthetic filters with a controlled pass rate. The blue lines are SilverTorch at 24 probes (light) and at the fastest setting reaching 0.90 and 0.95 (darker); a missing point means that target was not reached. On PubMed-synth, 0.95 is reached only at the rarest filter; on LAION-synth 10M, at a batch of 64 and no filter, 0.95 takes 0.73× LiNR V1's full scan.<span id="syn-pend"></span></p>
 </section>
 
 <section>
-  <span class="eyebrow">4 · Every cell, SilverTorch at 0.90 / 0.95 against exact LiNR</span>
+  <span class="eyebrow">4 · Every cell, SilverTorch at 0.90 / 0.95 against the best LiNR</span>
   <h2>Who is faster, filter by filter, with SilverTorch held to a recall target</h2>
   <div class="controls" id="ctl-map"></div>
   <div class="chart"><table class="map" id="c-map"></table></div>
-  <p class="note"><b>How to read it:</b> a number is SilverTorch's time as a fraction of the best LiNR's at the tuned point (0.30 = 3.3× faster). <span style="background:repeating-linear-gradient(135deg,var(--linr-soft) 0 5px,transparent 5px 8px);padding:0 4px">Hatched</span>: SilverTorch does not reach the target within a 25 % scan. Solid orange: SilverTorch reaches it but LiNR is faster.</p>
+  <p class="note"><b>How to read it:</b> a number is SilverTorch's time as a fraction of the fastest LiNR reaching the same target (0.30 = 3.3× faster; V3 runs at k 100 only). k 2048 is the papers' own k, on one filter per dataset. <span style="background:repeating-linear-gradient(135deg,var(--linr-soft) 0 5px,transparent 5px 8px);padding:0 4px">Hatched</span>: SilverTorch does not reach the target within a 25 % scan. Solid orange: SilverTorch reaches it but LiNR is faster.</p>
 </section>
 
 <section>
-  <span class="eyebrow">5 · Inside LiNR</span>
+  <span class="eyebrow">5 · Why a probabilistic filter</span>
+  <h2>The bloom filter is faster than a well-engineered exact filter in the same search</h2>
+  <div class="chart" id="c-cb"></div>
+  <p class="note" id="n-cb"><b>How to read it:</b> SilverTorch (Meta's code, adapted) with its bloom filter against the same search with an exact clause filter fused in its place, at the same clusters and probes. A number below 1 is the bloom's time as a share of the exact filter's. The bloom's price is its false positives: a passing-looking item that fails the filter and takes a top-k slot. That supports SilverTorch's case for a probabilistic filter; the paper's other half is how few false positives it lets through.</p>
+</section>
+
+<section>
+  <span class="eyebrow">6 · Seed to seed</span>
+  <h2>How much the comparison moves between seeds</h2>
+  <div class="chart" id="c-var"></div>
+  <p class="note" id="n-var"><b>How to read it:</b> the timed comparison rerun at seeds 1 and 2 (a new clustering, a new synthetic draw, a new timing run). Per cell: the median of SilverTorch's time over the best LiNR's, and its range over the three seeds.</p>
+</section>
+
+<section>
+  <span class="eyebrow">7 · Inside LiNR</span>
   <h2>LiNR's V2 beats V1 only for one query at a time</h2>
   <div class="chart"><div class="legend" id="lg-c1"></div><svg id="c-c1" viewBox="0 0 700 300" role="img" aria-label="LiNR V2 over V1 latency against pass rate at bs 1 and bs 16 for three index sizes"></svg></div>
-  <p class="note"><b>How to read it:</b> below the line V2 (gather the passing items, then score) is faster than V1 (score everything, mask). At bs 1 V2 wins below a pass rate of about 0.8–0.97, by more as N grows. At bs 16 the crossover drops to about 0.02; at bs 64 and 256, V1 wins on every real filter, and V2 at bs 256 times out on PubMed.</p>
+  <p class="note"><b>How to read it:</b> below the line V2 (gather the passing items, then score) is faster than V1 (score everything, mask). At bs 1 V2 wins below a pass rate of about 0.8–0.94, by more as N grows. At bs 16 the crossover drops to 0.01–0.05; at bs 64 and 256, V1 wins on every filter.</p>
 </section>
 
 <section>
-  <span class="eyebrow">6 · Co-design</span>
+  <span class="eyebrow">8 · Co-design</span>
   <h2>Meta's "probe, then filter" pays off only at 10–30 M items</h2>
   <div class="chart"><div class="legend" id="lg-c5"></div><svg id="c-c5" viewBox="0 0 700 280" role="img" aria-label="Full-index bloom filter time over probe-then-filter time against index size, Meta's code as published"></svg></div>
-  <p class="note"><b>How to read it:</b> above 1, filtering inside the probed clusters (the paper's co-design) beats building the filter over the whole index first. Measured on Meta's code as published: the paper's 1.79–2.15× shows up at 30 M; below 10 M the full-index path is faster. The adapted code has no full-index path to compare: it filters only the probed clusters by design.</p>
+  <p class="note" id="n-c5"><b>How to read it:</b> above 1, filtering inside the probed clusters (the paper's co-design) beats building the filter over the whole index first. Measured on Meta's code as published: the paper's 1.79–2.15× shows up at 30 M; below 10 M the full-index path is faster. The adapted code has no full-index path to compare: it filters only the probed clusters by design.</p>
 </section>
 
 <section>
-  <span class="eyebrow">7 · Claim check</span>
+  <span class="eyebrow">9 · Claim check</span>
   <h2>What each paper claimed, and what we measured</h2>
   <div class="claims" id="claims"></div>
 </section>
 
 <footer class="foot">
-  <span>Tables and the script that writes them: <code>research/artifacts/results-draft/build_results.py</code>; outputs on the results Hub under <code>artifacts/results-draft/20261013</code>. Page text: <code>research/paper/results.md</code>.</span>
-  <span>Inputs: the NUMBERS legs (SilverTorch adapted, interleaved with LiNR V1 / V2, bs 1 / 16 / 64, k 100 / 1000), the LiNR final pass (one library version) and the adapted code's gate grid. Latencies are CUDA-graph medians per batch; A100-SXM4-80GB.</span>
+  <span>Tables and the script that writes them: <code>research/artifacts/results-draft/build_results.py</code>, from the final rerun's records only. Page text: <code>research/paper/results.md</code>.</span>
+  <span>Inputs: the rerun's timed bloom comparison (SilverTorch adapted, bloom filter with no recheck, interleaved with LiNR V1 / V2 / V3; bs 1 / 16 / 64; k 100 / 1000 / 2048), its probe curves, the exact LiNR runs and the LiNR claim suites. Latencies are CUDA-graph medians per batch with Meta's default fp16 score path; A100-SXM4-80GB.</span>
 </footer>
 </div>
 <div id="tip" hidden></div>

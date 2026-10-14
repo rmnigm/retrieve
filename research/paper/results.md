@@ -1,7 +1,7 @@
 ---
 title: results
 created: 2026-10-11
-updated: 2026-10-12
+updated: 2026-10-14
 type: summary
 tags: [paper]
 sources: [research/artifacts/results-draft/build_results.py, research/artifacts/numbers/README.md, research/artifacts/hub-index.md, research/validation.md, research/paper/claims.md]
@@ -10,6 +10,32 @@ sources: [research/artifacts/results-draft/build_results.py, research/artifacts/
 # Results (draft): SilverTorch, adapted from Meta's code, against LiNR
 
 > **Numbers superseded by the FULL-RERUN, not for the paper.** The figures on this page come from the NUMBERS legs and the final pass at earlier tags; the paper's tables are regenerated from the FULL-RERUN's `results.parquet` ([roadmap](../roadmap.md) step 7, [validation](../validation.md#full-rerun)). The structure and the rulings stand.
+
+## FULL-RERUN, seed 0 (preliminary, not citable)
+
+From the final run's records only (tag `final-freeze`; tables in Hub `artifacts/results-draft/20261014-fr`, built by
+[`build_results.py`](../artifacts/results-draft/build_results.py)); the run's gate is open, so none of this is citable yet.
+SilverTorch is Meta's code, adapted, on its own bloom filter with no recheck; LiNR filters exactly.
+
+- **Head-to-head at a recall target.** Of 180 cells (dataset × filter × bs 1 / 16 / 64 × k 100 / 1000 / 2048 × target
+  0.90 / 0.95), SilverTorch reaches the target within a quarter of its clusters in 120, and in 119 of those it is faster
+  than the fastest LiNR at that recall (V1 or V2 exact, or V3 at its smallest pool reaching the target), taking 0.04-0.99
+  of its time. The exception: LAION 10M tags, bs 64, k 100, 0.95 (1.16× LiNR V1). V3 is the fastest LiNR in 3 cells.
+- **Where it falls short:** LAION's domain filter at every size and its tag filter at 1-3 M (top recall@100 0.83-0.91),
+  and about half the k 1000 / 2048 cells at 0.95. Filters with a NOT clause have no bloom form and are exact-LiNR only.
+- **At the papers' 24 probes** SilverTorch is 1.0-61× faster than the best exact LiNR, at recall@100 0.33-0.89.
+- **C1:** the bs 1 crossover sits at a pass rate of 0.81-0.94 (LiNR: 0.11); at bs 16 at 0.014-0.053; at bs 64 V1 wins
+  everywhere. **C2:** V3 at the smallest pool reaching 0.90 takes 0.84-1.37 of V2's time at bs 1, 0.71-1.07 at bs 16 / 64.
+  **C3** (so far PubMed and LAION-synth 30M, against torch.compile max-autotune, eager timing): 0.96-1.02× at bs 1,
+  1.96-2.20× at bs 16. **C6:** 0.95 is reached on 9 of 17 real filters. Recall bridge: on Goodreads, exact recall and
+  end-task recall correlate at Pearson 0.87-0.93 per filter.
+- **New finding (user, 2026-10-14), pending its numbers:** on the adapted code the bloom filter is faster than a
+  well-engineered exact clause filter in the same fused search; its recall cost is the false-positive count from the
+  untimed step. Both the clause reference row and the untimed step are still running.
+- **Still running:** seeds 1-2 of the timed comparison (seed spread), the synth timed legs on Goodreads / arXiv / LAION
+  30M, the false positives, the clause row, co-design (C5), and the LiNR N-sweep.
+
+The rest of this page predates the FULL-RERUN.
 
 **Status: citable**, with the exclusions below. The SilverTorch numbers are
 measured on the adapted code (the NUMBERS legs, whose gate is green:
