@@ -1,0 +1,73 @@
+fr-ext-timed-clause-synth-pod1-d256:
+  datasets:
+  - laion1m-synth
+  - laion3m-synth
+  dims:
+  - 256
+  filter_kinds:
+  - clause
+  ks:
+  - 100
+  batch_sizes:
+  - 1
+  - 16
+  - 64
+  seeds:
+  - 0
+  sweeps:
+    laion1m-synth:
+    - p0001
+    - p001
+    laion3m-synth:
+    - p0001
+  interleave:
+  - by:
+    - algo
+    - n_lists
+  arms:
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 512
+    datasets:
+      laion1m-synth:
+        sweeps:
+        - p0001
+        query:
+          n_probe:
+          - 384
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 512
+    datasets:
+      laion1m-synth:
+        sweeps:
+        - p001
+        query:
+          n_probe:
+          - 256
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - clause
+    build:
+      n_lists:
+      - 2048
+    datasets:
+      laion3m-synth:
+        sweeps:
+        - p0001
+        query:
+          n_probe:
+          - 1024
+          - 1536

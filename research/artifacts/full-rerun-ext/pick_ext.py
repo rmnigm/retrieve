@@ -5,7 +5,8 @@ only (no seed variance for TUNE-EXT points):
 - `fr-ext-timed-bloom-<pod>-d<dim>` (k 100, LiNR V1 / V2 exact and V3 at the seed-0 pools re-timed in the same run) and
   `fr-ext-timed-bloom-k1000-<pod>-d<dim>` (k 1000, V1 / V2), SilverTorch bloom with the recheck off; synth datasets in
   `fr-ext-timed-bloom-synth-<pod>-d<dim>`. Every suite bs 1 / 16 / 64, interleaved by (algo, n_lists), as pick.py's.
-- `fr-ext-timed-clause-<pod>-d<dim>`: the clause-row points, SilverTorch exact arms only (the row is lighter: user 2026-10-14 11:00Z).
+- `fr-ext-timed-clause[-synth]-<pod>-d<dim>`: the clause-row points at k 100, SilverTorch exact arms only (the row is lighter: user 2026-10-14
+  11:00Z); synth cells too, since the LAION synth TUNE-EXT cells are clause only (controller ~21:45Z: phase 2 for those cells).
 - `grade-<pod>-d<dim>.json`: the new bloom points for grade_bloom.py, [[dataset, sweep, n_lists, [n_probe...]], ...].
 
 usage: pick_ext.py PICKS_YAML OUTDIR CURVE_PARQUET [...]   (fr/curve*-s0, fr/v3pool*-s0 and fr/ext-curve*-s0 legs' results.parquet)
@@ -158,8 +159,7 @@ for (p, dim, _), keys in groups({**b100, **b1000}).items():
         grade.setdefault((p, dim), {}).setdefault((ds, sw, nl), set()).update(b100.get((ds, dim, sw, nl), []) + b1000.get((ds, dim, sw, nl), []))
 c100 = points.get((100, "clause"), {})
 for (p, dim, synth), keys in groups(c100).items():
-    if not synth:
-        out[f"fr-ext-timed-clause-{p}-d{dim}"] = suite(dim, keys, [100], c100, "clause", linr=False)
+    out[f"fr-ext-timed-clause{'-synth' if synth else ''}-{p}-d{dim}"] = suite(dim, keys, [100], c100, "clause", linr=False)
 
 outdir.mkdir(parents=True, exist_ok=True)
 (outdir / "suites-ext-timed.yaml").write_text(yaml.dump(out, sort_keys=False, width=140, Dumper=NoAlias))
