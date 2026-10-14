@@ -26,9 +26,12 @@ __device__ __forceinline__ bool exact_pass(
       continue;
     }
     bool match = false;
-#pragma unroll 4
     for (int64_t s = clause_slots[c]; s < clause_slots[c + 1]; ++s) {
-      match |= attrs[s * n_docs + doc] == q;
+      const int32_t v = attrs[s * n_docs + doc];
+      if (v == q || v == -1) {
+        match = v == q;
+        break;
+      }
     }
     if (match == reverse[c]) {
       return false;
