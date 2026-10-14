@@ -107,8 +107,8 @@ decisions.
   are citable ([validation](validation.md#numbers-adapted-silvertorch-over-the-study-grid)).
 - **Paper numbers, and the full rerun last** (user, 2026-10-11): the paper
   is written on measurement legs first: SilverTorch on the adapted backend
-  over the study grid (roadmap
-  [NUMBERS](roadmap.md#2-numbers-adapted-silvertorch-over-the-study-grid)),
+  over the study grid
+  ([NUMBERS](validation.md#numbers-adapted-silvertorch-over-the-study-grid)),
   LiNR from `campaign-final`. The full rerun of everything (LiNR, the
   adapted SilverTorch, the grid), pinned to the last repo version, into one
   parquet with its recipe, D1-G, T1 and T3, is the very last step

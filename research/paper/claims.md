@@ -73,8 +73,8 @@ co-design). Each claim is re-stated for the study and marked **keep**
 (unchanged), **change** (its SilverTorch half moves to the adapted code, or
 its subject changes) or **drop**. "Runs" names what feeds it: LiNR from the
 final pass (`campaign-final`), SilverTorch from the adapted backend's
-measurement legs (roadmap
-[NUMBERS](../roadmap.md#2-numbers-adapted-silvertorch-over-the-study-grid));
+measurement legs
+([NUMBERS](../validation.md#numbers-adapted-silvertorch-over-the-study-grid));
 the full rerun of everything at the last repo version comes last and
 regenerates the final tables. "Status so far" is read
 from [validation](../validation.md) (the final pass's EXHIBITS and D1-G rows,

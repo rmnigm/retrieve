@@ -38,7 +38,7 @@ Source-only distribution — Triton kernels JIT-compile on first call. Requires 
 For working on the library or running the evaluation harness:
 
 ```bash
-uv sync --extra official --all-packages   # from this directory — populates ./.venv with both packages installed editable, Meta's official extension and our fork of it, and pytest (in the members' dev groups)
+uv sync --extra official --all-packages   # from this directory — populates ./.venv with both packages installed editable, Meta's official extension and our adapted copy of it (`official-fork/`), and pytest (in the members' dev groups)
 ```
 
 After `uv sync`, run from anywhere in the workspace:
