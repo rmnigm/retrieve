@@ -73,6 +73,9 @@ def load():
     ]:
         df[key] = p.map(lambda d, key=key: d.get(key))
     df["unstable"] = df.unstable.fillna(False).astype(bool)
+    df["ext"] = df.leg.str.startswith(
+        "ext-"
+    )  # TUNE-EXT: points at 50 / 75 % of n_lists for cells short of 0.9
     df["recall"] = recall(df)
     df["pool"] = df.candidate_pool_frac
     key = [
@@ -96,7 +99,7 @@ def load():
 
 
 def timed_bloom(df):
-    return df[df.leg.str.startswith("timed-bloom") & df.perf_mode.notna()]
+    return df[df.leg.str.contains("timed-bloom") & df.perf_mode.notna()]
 
 
 def head_to_head(tb, mode="graph"):
@@ -131,6 +134,7 @@ def head_to_head(tb, mode="graph"):
         "linr_ms",
         "st_over_linr",
         "flagged",
+        "ext",
         "index_mib",
         "build_s",
     ]
@@ -141,14 +145,14 @@ def v3_matched(tb, mode="graph"):
     """LiNR V3 in the k 100 timed legs: per cell and target, the fastest timed pool whose recall reaches the target."""
     x = tb[(tb.perf_mode == mode) & (tb.algo == "linr_v3")]
     rows = []
-    for key, g in x.groupby(["leg", "pod", "seed"] + CELL):
+    for key, g in x.groupby(["pod", "seed"] + CELL):
         for t in TARGETS:
             ok = g[g.recall >= t]
             if len(ok):
                 b = ok.loc[ok.perf_median_ms.idxmin()]
                 rows.append(
                     dict(
-                        zip(["leg", "pod", "seed"] + CELL, key),
+                        zip(["pod", "seed"] + CELL, key),
                         target=t,
                         v3_pool=b.pool,
                         v3_recall=b.recall,
@@ -161,11 +165,13 @@ def v3_matched(tb, mode="graph"):
 
 def tuned(h, v3):
     """Per cell, seed and target: the fastest SilverTorch point reaching the target, against exact LiNR and against the
-    best LiNR at that recall (V1 / V2 exact, or V3 at its smallest pool reaching the target)."""
-    on = ["leg", "pod", "seed"] + CELL
+    best LiNR at that recall (V1 / V2 exact, or V3 at its smallest pool reaching the target). A cell's points may come from
+    its timed leg and a TUNE-EXT leg; each point's ratio is to the LiNR timed in its own run, the cell's LiNR columns are the
+    original leg's."""
+    on = ["pod", "seed"] + CELL
     rows = []
     for key, g in h.groupby(on):
-        base = g.iloc[0]
+        base = g.sort_values("ext").iloc[0]
         for t in TARGETS:
             row = dict(
                 zip(on, key),
@@ -184,6 +190,9 @@ def tuned(h, v3):
             if len(ok):
                 b = ok.loc[ok.st_ms.idxmin()]
                 row.update(
+                    leg=b.leg,
+                    ext=b.ext,
+                    probe_frac=b.n_probe / b.n_lists,
                     n_lists=b.n_lists,
                     n_probe=b.n_probe,
                     recall=b.recall,
@@ -241,7 +250,7 @@ def variance(h, tn):
         )
         .reset_index()
     )
-    tc = ["leg", "pod"] + CELL + ["target"]
+    tc = ["pod"] + CELL + ["target"]
     b = (
         tn.groupby(tc)
         .agg(
@@ -260,18 +269,20 @@ def variance(h, tn):
 
 
 def clause_vs_bloom(df):
-    """SilverTorch's exact clause filter (the clause reference row, `timed-clause` legs) against its bloom filter (the timed bloom
-    legs) at the same point, seed, pod and mode: bloom's time over the exact filter's, and the recall each returns."""
+    """SilverTorch's exact clause filter (the clause reference row, built at tag `final-freeze-clause`; the bloom path is
+    byte-identical) against its bloom filter (the timed bloom legs): separate runs, not interleaved, paired on pod, GPU,
+    seed, point and mode. A pair with either side unstable is dropped. Bloom's time over the exact filter's, the recall each
+    returns, and both runs' sampled SM clocks."""
     x = df[
         (df.algo == "silvertorch")
         & df.perf_mode.notna()
-        & df.leg.str.startswith(("timed-clause", "timed-bloom"))
+        & df.leg.str.contains("timed-clause|timed-bloom")
+        & ~df.unstable
     ]
-    on = ["pod", "seed", "perf_mode", "n_lists", "n_probe"] + CELL
-    cl = x[x.filter_kind == "clause"][on + ["perf_median_ms", "recall", "unstable"]]
-    bl = x[x.filter_kind == "bloom"][
-        on + ["perf_median_ms", "recall", "unstable", "pass_rate", "n_items"]
-    ]
+    on = ["pod", "env_gpu", "seed", "perf_mode", "n_lists", "n_probe"] + CELL
+    val = ["perf_median_ms", "recall", "perf_sm_mhz", "leg"]
+    cl = x[x.filter_kind == "clause"][on + val]
+    bl = x[x.filter_kind == "bloom"][on + val + ["pass_rate", "n_items", "ext"]]
     m = bl.merge(cl, on=on, suffixes=("_bloom", "_clause"))
     m["bloom_over_clause"] = m.perf_median_ms_bloom / m.perf_median_ms_clause
     m["recall_cost"] = m.recall_clause - m.recall_bloom
@@ -465,7 +476,7 @@ def c5(df):
 
 def c6(df):
     """The adapted code's probe curves (quality, seed 0), bloom (recheck off) and clause: the top recall per filter."""
-    x = df[df.leg.str.startswith("curve") & (df.seed == 0) & (df.algo == "silvertorch")]
+    x = df[df.leg.str.contains("curve") & (df.seed == 0) & (df.algo == "silvertorch")]
     curves = x.drop_duplicates(
         ["dataset", "dim", "filter_kind", "sweep", "n_lists", "n_probe"]
     )
@@ -483,14 +494,11 @@ def c6(df):
             "oracle_recall@1000",
         ]
     ]
-    top = (
-        curves.groupby(["dataset", "n_items", "filter_kind", "sweep", "pass_rate"])
-        .agg(
-            top_recall100=("oracle_recall@100", "max"),
-            max_probe_frac=("n_probe", "max"),
-        )
-        .reset_index()
-    )
+    keys = ["dataset", "n_items", "filter_kind", "sweep", "pass_rate"]
+    quarter = curves[curves.n_probe <= curves.n_lists / 4]
+    top = quarter.groupby(keys).agg(top_recall100=("oracle_recall@100", "max"))
+    top["top_recall100_any"] = curves.groupby(keys)["oracle_recall@100"].max()
+    top = top.reset_index()
     return curves.sort_values(
         ["dataset", "filter_kind", "sweep", "n_lists", "n_probe"]
     ), top

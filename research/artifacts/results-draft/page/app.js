@@ -27,6 +27,9 @@ const pct = p => p >= 0.01 ? (p * 100).toFixed(p >= 0.1 ? 0 : 1) + " %" : (p * 1
 const fmtMs = v => v < 1 ? (v * 1000).toFixed(0) + " µs" : v.toFixed(2) + " ms";
 const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
 
+const br = document.getElementById("bridge");
+if (br) br.textContent = `on Goodreads the two move together: Pearson ${D.bridge.bloom100} at k 100 and ${D.bridge.bloom1000} at k 1000 over SilverTorch's bloom settings, ${D.bridge.all_lo}–${D.bridge.all_hi} per filter over every method`;
+
 /* 1. tuned point per dataset size */
 (function () {
   const svg = document.getElementById("c-size"), ctl = document.getElementById("ctl-size");
@@ -62,7 +65,7 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
           const v = r.sp[b]; if (v == null) return;
           el("circle", { cx: sx(Math.max(0.8, v)), cy: y, r: 5, fill: b === 1 ? "var(--surface)" : ramp[b], stroke: ramp[b === 1 ? 16 : b], "stroke-width": 2 }, svg);
         });
-        el("text", { x: cx, y: y + 4, class: "axis" }, svg, r.cfg);
+        el("text", { x: cx, y: y + 4, class: "axis" }, svg, r.cfg + (r.half ? " ◐" : ""));
       }
       const hit = el("rect", { x: 0, y: y - 14, width: 700, height: rh - 2, class: "hit" }, svg);
       bindTip(hit, `<b>${r.ds} · ${r.sweep}</b><br>pass rate ${pct(r.pass_rate)}<br>` + (sp.length ? `${r.cfg}, recall ${r.recall}<br>bs 1 / 16 / 64: ${[1, 16, 64].map(b => r.sp[b] == null ? "–" : r.sp[b] + "×" + (r.v3[b] ? " (vs V3)" : "")).join(" / ")} faster` : `SilverTorch tops out at recall ${r.top}<br>no SilverTorch point within a 25 % scan`));
@@ -112,6 +115,70 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
     el("text", { x: 230 + i * 100, y: top + rows.length * rh + 26, class: "axis" }, svg, n);
   });
   svg.setAttribute("viewBox", `0 0 700 ${top + rows.length * rh + 34}`);
+})();
+
+/* 3a. SilverTorch's own settings */
+(function () {
+  const svg = document.getElementById("c-knob"), sel = document.getElementById("knob-ds"), ctl = document.getElementById("ctl-knob"), lg = document.getElementById("lg-knob");
+  const K = D.knobs;
+  let cur = Math.max(0, K.findIndex(k => k.key === "laion30m|tags4")), bs = 16;
+  K.forEach((k, i) => { const o = document.createElement("option"); o.value = i; o.textContent = `${k.label} (pass ${pct(k.pass_rate)})`; sel.appendChild(o); });
+  sel.value = cur; sel.onchange = () => { cur = +sel.value; draw(); };
+  [1, 16, 64].forEach(b => { const x = document.createElement("button"); x.id = "knob-bs-" + b; x.textContent = b === 1 ? "one query" : "batch of " + b; x.onclick = () => { bs = b; draw(); }; ctl.appendChild(x); });
+  const ramp = ["var(--st-1)", "var(--st-2)", "var(--st-3)", "var(--ink-3)"];
+  function draw() {
+    [...ctl.children].forEach(b => b.setAttribute("aria-pressed", b.id === "knob-bs-" + bs));
+    clear(svg); lg.innerHTML = "";
+    const k = K[cur], lists = Object.keys(k.curves).map(Number).sort((a, b) => a - b);
+    const col = nl => ramp[Math.min(lists.indexOf(nl), 3)] || "var(--ink-3)";
+    lists.forEach(nl => {
+      const m = k.mem[nl];
+      lg.insertAdjacentHTML("beforeend", `<span><i style="border-color:${col(nl)}"></i>${nl.toLocaleString("en")} clusters${m ? ` · index ${(m[0] / 1024).toFixed(1)} GiB, build ${m[1]} s` : ""}</span>`);
+    });
+    /* left: recall vs share probed */
+    const A0 = 50, A1 = 320, Y0 = 280, Y1 = 20;
+    const sx = log(0.0003, 1, A0, A1), sy = lin(0, 1, Y0, Y1);
+    [0, 0.5, 0.9, 1].forEach(t => {
+      el("line", { x1: A0, x2: A1, y1: sy(t), y2: sy(t), stroke: t === 0.9 ? "var(--ink-3)" : "var(--grid)", "stroke-dasharray": t === 0.9 ? "3 3" : "" }, svg);
+      el("text", { x: A0 - 6, y: sy(t) + 4, class: "axis", "text-anchor": "end" }, svg, t);
+    });
+    [0.001, 0.01, 0.1, 1].forEach(t => el("text", { x: sx(t), y: Y0 + 16, class: "axis", "text-anchor": "middle" }, svg, pct(t)));
+    el("text", { x: (A0 + A1) / 2, y: Y0 + 30, class: "axis", "text-anchor": "middle" }, svg, "share of clusters probed");
+    el("text", { x: A0, y: 12, class: "lbl" }, svg, "recall@100");
+    lists.forEach(nl => {
+      const pts = k.curves[nl].filter(p => p[1] != null);
+      el("path", { d: pts.map((p, i) => (i ? "L" : "M") + sx(p[0]).toFixed(1) + " " + sy(p[1]).toFixed(1)).join(" "), fill: "none", stroke: col(nl), "stroke-width": 2 }, svg);
+      pts.forEach(p => {
+        el("circle", { cx: sx(p[0]), cy: sy(p[1]), r: 3, fill: col(nl) }, svg);
+        bindTip(el("circle", { cx: sx(p[0]), cy: sy(p[1]), r: 9, class: "hit" }, svg), `<b>${nl.toLocaleString("en")} clusters, ${Math.round(p[0] * nl)} probes</b><br>${pct(p[0])} of clusters probed<br>recall@100 ${p[1]}`);
+      });
+    });
+    /* right: time vs recall at the timed settings */
+    const B0 = 400, B1 = 680;
+    const T = k.timed[bs] || [], L = k.linr[bs];
+    if (!T.length) { el("text", { x: B0, y: 140, class: "axis" }, svg, "no timed settings for this filter"); return; }
+    const ms = T.map(p => p[2]).concat(L ? [L[0]] : []);
+    const lo = Math.min(...ms) * 0.7, hi = Math.max(...ms) * 1.4;
+    const rx = lin(Math.max(0, Math.min(...T.map(p => p[3])) - 0.05), 1, B0, B1), ry = log(lo, hi, Y0, Y1);
+    [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100].filter(t => t >= lo && t <= hi).forEach(t => {
+      el("line", { x1: B0, x2: B1, y1: ry(t), y2: ry(t), stroke: "var(--grid)" }, svg);
+      el("text", { x: B0 - 6, y: ry(t) + 4, class: "axis", "text-anchor": "end" }, svg, fmtMs(t));
+    });
+    [0.5, 0.9, 1].filter(t => rx(t) >= B0).forEach(t => el("text", { x: rx(t), y: Y0 + 16, class: "axis", "text-anchor": "middle" }, svg, t));
+    el("text", { x: (B0 + B1) / 2, y: Y0 + 30, class: "axis", "text-anchor": "middle" }, svg, "recall@100");
+    el("text", { x: B0, y: 12, class: "lbl" }, svg, "time per batch");
+    if (L) {
+      el("line", { x1: B0, x2: B1, y1: ry(L[0]), y2: ry(L[0]), stroke: "var(--linr)", "stroke-dasharray": "6 4", "stroke-width": 1.5 }, svg);
+      el("text", { x: B1, y: ry(L[0]) - 5, class: "axis", "text-anchor": "end", style: "fill:var(--linr)" }, svg, `LiNR ${L[1]}, exact`);
+    }
+    T.forEach(p => {
+      const c = col(p[0]);
+      el("circle", { cx: rx(p[3]), cy: ry(p[2]), r: 5, fill: c, stroke: "var(--surface)", "stroke-width": 1.5 }, svg);
+      el("text", { x: rx(p[3]) + 7, y: ry(p[2]) - 6, class: "axis" }, svg, p[1]);
+      bindTip(el("circle", { cx: rx(p[3]), cy: ry(p[2]), r: 10, class: "hit" }, svg), `<b>${p[0].toLocaleString("en")} clusters, ${p[1]} probes</b><br>recall@100 ${p[3]}<br>${fmtMs(p[2])} per batch` + (L ? `<br>${(p[2] / L[0]).toFixed(2)}× LiNR ${L[1]}'s time` : ""));
+    });
+  }
+  draw();
 })();
 
 /* 3. latency vs pass rate */
@@ -191,8 +258,9 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
         const r = rows.find(x => x.ds === k.ds && x.sweep === k.sweep && x.bs === bs && x.k === kk);
         if (!r) { h += `<td class="na">–</td>`; return; }
         const f = r.flag ? "†" : "";
-        const info = r.win === "ST" ? `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time` : (r.np == null ? `SilverTorch tops out at recall ${r.maxrec} within a 25 % scan (k ${r.k})` : `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time`);
-        h += r.win === "ST" ? `<td class="st" data-tip="${info}">${r.ratio.toFixed(2)}${f}</td>` : `<td class="li${r.np == null ? " def" : ""}" data-tip="${info}">${r.np == null ? r.linr : r.ratio.toFixed(2)}${f}</td>`;
+        const ex = r.ex != null && r.linr === "V3" ? ` (${r.ex}× the best exact LiNR)` : "", hf = r.half ? "; reaches the target only by probing about half or more of the lists" : "";
+        const info = r.win === "ST" ? `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time${ex}${hf}` : (r.np == null ? `SilverTorch tops out at recall ${r.maxrec} within a 25 % scan (k ${r.k})` : `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time${ex}${hf}`);
+        h += r.win === "ST" ? `<td class="st" data-tip="${info}">${r.ratio.toFixed(2)}${f}${r.half ? "◐" : ""}</td>` : `<td class="li${r.np == null ? " def" : ""}" data-tip="${info}">${r.np == null ? r.linr : r.ratio.toFixed(2)}${f}</td>`;
       });
       h += "</tr>";
     });
@@ -215,7 +283,7 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
     h += `<tr><td class="row">${k.ds} · ${k.sweep}</td>`;
     [1, 16, 64].forEach(bs => {
       const r = D.clause_bloom.find(x => x.ds === k.ds && x.sweep === k.sweep && x.bs === bs);
-      h += !r ? `<td class="na">–</td>` : `<td class="${r.med < 1 ? "st" : "li"}" data-tip="bloom takes ${r.lo}–${r.hi}× the exact filter's time over ${r.n} points; median recall cost ${r.cost}">${r.med.toFixed(2)}</td>`;
+      h += !r ? `<td class="na">–</td>` : `<td class="${r.med < 1 ? "st" : "li"}" data-tip="bloom takes ${r.lo}–${r.hi}× the exact filter's time over ${r.n} points; median recall cost ${r.cost}; SM clock ${r.mhz_b} / ${r.mhz_c} MHz (bloom / exact runs)">${r.med.toFixed(2)}</td>`;
     });
     h += "</tr>";
   });

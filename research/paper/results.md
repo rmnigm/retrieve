@@ -28,7 +28,7 @@ SilverTorch is Meta's code, adapted, on its own bloom filter with no recheck; Li
   everywhere. **C2:** V3 at the smallest pool reaching 0.90 takes 0.84-1.37 of V2's time at bs 1, 0.71-1.07 at bs 16 / 64.
   **C3** (so far PubMed and LAION-synth 30M, against torch.compile max-autotune, eager timing): 0.96-1.02× at bs 1,
   1.96-2.20× at bs 16. **C6:** 0.95 is reached on 9 of 17 real filters. Recall bridge: on Goodreads, exact recall and
-  end-task recall correlate at Pearson 0.87-0.93 per filter.
+  end-task recall correlate at Pearson 0.99 (k 100) over SilverTorch's bloom settings, 0.87-0.93 per filter over every method.
 - **New finding (user, 2026-10-14), pending its numbers:** on the adapted code the bloom filter is faster than a
   well-engineered exact clause filter in the same fused search; its recall cost is the false-positive count from the
   untimed step. Both the clause reference row and the untimed step are still running.

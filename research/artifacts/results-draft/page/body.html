@@ -3,7 +3,7 @@
   <span class="eyebrow">Reproducibility paper · results · preliminary · 14 Oct 2026</span>
   <h1>Where SilverTorch reaches the recall you ask for, it beats LiNR in all but one cell</h1>
   <p class="lede">Two families of filtered GPU retrieval on one A100: <span class="key"><i class="sw" style="background:var(--st)"></i>SilverTorch</span> (Meta's official code, adapted by us) probes a few clusters of an int8 index and filters them with its bloom filter, false positives allowed; <span class="key"><i class="sw" style="background:var(--linr)"></i>LiNR</span> (V1 mask-then-score, V2 gather-then-score, V3 a 1-bit prefilter, our implementation from the paper) filters exactly. Every SilverTorch point was timed in the same process as LiNR, on five datasets from 0.8 M to 30 M items.</p>
-  <div class="banner"><span>ⓘ</span><span><b>Preliminary, not citable.</b> These are the final rerun's numbers at seed 0, rebuilt as its runs land; the rerun's gate is not passed yet. <b>Recall</b> here means fidelity to exact search: the share of the exact filtered top-k (highest inner products over the whole catalogue, same filter) that a method returns, so a bloom false positive in the top-k counts as a miss. It is not the papers' end-task recall, but on Goodreads the two move together (Pearson 0.87–0.93 per filter). Cells unstable in every run are marked †.</span></div>
+  <div class="banner"><span>ⓘ</span><span><b>Preliminary, not citable.</b> These are the final rerun's numbers at seed 0, rebuilt as its runs land; the rerun's gate is not passed yet. <b>Recall</b> here means fidelity to exact search: the share of the exact filtered top-k (highest inner products over the whole catalogue, same filter) that a method returns, so a bloom false positive in the top-k counts as a miss. It is not the papers' end-task recall, but <span id="bridge"></span>. Cells unstable in every run are marked †.</span></div>
 </header>
 
 <section>
@@ -22,7 +22,16 @@
 </section>
 
 <section>
-  <span class="eyebrow">3 · The price of recall</span>
+  <span class="eyebrow">3 · SilverTorch's own settings</span>
+  <h2>Recall follows the share of clusters probed; more clusters cost build time, not memory</h2>
+  <div class="controls"><select id="knob-ds" aria-label="dataset and filter"></select></div>
+  <div class="controls" id="ctl-knob"></div>
+  <div class="chart"><div class="legend" id="lg-knob"></div><svg id="c-knob" viewBox="0 0 700 330" role="img" aria-label="SilverTorch recall against the share of clusters probed, and latency against recall at the timed settings"></svg></div>
+  <p class="note" id="n-knob"><b>How to read it:</b> left, recall@100 against the share of clusters probed, one line per number of clusters (bloom filter, no recheck). Right, time per batch against recall at the settings that were timed, labelled by probes; the dashed line is the best exact LiNR in the same run. At the same share probed, 4,096 and 65,536 clusters give about the same recall, but building 65,536 takes 17× longer (LAION 30M: 105 s against 1,738 s) for an index only 0.5 % larger. More probes cost time: on arXiv at a batch of 16, going from 24 to 512 probes takes 0.19 ms to 0.61–1.01 ms, still under exact LiNR's 1.8–2.1 ms.</p>
+</section>
+
+<section>
+  <span class="eyebrow">4 · The price of recall</span>
   <h2>Higher targets cost probes; broad filters at large batches are where LiNR V1 comes close</h2>
   <div class="controls" id="ctl-curve"></div>
   <div class="chart"><div class="legend" id="lg-curve"></div><svg id="c-curve" viewBox="0 0 700 360" role="img" aria-label="Latency against filter pass rate for LiNR V1, V2 and SilverTorch at 24 probes and at its tuned points"></svg></div>
@@ -30,43 +39,43 @@
 </section>
 
 <section>
-  <span class="eyebrow">4 · Every cell, SilverTorch at 0.90 / 0.95 against the best LiNR</span>
+  <span class="eyebrow">5 · Every cell, SilverTorch at 0.90 / 0.95 against the best LiNR</span>
   <h2>Who is faster, filter by filter, with SilverTorch held to a recall target</h2>
   <div class="controls" id="ctl-map"></div>
   <div class="chart"><table class="map" id="c-map"></table></div>
-  <p class="note"><b>How to read it:</b> a number is SilverTorch's time as a fraction of the fastest LiNR reaching the same target (0.30 = 3.3× faster; V3 runs at k 100 only). k 2048 is the papers' own k, on one filter per dataset. <span style="background:repeating-linear-gradient(135deg,var(--linr-soft) 0 5px,transparent 5px 8px);padding:0 4px">Hatched</span>: SilverTorch does not reach the target within a 25 % scan. Solid orange: SilverTorch reaches it but LiNR is faster.</p>
+  <p class="note"><b>How to read it:</b> a number is SilverTorch's time as a fraction of the fastest LiNR reaching the same target (0.30 = 3.3× faster; V3 runs at k 100 only). k 2048 is the papers' own k, on one filter per dataset. <span style="background:repeating-linear-gradient(135deg,var(--linr-soft) 0 5px,transparent 5px 8px);padding:0 4px">Hatched</span>: SilverTorch does not reach the target within a 25 % scan. Solid orange: SilverTorch reaches it but LiNR is faster. ◐: reaches the target only by probing about half or more of the lists.</p>
 </section>
 
 <section>
-  <span class="eyebrow">5 · Why a probabilistic filter</span>
+  <span class="eyebrow">6 · Why a probabilistic filter</span>
   <h2>The bloom filter is faster than a well-engineered exact filter in the same search</h2>
   <div class="chart" id="c-cb"></div>
-  <p class="note" id="n-cb"><b>How to read it:</b> SilverTorch (Meta's code, adapted) with its bloom filter against the same search with an exact clause filter fused in its place, at the same clusters and probes. A number below 1 is the bloom's time as a share of the exact filter's. The bloom's price is its false positives: a passing-looking item that fails the filter and takes a top-k slot. That supports SilverTorch's case for a probabilistic filter; the paper's other half is how few false positives it lets through.</p>
+  <p class="note" id="n-cb"><b>How to read it:</b> SilverTorch (Meta's code, adapted) with its bloom filter against the same search with an exact clause filter fused in its place, at the same clusters and probes, from two separate runs on the same GPU (not interleaved; the exact filter's run is a later build whose bloom path is byte-identical), with pairs unstable on either side dropped. A number below 1 is the bloom's time as a share of the exact filter's. The bloom's price is its false positives: a passing-looking item that fails the filter and takes a top-k slot. That supports SilverTorch's case for a probabilistic filter; the paper's other half is how few false positives it lets through.</p>
 </section>
 
 <section>
-  <span class="eyebrow">6 · Seed to seed</span>
+  <span class="eyebrow">7 · Seed to seed</span>
   <h2>How much the comparison moves between seeds</h2>
   <div class="chart" id="c-var"></div>
   <p class="note" id="n-var"><b>How to read it:</b> the timed comparison rerun at seeds 1 and 2 (a new clustering, a new synthetic draw, a new timing run). Per cell: the median of SilverTorch's time over the best LiNR's, and its range over the three seeds.</p>
 </section>
 
 <section>
-  <span class="eyebrow">7 · Inside LiNR</span>
+  <span class="eyebrow">8 · Inside LiNR</span>
   <h2>LiNR's V2 beats V1 only for one query at a time</h2>
   <div class="chart"><div class="legend" id="lg-c1"></div><svg id="c-c1" viewBox="0 0 700 300" role="img" aria-label="LiNR V2 over V1 latency against pass rate at bs 1 and bs 16 for three index sizes"></svg></div>
   <p class="note"><b>How to read it:</b> below the line V2 (gather the passing items, then score) is faster than V1 (score everything, mask). At bs 1 V2 wins below a pass rate of about 0.8–0.94, by more as N grows. At bs 16 the crossover drops to 0.01–0.05; at bs 64 and 256, V1 wins on every filter.</p>
 </section>
 
 <section>
-  <span class="eyebrow">8 · Co-design</span>
+  <span class="eyebrow">9 · Co-design</span>
   <h2>Meta's "probe, then filter" pays off only at 10–30 M items</h2>
   <div class="chart"><div class="legend" id="lg-c5"></div><svg id="c-c5" viewBox="0 0 700 280" role="img" aria-label="Full-index bloom filter time over probe-then-filter time against index size, Meta's code as published"></svg></div>
   <p class="note" id="n-c5"><b>How to read it:</b> above 1, filtering inside the probed clusters (the paper's co-design) beats building the filter over the whole index first. Measured on Meta's code as published: the paper's 1.79–2.15× shows up at 30 M; below 10 M the full-index path is faster. The adapted code has no full-index path to compare: it filters only the probed clusters by design.</p>
 </section>
 
 <section>
-  <span class="eyebrow">9 · Claim check</span>
+  <span class="eyebrow">10 · Claim check</span>
   <h2>What each paper claimed, and what we measured</h2>
   <div class="claims" id="claims"></div>
 </section>

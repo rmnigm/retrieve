@@ -80,6 +80,9 @@ for (t, ds, sw), g in x.groupby(["target", "dataset", "sweep"]):
                 for bs in g.index
             },
             v3={int(bs): bool(g.matched_best[bs] == "V3") for bs in g.index},
+            half=bool((b.probe_frac > 0.25).any())
+            if "probe_frac" in b and len(b)
+            else False,
             linr=g.matched_best.iloc[0],
         )
     )
@@ -160,6 +163,8 @@ D["matched"] = [
         pass_rate=num(r.pass_rate, 4),
         win="ST" if r.winner_matched == "SilverTorch" else "LiNR",
         ratio=num(r.st_over_matched, 2),
+        ex=num(r.st_over_linr, 2),
+        half=bool(getattr(r, "probe_frac", 0) > 0.25),
         np=None if pd.isna(r.n_probe) else int(r.n_probe),
         nl=None if pd.isna(r.n_lists) else int(r.n_lists),
         maxrec=curve_top(r.dataset, r.sweep, int(r.perf_k)),
@@ -211,6 +216,8 @@ D["clause_bloom"] = [
         lo=num(g.bloom_over_clause.min(), 2),
         hi=num(g.bloom_over_clause.max(), 2),
         cost=num(g.recall_cost.median(), 3),
+        mhz_b=num(g.perf_sm_mhz_bloom.median(), 0),
+        mhz_c=num(g.perf_sm_mhz_clause.median(), 0),
     )
     for (ds, sw, bs), g in cb.groupby(["dataset", "sweep", "perf_bs"])
 ]
@@ -360,10 +367,62 @@ claims.append(
         "C7",
         "ok",
         "holds",
-        "<b>Our adaptation keeps Meta's results.</b> Identical ids and scores to Meta's code as published in all 1,536 gate cells (an earlier gate, not part of this rerun).",
+        "<b>Our adaptation keeps Meta's results.</b> Identical ids and scores to Meta's code as published in all 1,536 gate cells (earlier gate at the adapted code's review head; C7 was not rerun in the final rerun, by the user's call).",
     ]
 )
 D["claims"] = claims
+pr = json.load(open(OUT + "product_recall.json"))
+allf = [
+    v["pearson"] for k, v in pr.items() if k.startswith("all k") and "pooled" not in k
+]
+D["bridge"] = dict(
+    bloom100=num(pr["bloom k100 pooled"]["pearson"], 2),
+    bloom1000=num(pr["bloom k1000 pooled"]["pearson"], 2),
+    n=pr["bloom k100 pooled"]["n"],
+    all_lo=num(min(allf), 2),
+    all_hi=num(max(allf), 2),
+)
+# SilverTorch's own settings: recall against the share of clusters probed (curves), speed against recall (timed points)
+cv = pd.read_csv(OUT + "c6_curves.csv")
+cv = cv[cv.filter_kind == "bloom"]
+mem = pd.read_csv(OUT + "memory.csv")
+mem = mem[mem.arm == "SilverTorch"]
+knobs = []
+for (ds, sw), g in cv.groupby(["dataset", "sweep"]):
+    if ds not in lab:
+        continue
+    t = h0[(h0.dataset == ds) & (h0.sweep == sw) & (h0.perf_k == 100)]
+    knobs.append(
+        dict(
+            key=f"{ds}|{sw}",
+            label=f"{lab[ds]} · {sw}",
+            n=int(g.n_items.iloc[0]),
+            pass_rate=num(g.pass_rate.iloc[0], 4),
+            curves={
+                int(nl): [
+                    [num(r.n_probe / nl, 5), num(r["oracle_recall@100"])]
+                    for _, r in c.sort_values("n_probe").iterrows()
+                ]
+                for nl, c in g.groupby("n_lists")
+            },
+            timed={
+                int(bs): [
+                    [int(r.n_lists), int(r.n_probe), num(r.st_ms, 4), num(r.recall)]
+                    for r in tb_.itertuples()
+                ]
+                for bs, tb_ in t.groupby("perf_bs")
+            },
+            linr={
+                int(bs): [num(tb_.linr_ms.iloc[0], 4), tb_.linr_best.iloc[0]]
+                for bs, tb_ in t.groupby("perf_bs")
+            },
+            mem={
+                int(r.n_lists): [num(r.index_mib, 0), num(r.build_s, 1)]
+                for r in mem[mem.dataset == ds].itertuples()
+            },
+        )
+    )
+D["knobs"] = sorted(knobs, key=lambda r: (r["n"], r["key"]))
 json.dump(D, open(sys.argv[2], "w"))
 print(len(json.dumps(D)), {k: len(v) for k, v in D.items()})
 print(json.dumps(D["counts"], indent=1))

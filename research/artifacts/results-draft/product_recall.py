@@ -4,7 +4,8 @@ Every distinct configuration on goodreads (SilverTorch probe-curve and timed poi
 pools 0.5-20 %) carries both metrics per record: ``oracle_recall@k`` (share of the exact filtered top-k returned) and
 ``heldout_recall@k`` (share of held-out interactions in the returned top-k, the end-task metric; rows whose target
 passes the filter). Writes ``product_recall.csv`` (one row per configuration and k) and ``product_recall.json``
-(Pearson / Spearman per filter and k, and pooled over filters with held-out recall divided by the exact scan's).
+(Pearson / Spearman per filter and k, and pooled over filters with held-out recall divided by the exact scan's), for
+SilverTorch's bloom points (the study arm) and for every configuration (robustness).
 
 usage: product_recall.py FR OUT   (FR: one bench-fetched directory per fr/ subtree)
 """
@@ -45,18 +46,25 @@ for k in [100, 1000]:
     rows.append(
         x[["k", "sweep", "algo", "config", "oracle", "heldout", "heldout_over_exact"]]
     )
-    for sw, g in x.groupby("sweep"):
-        stats[f"k{k} {sw}"] = dict(
-            n=len(g),
-            pearson=pearsonr(g.oracle, g.heldout)[0],
-            spearman=spearmanr(g.oracle, g.heldout)[0],
-            exact_heldout=exact[sw],
+    arms = {  # the study arm (SilverTorch bloom) first; every configuration pooled as the robustness line
+        "bloom": x[(x.algo == "silvertorch") & (x.filter_kind == "bloom")],
+        "all": x,
+    }
+    for arm, y in arms.items():
+        for sw, g in y.groupby("sweep"):
+            if len(g) < 3:
+                continue
+            stats[f"{arm} k{k} {sw}"] = dict(
+                n=len(g),
+                pearson=pearsonr(g.oracle, g.heldout)[0],
+                spearman=spearmanr(g.oracle, g.heldout)[0],
+                exact_heldout=exact[sw],
+            )
+        stats[f"{arm} k{k} pooled"] = dict(
+            n=len(y),
+            pearson=pearsonr(y.oracle, y.heldout_over_exact)[0],
+            spearman=spearmanr(y.oracle, y.heldout_over_exact)[0],
         )
-    stats[f"k{k} pooled"] = dict(
-        n=len(x),
-        pearson=pearsonr(x.oracle, x.heldout_over_exact)[0],
-        spearman=spearmanr(x.oracle, x.heldout_over_exact)[0],
-    )
 OUT.mkdir(parents=True, exist_ok=True)
 pd.concat(rows).to_csv(OUT / "product_recall.csv", index=False)
 (OUT / "product_recall.json").write_text(json.dumps(stats, indent=1))
