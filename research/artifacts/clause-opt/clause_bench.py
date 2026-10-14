@@ -92,8 +92,8 @@ def prof_one(fn, reps):
 
 
 def read_peak() -> float:
-    """GB/s of a streaming read (sum of 2 GiB int32): the practical DRAM ceiling."""
-    x = torch.ones(1 << 29, dtype=torch.int32, device="cuda")
+    """GB/s of a streaming read (sum of 2 GiB fp32): the practical DRAM ceiling."""
+    x = torch.ones(1 << 29, dtype=torch.float32, device="cuda")
     x.sum()
     start, end = (
         torch.cuda.Event(enable_timing=True),
