@@ -21,6 +21,7 @@ from bench import algos, inputs, run
 from bench.config import load_dataset
 from torch.profiler import ProfilerActivity, profile
 
+import bytes_model
 
 
 FILTER = (
@@ -90,6 +91,44 @@ def prof_one(fn, reps):
     return dict(groups), top
 
 
+def read_peak() -> float:
+    """GB/s of a streaming read (sum of 2 GiB int32): the practical DRAM ceiling."""
+    x = torch.ones(1 << 29, dtype=torch.int32, device="cuda")
+    x.sum()
+    start, end = (
+        torch.cuda.Event(enable_timing=True),
+        torch.cuda.Event(enable_timing=True),
+    )
+    start.record()
+    for _ in range(10):
+        x.sum()
+    end.record()
+    torch.cuda.synchronize()
+    return 10 * x.numel() * 4 / (start.elapsed_time(end) * 1e6)
+
+
+def model(exact, sorted_attrs, inp, pool, qa_pool, batches) -> dict:
+    """bytes_model per forward, averaged over the first ``batches`` pool batches."""
+    tot = {"docs": 0.0, "exact_lane_B": 0.0, "exact_sector_B": 0.0, "exact_before_B": 0.0,
+           "bloom_B": 0.0}  # fmt: skip
+    rev = inp["clause_is_reverse"]
+    rev = rev.tolist() if rev is not None else [False] * sorted_attrs.shape[1]
+    for i in range(batches):
+        qa = qa_pool[i].long()
+        rows, doc, group, _ = bytes_model.probed_docs(exact, pool[i])
+        lane, sector, before = bytes_model.exact_bytes(
+            sorted_attrs, rev, qa, rows, doc, group
+        )
+        tot["docs"] += doc.numel()
+        tot["exact_lane_B"] += lane
+        tot["exact_sector_B"] += sector
+        tot["exact_before_B"] += before
+        tot["bloom_B"] += bytes_model.bloom_bytes(
+            qa, rows, algos.BLOOM_DEFAULTS["k_hash"]
+        )
+    return {k: v / batches for k, v in tot.items()}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", required=True)
@@ -104,6 +143,9 @@ def main():
     ap.add_argument("--mode", choices=["profile", "dump"], required=True)
     ap.add_argument("--reps", type=int, default=20, help="profile: batches profiled")
     ap.add_argument("--json", type=Path, help="profile: the table rows")
+    ap.add_argument(
+        "--model-batches", type=int, default=4, help="profile: batches modelled"
+    )
     ap.add_argument("--batches", type=int, default=8, help="dump: batches dumped")
     ap.add_argument("--out", type=Path, help="dump: the .pt file")
     a = ap.parse_args()
@@ -119,13 +161,24 @@ def main():
         **{f"bloom{'_rc' if rc else ''}": m for rc, m in blooms.items()},
     }
     rows, dumps = [], {}
+    sorted_attrs = (
+        inp["item_attrs"].long()[exact.sort_perm].sort(dim=2, descending=True).values
+    )
     with torch.inference_mode():
+        if a.mode == "profile":
+            rows.append({"key": "peak", "read_GBps": read_peak()})
         for sweep in a.sweeps:
             qa_s, skip = inputs.sweep_qa(inp["qa"], ds.clauses["clause"][sweep])
             for bs in a.bs:
                 pool, qa_pool = inputs.query_pool(
                     inp, qa_s, skip, bs=bs, seed=a.seed, n_pool=64, device=dev
                 )
+                models = {}
+                if a.mode == "profile":
+                    for n_probe in a.n_probe:
+                        exact.set_query_params(n_probe=n_probe)
+                        models[n_probe] = model(exact, sorted_attrs, inp, pool, qa_pool,
+                                                a.model_batches)  # fmt: skip
                 for name, m in mods.items():
                     preps = [
                         run.filter_arg(m, qa_pool[i]) for i in range(pool.shape[0])
@@ -143,7 +196,9 @@ def main():
                             key = f"{sweep}/bs{bs}/np{n_probe}/k{k}/{name}"
                             if a.mode == "profile":
                                 g, top = prof_one(fn, a.reps)
-                                rows.append({"key": key, **g, "top": top})
+                                rows.append(
+                                    {"key": key, **g, **models[n_probe], "top": top}
+                                )
                                 print(
                                     key,
                                     {x: round(v, 1) for x, v in g.items()},

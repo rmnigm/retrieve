@@ -1925,8 +1925,15 @@ file. `CHANGES.md` lists every change; each has its gate row in
    Each filter's full-warp and remainder payload kernels are one launch (the blocks split
    between the two), so their latencies overlap at small batches. `exact`: the clauses are
    tested over the probed docs only, one warp per 32-doc payload with `__brev(__ballot_sync(…))`
-   as its mask, an inactive clause a warp-uniform skip. A given full-`N` `filtering_bit_mask`
-   is read by the scorer as upstream's.
+   as its mask, an inactive clause a warp-uniform skip. The attrs are the layer's
+   `fork_clause_attrs` layout (C14), not the `[N, C, A_max]` int64 table the other backends
+   read: int32 `[R, N]`, clause `c` in slot rows `clause_slots[c]:clause_slots[c + 1]` (as many
+   as its widest doc has values, so no all-pad slot is stored), each doc's values sorted
+   descending so a `-1` ends them. A warp's 32 docs read one coalesced 128-byte row per slot,
+   and a lane stops at its match or its first pad. `prepare_queries` casts the query attrs to
+   int32 (`fork_query_attrs`: a value outside `[-1, 2^31)` becomes `INT32_MIN`, which no doc
+   holds; `register_index` raises on doc values outside that range). A given full-`N`
+   `filtering_bit_mask` is read by the scorer as upstream's.
 3. **Scorer**: upstream's payload scorer (`process_cluster` / `_remaining`), except that for
    D ≥ 128 full warps go to `process_cluster_coop` (fixed in `search`; no switch):
    the warp reads its 32 consecutive rows linearly (≤ 256 bytes a row a chunk) into a padded
@@ -1958,7 +1965,7 @@ layer's `m_bits` is then required), so its index is `N · m_bits / 8` bytes like
 
 **Exact recheck (C13).** `OfficialConfig.recheck` (the fork's default; `"official"` has none):
 `prepare_queries` also keeps the query attrs and the layer keeps the cluster-sorted exact attrs
-beside the bloom index, and `search` tests the bloom's survivors exactly (partial path: a warp takes up
+(C14's layout, above) beside the bloom index, and `search` tests the bloom's survivors exactly (partial path: a warp takes up
 to 32 consecutive payloads, as many as keep ≥ 64 warps an SM, lane l evaluating payload l's bloom
 columns; the warp then walks its payloads, skipping those without bloom survivors, each lane
 testing one bloom-passing doc). Bloom ∧ exact is the exact
