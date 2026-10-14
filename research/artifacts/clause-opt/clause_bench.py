@@ -140,22 +140,29 @@ def main():
     ap.add_argument("--k", type=int, nargs="+", default=[100])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--config-dir", type=Path, default=Path("/scratch/fr/config"))
-    ap.add_argument("--mode", choices=["profile", "dump"], required=True)
+    ap.add_argument("--mode", choices=["profile", "dump", "both"], required=True)
     ap.add_argument("--reps", type=int, default=20, help="profile: batches profiled")
     ap.add_argument("--json", type=Path, help="profile: the table rows")
     ap.add_argument(
+        "--profile-k", type=int, default=100, help="profile: the k profiled"
+    )
+    ap.add_argument(
         "--model-batches", type=int, default=4, help="profile: batches modelled"
     )
+    ap.add_argument(
+        "--model-max-docs", type=int, default=200_000_000,
+        help="profile: no bytes model above this many probed docs a batch (memory)",
+    )  # fmt: skip
     ap.add_argument("--batches", type=int, default=8, help="dump: batches dumped")
     ap.add_argument("--out", type=Path, help="dump: the .pt file")
     a = ap.parse_args()
+    prof, dump = a.mode in ("profile", "both"), a.mode in ("dump", "both")
 
     dev = torch.device("cuda")
     ds = load_dataset(a.config_dir / f"{a.dataset}.yaml", a.dim)
     inp = inputs.load_inputs(ds, dev)
-    k_max = max(a.k)
-    recheck = [False] if a.mode == "profile" else [True]
-    exact, blooms = build(ds, inp, a.n_lists, k_max, a.seed, recheck)
+    recheck = [False] * prof + [True] * dump
+    exact, blooms = build(ds, inp, a.n_lists, max(a.k), a.seed, recheck)
     mods = {
         "exact": exact,
         **{f"bloom{'_rc' if rc else ''}": m for rc, m in blooms.items()},
@@ -165,7 +172,7 @@ def main():
         inp["item_attrs"].long()[exact.sort_perm].sort(dim=2, descending=True).values
     )
     with torch.inference_mode():
-        if a.mode == "profile":
+        if prof:
             rows.append({"key": "peak", "read_GBps": read_peak()})
         for sweep in a.sweeps:
             qa_s, skip = inputs.sweep_qa(inp["qa"], ds.clauses["clause"][sweep])
@@ -174,9 +181,9 @@ def main():
                     inp, qa_s, skip, bs=bs, seed=a.seed, n_pool=64, device=dev
                 )
                 models = {}
-                if a.mode == "profile":
-                    for n_probe in a.n_probe:
-                        exact.set_query_params(n_probe=n_probe)
+                for n_probe in a.n_probe if prof else []:
+                    exact.set_query_params(n_probe=n_probe)
+                    if exact._probe_width * bs <= a.model_max_docs:
                         models[n_probe] = model(exact, sorted_attrs, inp, pool, qa_pool,
                                                 a.model_batches)  # fmt: skip
                 for name, m in mods.items():
@@ -194,25 +201,24 @@ def main():
                                 )
 
                             key = f"{sweep}/bs{bs}/np{n_probe}/k{k}/{name}"
-                            if a.mode == "profile":
+                            if dump and name != "bloom":
+                                out = [
+                                    fn(i) for i in range(min(a.batches, pool.shape[0]))
+                                ]
+                                dumps[key] = [(i.cpu(), s.cpu()) for i, s in out]
+                            if prof and name != "bloom_rc" and k == a.profile_k:
                                 g, top = prof_one(fn, a.reps)
-                                rows.append(
-                                    {"key": key, **g, **models[n_probe], "top": top}
-                                )
+                                rows.append({"key": key, **g, **models.get(n_probe, {}),
+                                             "top": top})  # fmt: skip
                                 print(
                                     key,
                                     {x: round(v, 1) for x, v in g.items()},
                                     flush=True,
                                 )
-                            else:
-                                out = [
-                                    fn(i) for i in range(min(a.batches, pool.shape[0]))
-                                ]
-                                dumps[key] = [(i.cpu(), s.cpu()) for i, s in out]
-    if a.mode == "profile" and a.json:
+    if prof and a.json:
         a.json.parent.mkdir(parents=True, exist_ok=True)
         a.json.write_text(json.dumps(rows, indent=1))
-    if a.mode == "dump":
+    if dump:
         a.out.parent.mkdir(parents=True, exist_ok=True)
         torch.save(dumps, a.out)
         print(f"dumped {len(dumps)} cells to {a.out}")
