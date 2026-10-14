@@ -6,7 +6,7 @@ torch.profiler over --reps pool batches. dump: ids + scores of the first --batch
 batches, exact and bloom with recheck (C13), to --out for the bit-exact gate (compare.py).
 
   python clause_bench.py --dataset pubmed --dim 768 --n-lists 4096 --n-probe 24 512 \
-      --sweeps all5 c0_mesh --bs 1 16 64 --k 100 profile --json out.json
+      --sweeps all5 c0_mesh --bs 1 16 64 --k 100 --mode profile --json out.json
 """
 
 import argparse
@@ -21,7 +21,6 @@ from bench import algos, inputs, run
 from bench.config import load_dataset
 from torch.profiler import ProfilerActivity, profile
 
-CONFIG = Path(__file__).resolve().parents[3] / "evaluation" / "config"
 
 
 FILTER = (
@@ -101,17 +100,16 @@ def main():
     ap.add_argument("--bs", type=int, nargs="+", default=[1, 16, 64])
     ap.add_argument("--k", type=int, nargs="+", default=[100])
     ap.add_argument("--seed", type=int, default=0)
-    sub = ap.add_subparsers(dest="mode", required=True)
-    p = sub.add_parser("profile")
-    p.add_argument("--reps", type=int, default=20)
-    p.add_argument("--json", type=Path)
-    d = sub.add_parser("dump")
-    d.add_argument("--batches", type=int, default=8)
-    d.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--config-dir", type=Path, default=Path("/scratch/fr/config"))
+    ap.add_argument("--mode", choices=["profile", "dump"], required=True)
+    ap.add_argument("--reps", type=int, default=20, help="profile: batches profiled")
+    ap.add_argument("--json", type=Path, help="profile: the table rows")
+    ap.add_argument("--batches", type=int, default=8, help="dump: batches dumped")
+    ap.add_argument("--out", type=Path, help="dump: the .pt file")
     a = ap.parse_args()
 
     dev = torch.device("cuda")
-    ds = load_dataset(CONFIG / f"{a.dataset}.yaml", a.dim)
+    ds = load_dataset(a.config_dir / f"{a.dataset}.yaml", a.dim)
     inp = inputs.load_inputs(ds, dev)
     k_max = max(a.k)
     recheck = [False] if a.mode == "profile" else [True]
