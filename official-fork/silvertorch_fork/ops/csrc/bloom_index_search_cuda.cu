@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C4: prepared-plan search ops, no host sync; C8: bloom-evaluating payload kernels; C13: their exact recheck; K fix 4: signature_match loads after resolving (official-fork/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: package silvertorch -> silvertorch_fork, ops torch.ops.st -> torch.ops.stfork; C4: prepared-plan search ops, no host sync; C8: bloom-evaluating payload kernels; C13: their exact recheck; K fix 4: signature_match loads after resolving; C14: the recheck reads the int32 clause-slot layout (official-fork/CHANGES.md).
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
