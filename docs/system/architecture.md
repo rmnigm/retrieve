@@ -17,9 +17,8 @@ shapes, autotune keys, numerics) see [kernels.md](kernels.md).
 **What ships** ([decisions](../../research/decisions.md#goal-and-scheduling)): the
 release carries LiNR V1-V3 with their filters and kernels, and
 `SilverTorch` on Meta's official SilverTorch code, adapted
-(`backend="official-fork"`, the `official-fork/` workspace member, on
-`dev/meta-fork` until its review accepts; renamed to the default backend at
-roadmap RENAME). `backend="official"` (Meta's code as published) stays as
+(`backend="official-fork"`, the `official-fork/` workspace member;
+renamed to the default backend at roadmap RENAME). `backend="official"` (Meta's code as published) stays as
 the parity reference. `SilverTorch`'s `backend="triton"` and
 `backend="torch"` (our Triton reimplementation of Algorithm 1 and its eager
 reference) are in this tree today but not in the release; roadmap

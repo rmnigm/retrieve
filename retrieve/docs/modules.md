@@ -55,9 +55,9 @@ the same code (cuBLAS already covers its case). `SilverTorch` alone also accepts
 and bloom phases, with our k-means and quantization in front; it is Meta's code as published,
 the reference the adapted code is checked against, eager-only (`torch.compile` raises), and its bloom mode is Meta's
 bloom index rather than ours (`m_bits` is optional; `official=OfficialConfig(...)` carries
-`b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path, the
+`b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path
 and the partial-vs-full bloom path; the expression parse runs in `prepare_queries`).
-`backend="official-fork"` runs the same path on our fork of Meta's kernels (`torch.ops.stfork.*`,
+`backend="official-fork"` runs the same path on Meta's official SilverTorch code, adapted (`torch.ops.stfork.*`,
 package `silvertorch-fork`, also in the `official` extra): ids and scores equal to Meta's, no host
 sync, so it captures and compiles; its bloom evaluates only the probed clusters
 (`OfficialConfig(bloom_path="full")` raises) and by default rechecks the bloom's survivors
@@ -158,7 +158,8 @@ inputs, fp32 accumulation). Ranking is what the layers promise; cast at the boun
 
 ```python
 SilverTorch(k, n_lists, n_probe, filter_mode="none", m_bits=None, k_hash=None,
-            n_iter=10, seed=0, kmeans_init="random", backend="triton", official=None)
+            n_iter=10, seed=0, kmeans_init="random", backend="triton", official=None,
+            bloom_path="partial")
 ```
 
 - `register_index(item_embs, item_clause_attrs=None, clause_is_reverse=None)`
@@ -187,7 +188,10 @@ otherwise). `k` is a plain attribute, settable at any time.
 
 After `register_index`, `build_timings` holds the seconds of the four build phases
 (`kmeans_s`, `assemble_s`, `quantize_s`, `filter_s`; `{}` before it and on a prebuilt module).
-`capturable` is `True` on `triton` / `torch` and `False` on `official` (eager-only).
+`capturable` is `True` on `triton` / `torch` / `official-fork` and `False` on `official`
+(eager-only). `bloom_path="full"` (bloom over every item, not only the probed clusters) applies
+to `filter_mode="bloom"` on `triton` / `torch`; the official backends take
+`OfficialConfig(bloom_path=...)`.
 
 ### `SilverTorchBuilder(**kwargs)`
 

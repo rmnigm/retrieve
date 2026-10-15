@@ -149,7 +149,7 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    recorded, and raises (the cell fails at the perf stage) if they never are.
 6. **Seeds and repeats.** Timing repeats are the 3 windows above (no
    rebuild). Seeds change the IVF (k-means), the OPORP projection
-   (`v3_seed`) and the pool; V1/V2 and the postfilter are seed-invariant in
+   (`seed`) and the pool; V1/V2 and the postfilter are seed-invariant in
    quality, so their later seeds copy seed 0's ([quality cache](#quality-cache)).
    Every suite runs seeds `[0, 1, 2]` on every dataset and sweep (user,
    2026-10-08), `codesign`'s as timing repeats; `h2h` runs five. The report takes the

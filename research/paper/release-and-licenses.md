@@ -62,7 +62,8 @@ Read with `HfApi().list_datasets(author="pinkmeme")` / `list_models` and
 | `pinkmeme/eval-goodreads-work-id` (dataset) | private | 9.66 GB: `trainer/` (interaction sequences), `test.parquet`, attrs, vocabularies, `item_id_map.json`, 6 checkpoints | **stays private** ([§1](#1-datasets)); at most the checkpoints, if the user decides so | any interaction data, catalog attrs or vocabularies |
 | `pinkmeme/eval-laion30m` (registered on `dev/v-laion30`, not created yet) | — | — | gated, if the user publishes LAION at all | captions, URLs (`items.parquet`, `queries.parquet`) |
 | `pinkmeme/eval-pubmed` (dataset) | private | 17.2 GB (`10d48d05`): the dot-product 10 M slice, MedCPT vectors fp16 not normalised, attrs, splits, vocabularies, id map; no titles or abstracts | vectors-only, as it is now, public or left private (user) | titles, abstracts (not in it) |
-| `pinkmeme/eval-yambda-500m`, `-5b`, `eval-kuairand` (datasets) | private | trainer inputs + checkpoints (19.6 / 8.9 / 0.5 GB) | stay private: out of the study | — |
+| `pinkmeme/eval-yambda-500m` (dataset) | private | trainer inputs + checkpoints (19.6 GB) | stays private | — |
+| `pinkmeme/eval-yambda-5b`, `eval-kuairand`, `eval-yfcc10m` (datasets) | — | deleted by the user (2026-10-15); out of the study | — | — |
 | `pinkmeme/arxiv-retrieval` (dataset), `goodreads-gsasrec`, `yambda-500m-gsasrec`, `yambda-5b-gsasrec` (models) | private | only `.gitattributes`: empty shells | stay private or are deleted (user) | — |
 | `pinkmeme/retrieval-filter-evals-2026-05-20`, `-05-23` (datasets) | **public**, MIT | the thesis-era result JSONs and configs, including LiNR V4 rows; the card names `/workspace/retrieve/evaluation/` | the user decides: they predate the harness rewrite, and none of their numbers is paper material ([provenance](provenance-and-disclosure.md#5-what-was-compared-with-what--and-what-is-not-claimed)). They identify the account during review | — |
 

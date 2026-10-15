@@ -310,7 +310,7 @@ non-null item's bucket is unchanged.
 YFCC-10M left the study (user, 2026-10-13, [decisions](../../research/decisions.md#datasets)); its ETL, GT check,
 configs and tests are deleted (tag `pre-release-cleanup` holds them). Until roadmap step 6 two leftovers stay in files
 the final run imports: `eval-data yfcc` / `yfcc-check-gt` are still listed in `cli.py` and fail on import, and
-`hub.py` still names `pinkmeme/eval-yfcc10m`.
+`hub.py` still names `pinkmeme/eval-yfcc10m`, a repo the user deleted (2026-10-15).
 
 ### pubmed
 
@@ -528,8 +528,8 @@ quantization* and *Build-time 1-bit quantization*).
 ### kuairand
 
 **Status: out of the study** ([decisions](../../research/decisions.md#datasets)); its ETL, config and
-trainer inputs stay. The eval inputs are rebuilt with `eval-data kuairand all` (~20 min); only
-the trainer inputs are on the Hub ([HuggingFace I/O](#huggingface-io)), and the d64
+code stays. Nothing is on the Hub (its repo, which held the trainer inputs, was deleted, 2026-10-15):
+`eval-data kuairand all` rebuilds the trainer and eval inputs (its `prep` and `attrs` steps), and the d64
 `train_on_val` checkpoint was not kept ([validation](../../research/validation.md#final-models-the-e1c-recipe);
 its flags are in [its command.sh](../../research/artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)).
 d128 does not fit. The one filter cell recorded ran on the deleted gSASRec `gsasrec-d128-shared`
@@ -1139,15 +1139,17 @@ EVAL_REPOS = {
 }
 ```
 
+`yambda-5b`, `yfcc10m` and `kuairand` name repos the user deleted (2026-10-15); their keys stay in the
+code until the roadmap's deletion step.
+
 What may be
 published from each repo: [release and licenses](../../research/paper/release-and-licenses.md).
 
 `pinkmeme/eval-pubmed` (private, revision `10d48d05`, 17.2 GB) holds the dot-product 10 M slice
 (`pubmed-medcpt-dot`, [pubmed](#pubmed)): `content_d768/`, attrs, `eval_split.parquet`, `heldout.parquet`,
 `item_id_map.json` and vocabularies, no titles, abstracts or ETL intermediates (published from a directory of
-hardlinks to exactly those files). `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `pinkmeme/eval-openalex` likewise. `pinkmeme/eval-kuairand` (private) holds only the
-KuaiRand trainer inputs: the eval inputs and the checkpoint are not published
-(user choice, see [kuairand](#kuairand)). `pinkmeme/eval-laion30m` (private) is to hold the
+hardlinks to exactly those files). `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `pinkmeme/eval-openalex` likewise. KuaiRand has no Hub repo (`pinkmeme/eval-kuairand`, which held only its trainer inputs, was
+deleted, 2026-10-15); rebuild it with its ETL ([kuairand](#kuairand)). `pinkmeme/eval-laion30m` (private) is to hold the
 staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`); not yet published. The old A100
 `checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).
 
@@ -1160,9 +1162,7 @@ staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`
   (`train/val/test.parquet`, `item_id_map.json`, `prep_log.json`, `book_to_work.parquet`);
 - `pinkmeme/eval-yambda-500m` `trainer/`: all of `data/yambda-500m/trainer/`
   (`train/val/test.parquet`, `item_id_map.json`, the re-prep with `timestamps`);
-- `pinkmeme/eval-kuairand` `trainer/`: `train.parquet`, `val.parquet`, `prep_log.json`.
-  The trainer also needs `test.parquet` and `item_id_map.json` from `data/kuairand/`,
-  which are not on the Hub; rebuild them with `eval-data kuairand all`.
+- KuaiRand: none on the Hub (repo deleted); rebuild everything with `eval-data kuairand all`.
 
 ```bash
 hf download pinkmeme/eval-goodreads-work-id --repo-type dataset \

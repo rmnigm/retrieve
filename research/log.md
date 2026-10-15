@@ -1,3 +1,12 @@
+---
+title: log
+created: 2026-09-26
+updated: 2026-10-14
+type: summary
+tags: [process]
+sources: [research/, docs/]
+---
+
 # Wiki Log
 
 > Append-only record of structural wiki changes, one line each.
