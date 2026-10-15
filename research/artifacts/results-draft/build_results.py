@@ -53,6 +53,8 @@ def load():
         x = pd.read_parquet(d / "results.parquet")
         owner = [re.search(r"-(pod1|pode)-", s.name) for s in d.iterdir() if s.is_dir()]
         owner = next((o[1] for o in owner if o), m["pod"])
+        if m["pod"] == "podf" and m["seed"] == "2":
+            owner = "pod1"  # the scope note: pod f runs pod 1's cells at seed 2
         parts.append(
             x.assign(
                 leg=m["leg"],
@@ -64,6 +66,9 @@ def load():
         )
     df = pd.concat(parts, ignore_index=True)
     df = df[(df.status == "ok") & ~df.dataset.str.startswith("yfcc")]
+    df["dataset"] = df.dataset.str.replace(
+        r"-s\d$", "", regex=True
+    )  # a seed's synthetic draw
     p = df.params.map(json.loads)
     for key in [
         "n_lists",

@@ -76,4 +76,28 @@ td small{font-weight:400;color:var(--ink-3)}
 #tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--bg);font:12px/1.45 var(--f-body);padding:6px 9px;border-radius:5px;max-width:260px;z-index:9;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 #tip b{font-weight:600}
 .hit{fill:transparent;cursor:default}
+/* Thesis-style tables: booktabs rules, algorithms as rows, the best number bold */
+.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:10px 14px}
+.tbl caption{caption-side:top;text-align:left;font:500 .82rem var(--f-body);color:var(--ink-2);padding:0 0 8px}
+table.t{border-collapse:collapse;width:100%;font-size:.84rem;font-variant-numeric:tabular-nums}
+table.t th{font:500 .74rem var(--f-body);color:var(--ink-3);text-align:right;padding:6px 8px;border-bottom:1px solid var(--ink-3);white-space:nowrap;vertical-align:bottom}
+table.t td{padding:5px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--grid)}
+table.t tr:last-child td{border-bottom:1px solid var(--ink-3)}
+table.t th:first-child,table.t td:first-child{text-align:left}
+table.t td.l{text-align:left;color:var(--ink-2)}
+table.t td small{color:var(--ink-3)}
+table.t tr.st td:first-child{color:var(--st-3);font-weight:500}
+table.t tr.li td:first-child{color:var(--linr-3);font-weight:500}
+table.t tr.grp td{border-top:1px solid var(--rule)}
+table.t b{font-weight:650;color:var(--ink)}
+table.t td.na{color:var(--ink-3)}
+h3{font:600 1rem var(--f-body);margin:6px 0 0}
+.lede2{font-size:.95rem;color:var(--ink-2)}
+ol.pat{margin:0;padding-left:1.2rem;display:flex;flex-direction:column;gap:8px;max-width:65ch}
+details summary{cursor:pointer;font-size:.86rem;color:var(--ink-2)}
+.claims-t th,.claims-t td{text-align:left!important;vertical-align:top}
+.claims-t td:nth-child(3),.claims-t td:nth-child(4){white-space:normal;min-width:12rem}
+.prov{font-size:.86rem;color:var(--ink-2);display:flex;flex-direction:column;gap:8px}
+.prov code{font:.78rem var(--f-mono);overflow-wrap:anywhere}
+.prov ul{margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:4px}
 </style>

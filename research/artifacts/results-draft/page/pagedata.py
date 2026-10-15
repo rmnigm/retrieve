@@ -43,6 +43,13 @@ def rng(s, nd=2):
     )
 
 
+TG = [0.9, 0.95]
+
+
+def pct_(p):
+    return f"{100 * p:.1f} %" if p < 0.1 else f"{100 * p:.0f} %"
+
+
 def curve_top(ds, sweep, k):
     t = top[(top.dataset == ds) & (top.sweep == sweep) & (top.filter_kind == "bloom")]
     col = "top_recall100"
@@ -354,8 +361,9 @@ claims.append(
         f"At the timed settings, at most {D['fp']['share_max']} % of the items it passes are false, and recall moves by at most {D['fp']['cost_max']} against the exact filter. Narrower filters let more through: {100 * fw[(fw.dataset == 'pubmed') & (fw.m_bits == 64)].fp_rate_mean.max():.1f} % on PubMed at 64 bits, where recall at a fixed probe setting falls to {pm.min():.2f} from {pm.max():.2f}.",
     ]
 )
-c5n = pd.read_csv(OUT + "c5_meta.csv")
-c5n = c5n[c5n.suite == "nsweep-codesign"].groupby("n_items").full_over_partial
+c5n_all = pd.read_csv(OUT + "c5_meta.csv")
+c5n_all = c5n_all[c5n_all.suite == "nsweep-codesign"]
+c5n = c5n_all.groupby("n_items").full_over_partial
 if len(c5n.size()):
     claims.append(
         [
@@ -417,6 +425,58 @@ claims.append(
     ]
 )
 D["claims"] = claims
+med5 = c5n.median()
+D["verdicts"] = [
+    [
+        "C1",
+        "part",
+        "shape holds, location does not",
+        "LiNR V2 (gather, then score) beats V1 (score, then mask) below about 11 % passing.",
+        f"For one query V2 wins below {rng(b1)} passing; at a batch of 16 only below {rng(b16, 3)}; at 64 and 256 never.",
+    ],
+    [
+        "C2",
+        "part",
+        "not comparable",
+        "LiNR V3's 1-bit prefilter is about 10 % faster at near-equal recall.",
+        f"At the smallest pool reaching 0.90, V3 takes {rng(r1)} of V2's time for one query and {rng(r16)} at batches of 16 and 64, where V1 beats both.",
+    ],
+    [
+        "C3",
+        "no",
+        "does not hold as stated",
+        "Native PyTorch masking is about 100× slower than a custom kernel.",
+        f"{rng(pt[pt.perf_bs == 1].torch_over_triton, 1)}× at one query and {rng(pt[pt.perf_bs == 16].torch_over_triton, 1)}× at a batch of 16 against plain PyTorch; about even with torch.compile at one query.",
+    ],
+    [
+        "C4",
+        "ok",
+        "holds on Meta's bloom as adapted",
+        "SilverTorch's 1024-bit bloom filter lets through about 0.067 % false positives.",
+        f"At most {100 * f1024[f1024.k_hash == 5].fp_rate_mean.max():.6f} % of failing items pass; recall moves by at most {D['fp']['cost_max']} against the exact filter.",
+    ],
+    [
+        "C5",
+        "part",
+        "wins at 10–30 M only",
+        "Filtering inside the probed clusters is 1.79–2.15× faster than filtering the whole index.",
+        f"{med5[30_000_000]:.2f}× at 30 M, {med5[10_000_000]:.2f}× at 10 M, {med5[1_000_000]:.2f}× at 1 M (median, Meta's code as published).",
+    ],
+    [
+        "C6",
+        "part",
+        "partially",
+        "int8 SilverTorch cannot reach 0.95 recall; selective filters need more probes.",
+        f"0.95 is reached within a quarter of the clusters on {len(reach95)} of {len(reach95) + len(miss95)} real filters; the clusters probed, not int8, set the limit.",
+    ],
+    [
+        "C7",
+        "ok",
+        "holds (earlier gate)",
+        "Our adaptation returns what Meta's published code returns.",
+        "Identical ids and scores in all 1,536 gate cells, at the adapted code's review head; not rerun in the final rerun.",
+    ],
+]
 pr = json.load(open(OUT + "product_recall.json"))
 allf = [
     v["pearson"] for k, v in pr.items() if k.startswith("all k") and "pooled" not in k
@@ -469,6 +529,342 @@ for (ds, sw), g in cv.groupby(["dataset", "sweep"]):
         )
     )
 D["knobs"] = sorted(knobs, key=lambda r: (r["n"], r["key"]))
+
+# Thesis-style tables: one per question, algorithms as rows
+rp = pd.read_parquet(OUT + "results.parquet")
+exact = (
+    rp[
+        rp.leg.str.contains("timed-bloom")
+        & (rp.seed == 0)
+        & rp.algo.isin(["linr_v1_filter_mask", "linr_v2"])
+        & (rp.perf_k == 100)
+    ]
+    .groupby(["dataset", "sweep", "algo"])["oracle_recall@100"]
+    .first()
+)
+memall = pd.read_csv(OUT + "memory.csv")
+
+
+def mib(ds, arm, nl=None):
+    m = memall[(memall.dataset == ds) & (memall.arm == arm)]
+    if nl is not None:
+        m = m[m.n_lists == nl]
+    return num(m.index_mib.iloc[0], 0) if len(m) else None
+
+
+tab = []
+k100 = h0[(h0.perf_k == 100) & h0.dataset.isin(REAL)]
+for (ds, sw, bs), g in k100.groupby(["dataset", "sweep", "perf_bs"]):
+    v1, v2 = g.V1.iloc[0], g.V2.iloc[0]
+    tt = s0[
+        (s0.dataset == ds) & (s0.sweep == sw) & (s0.perf_bs == bs) & (s0.perf_k == 100)
+    ].set_index("target")
+    a24 = g[(g.n_probe == 24) & (g.n_lists == g.n_lists.min())]
+    rows = [
+        [
+            "LiNR V1",
+            num(exact.get((ds, sw, "linr_v1_filter_mask"))),
+            num(v1, 3),
+            "exact",
+            mib(ds, "V1"),
+        ],
+        [
+            "LiNR V2",
+            num(exact.get((ds, sw, "linr_v2"))),
+            num(v2, 3),
+            "exact",
+            mib(ds, "V2"),
+        ],
+    ]
+    for t in TG:
+        if t in tt.index and not pd.isna(tt.v3_ms[t]):
+            rows.append(
+                [
+                    f"LiNR V3, pool for {t:.2f}",
+                    num(tt.v3_recall[t]),
+                    num(tt.v3_ms[t], 3),
+                    f"pool {100 * tt.v3_pool[t]:g} %",
+                    mib(ds, "V3"),
+                ]
+            )
+    if len(a24):
+        a = a24.iloc[0]
+        rows.append(
+            [
+                "SilverTorch, 24 probes",
+                num(a.recall),
+                num(a.st_ms, 3),
+                f"{int(a.n_lists)} lists / 24",
+                mib(ds, "SilverTorch", a.n_lists),
+            ]
+        )
+    for t in TG:
+        if t in tt.index and not pd.isna(tt.st_ms[t]):
+            r = tt.loc[t]
+            rows.append(
+                [
+                    f"SilverTorch, tuned for {t:.2f}",
+                    num(r.recall),
+                    num(r.st_ms, 3),
+                    f"{int(r.n_lists)} / {int(r.n_probe)}"
+                    + (" ◐" if r.probe_frac > 0.25 else ""),
+                    mib(ds, "SilverTorch", r.n_lists),
+                ]
+            )
+        elif t in tt.index:
+            rows.append(
+                [
+                    f"SilverTorch, tuned for {t:.2f}",
+                    None,
+                    None,
+                    f"not reached (top {num(tt.max_recall[t])})",
+                    None,
+                ]
+            )
+    for r in rows:
+        r.insert(3, None if r[2] is None else num(v1 / r[2], 2))
+    tab.append(
+        dict(
+            ds=lab[ds],
+            key=f"{ds}|{sw}",
+            n=int(g.n_items.iloc[0]),
+            sweep=sw,
+            bs=int(bs),
+            pass_rate=num(g.pass_rate.iloc[0], 4),
+            dim=int(g.dim.iloc[0]),
+            rows=rows,
+        )
+    )
+D["tab"] = sorted(tab, key=lambda r: (r["n"], r["key"], r["bs"]))
+# matched-recall summary: one row per real filter, SilverTorch at 0.90 against the best LiNR at that recall
+msum = []
+for (ds, sw), g in s0[(s0.perf_k == 100) & s0.dataset.isin(REAL)].groupby(
+    ["dataset", "sweep"]
+):
+    row = dict(
+        ds=lab[ds],
+        sweep=sw,
+        n=int(g.n_items.iloc[0]),
+        pass_rate=num(g.pass_rate.iloc[0], 4),
+    )
+    for t in TG:
+        x = g[g.target == t].set_index("perf_bs")
+        b = x.dropna(subset=["n_probe"])
+        row[f"frac{t}"] = None if b.empty else num(b.probe_frac.iloc[0], 3)
+        row[f"sp{t}"] = {
+            int(bs): None
+            if pd.isna(x.st_over_matched[bs])
+            else num(1 / x.st_over_matched[bs], 2)
+            for bs in x.index
+        }
+        row[f"top{t}"] = num(x.max_recall.iloc[0])
+    msum.append(row)
+D["msum"] = sorted(msum, key=lambda r: (r["n"], r["ds"], r["sweep"]))
+D["band"] = dict(
+    beyond=D["counts"]["beyond"],
+    beyond_wins=D["counts"]["beyond_wins"],
+    quarter=D["counts"]["quarter"],
+    quarter_wins=D["counts"]["quarter_wins"],
+    unreached=int(len(s0) - len(reached)),
+)
+# batch size: ms per query at bs 1 / 16 / 64, tuned for 0.90
+bsc = []
+for key in ["arxiv|c0_maincat", "pubmed|c0_mesh", "laion30m|tags4"]:
+    ds, sw = key.split("|")
+    rows = {}
+    for t_ in [r for r in tab if r["key"] == key]:
+        for name, rec, ms, sp, cfg, mb in t_["rows"]:
+            rows.setdefault(name, {})[t_["bs"]] = (
+                None if ms is None else num(ms / t_["bs"], 4)
+            )
+    bsc.append(
+        dict(
+            ds=lab[ds],
+            sweep=sw,
+            rows=[[k, v.get(1), v.get(16), v.get(64)] for k, v in rows.items()],
+        )
+    )
+D["batch"] = bsc
+# scale: LAION's two filters at 1-30 M, SilverTorch tuned for 0.90 against the best LiNR, and recall at 24 probes
+D["scale"] = [
+    dict(
+        ds=r["ds"],
+        sweep=r["sweep"],
+        n=r["n"],
+        sp=r["sp0.9"],
+        frac=r["frac0.9"],
+        top=r["top0.9"],
+        r24=next(
+            (
+                p["recall"]
+                for p in D["prod"]
+                if p["ds"] == r["ds"] and p["sweep"] == r["sweep"]
+            ),
+            None,
+        ),
+        sp24=next(
+            (
+                p["sp16"]
+                for p in D["prod"]
+                if p["ds"] == r["ds"] and p["sweep"] == r["sweep"]
+            ),
+            None,
+        ),
+    )
+    for r in D["msum"]
+    if r["ds"].startswith("LAION")
+]
+D["c5tab"] = [
+    dict(
+        n=int(n),
+        bs=int(bs),
+        med=num(g.full_over_partial.median(), 2),
+        lo=num(g.full_over_partial.min(), 2),
+        hi=num(g.full_over_partial.max(), 2),
+    )
+    for (n, bs), g in c5n_all.groupby(["n_items", "perf_bs"])
+]
+# selectivity: synthetic pass rates, bs 16
+sel = []
+for v_ in D["curves"]:
+    if v_["bs"] != 16:
+        continue
+    ser = {s_["name"]: {p[0]: (p[1], p[2]) for p in s_["pts"]} for s_ in v_["series"]}
+    prs = sorted(ser["LiNR V1"])
+    sel.append(
+        dict(
+            label=v_["label"],
+            rows=[
+                [
+                    pct_(p),
+                    num(ser["LiNR V1"][p][0], 2),
+                    num(ser["LiNR V2"][p][0], 2),
+                    ser["SilverTorch, 24 probes"].get(p, (None, None))[1],
+                    num(ser["SilverTorch, 24 probes"].get(p, (None,))[0], 2),
+                    num(ser["SilverTorch, tuned for 0.90"].get(p, (None,))[0], 2),
+                ]
+                for p in prs
+            ],
+        )
+    )
+D["sel"] = sel
+# memory
+mt = []
+for ds in REAL:
+    m = memall[memall.dataset == ds]
+    st_ = m[m.arm == "SilverTorch"].sort_values("n_lists")
+    mt.append(
+        dict(
+            ds=lab[ds],
+            dim=int(m.dim.iloc[0]),
+            v1=num(m[m.arm == "V1"].index_mib.iloc[0], 0),
+            v3=num(m[m.arm == "V3"].index_mib.iloc[0], 0)
+            if (m.arm == "V3").any()
+            else None,
+            st=num(st_.index_mib.iloc[0], 0),
+            st_nl=int(st_.n_lists.iloc[0]),
+            st_max=num(st_.index_mib.iloc[-1], 0),
+            nl_max=int(st_.n_lists.iloc[-1]),
+            b_min=num(st_.build_s.iloc[0], 1),
+            b_max=num(st_.build_s.iloc[-1], 1),
+        )
+    )
+D["mem"] = mt
+# seed variance summary per dataset (cells with all three seeds)
+vp = pd.read_csv(OUT + "variance_points.csv")
+vp = vp[vp.seeds == 3].assign(
+    t_spread=lambda d: d.st_ms_max / d.st_ms_min - 1,
+    r_spread=lambda d: d.recall_max - d.recall_min,
+    w_spread=lambda d: d.ratio_max / d.ratio_min - 1,
+)
+vt = pd.read_csv(OUT + "variance_tuned.csv")
+vt = vt[(vt.seeds == 3) & (vt.reached == 3)]
+vsum = []
+for ds, g in vp.groupby("dataset"):
+    w = vt[vt.dataset == ds]
+    vsum.append(
+        dict(
+            ds=lab.get(ds, ds),
+            points=int(len(g)),
+            t_med=num(100 * g.t_spread.median(), 1),
+            t_max=num(100 * g.t_spread.max(), 1),
+            r_max=num(g.r_spread.max(), 3),
+            w_med=num(100 * g.w_spread.median(), 1),
+            cells=int(len(w)),
+            flips=int(((w.matched_min < 1) & (w.matched_max > 1)).sum()),
+        )
+    )
+D["vsum"] = vsum
+D["vflip"] = [
+    f"{lab.get(r.dataset, r.dataset)} {r.sweep}, bs {int(r.perf_bs)}, k {int(r.perf_k)}, {r.target:.2f}: {r.matched_min:.2f}–{r.matched_max:.2f}"
+    for r in vt[(vt.matched_min < 1) & (vt.matched_max > 1)].itertuples()
+]
+# bloom against the exact filter, one row per filter, pooled over lists and batch sizes
+D["cbsum"] = [
+    dict(
+        ds=lab.get(ds, ds),
+        sweep=sw,
+        n=len(g),
+        med=num(g.bloom_over_clause.median(), 2),
+        lo=num(g.bloom_over_clause.min(), 2),
+        hi=num(g.bloom_over_clause.max(), 2),
+        lists=f"{int(g.n_lists.min())}–{int(g.n_lists.max())}",
+        cost=num(g.recall_cost.abs().max(), 4),
+    )
+    for (ds, sw), g in cb.groupby(["dataset", "sweep"])
+]
+D["cbtab"] = [
+    dict(
+        ds=lab.get(ds, ds),
+        sweep=sw,
+        nl=int(nl),
+        n=len(g),
+        probes=f"{int(g.n_probe.min())}–{int(g.n_probe.max())}",
+        med=num(g.bloom_over_clause.median(), 2),
+        lo=num(g.bloom_over_clause.min(), 2),
+        hi=num(g.bloom_over_clause.max(), 2),
+    )
+    for (ds, sw, nl), g in cb.groupby(["dataset", "sweep", "n_lists"])
+]
+# parameter sensitivity: clusters on LAION 30M, and LiNR V3's candidate pool
+nlt = []
+for sw in ["tags4", "c0_domain"]:
+    kn = next(k for k in D["knobs"] if k["key"] == f"laion30m|{sw}")
+    for nl, pts in kn["curves"].items():
+        at = dict(pts)
+        tm = [p for p in kn["timed"].get(16, []) if p[0] == int(nl) and p[3] >= 0.9]
+        best = min(tm, key=lambda p: p[2]) if tm else None
+        nlt.append(
+            dict(
+                sweep=sw,
+                nl=int(nl),
+                mib=kn["mem"][int(nl)][0],
+                build=kn["mem"][int(nl)][1],
+                r8=at.get(0.125),
+                r4=at.get(0.25),
+                probes=None if best is None else best[1],
+                ms=None if best is None else best[2],
+            )
+        )
+D["nltab"] = nlt
+pools = pd.read_csv(OUT + "c2_pools.csv")
+D["pools"] = [
+    dict(
+        ds=lab[ds],
+        sweep=sw,
+        pass_rate=num(g.pass_rate.iloc[0], 4),
+        pts=[[num(100 * p, 1), num(r)] for p, r in zip(g.pool, g.recall)],
+    )
+    for (ds, sw), g in pools.groupby(["dataset", "sweep"])
+    if ds in lab
+]
+summ = json.load(open(OUT + "summary.json"))
+D["prov"] = dict(
+    legs=len(summ["runs"]),
+    records=summ["records"],
+    flagged=summ["h2h_flagged"],
+    points=summ["h2h_rows"],
+)
 json.dump(D, open(sys.argv[2], "w"))
 print(len(json.dumps(D)), {k: len(v) for k, v in D.items()})
 print(json.dumps(D["counts"], indent=1))
