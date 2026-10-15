@@ -843,6 +843,8 @@ def _transplant(off: SilverTorch, tri: SilverTorch) -> None:
     if off.filter_mode == "exact":
         off.item_clause_attrs = tri.item_clause_attrs.clone()
         off.clause_is_reverse = tri.clause_is_reverse.clone()
+        if off.backend == "official-fork":  # the fork's own layout (CHANGES.md C14)
+            off.item_clause_attrs, off.clause_slots = of.fork_clause_attrs(off.item_clause_attrs)
 
 
 @pytest.mark.parametrize(

@@ -8,6 +8,7 @@
 #include <optional>
 #include <tuple>
 
+#include "fork_filters.cuh"
 #include "fused_kmean_ann.cuh"
 
 // The upstream-file entry points stfork::search (fork_search_cuda.cu) composes, defined in
@@ -81,6 +82,6 @@ std::tuple<at::Tensor, int64_t, at::Tensor, int64_t> bloom_partial_payloads_prep
     const at::Tensor& remaining_length_cumsum,
     const at::Tensor& warp_size_cumsum,
     int64_t max_tensor_size_per_row,
-    const std::optional<std::tuple<at::Tensor, at::Tensor, at::Tensor>>& recheck);
+    const std::optional<st::ops::fork_filters::ExactClauses>& recheck);
 
 } // namespace st::ops::bloom_search
