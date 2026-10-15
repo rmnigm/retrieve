@@ -200,24 +200,6 @@ D["counts"] = dict(
         ((reached.probe_frac > 0.25) & (reached.winner_matched == "SilverTorch")).sum()
     ),
 )
-# 5: seed variance of the tuned head-to-head
-v = pd.read_csv(OUT + "variance_tuned.csv")
-v = v[v.seeds > 1]
-D["variance"] = [
-    dict(
-        ds=lab[r.dataset],
-        sweep=r.sweep,
-        bs=int(r.perf_bs),
-        k=int(r.perf_k),
-        t=r.target,
-        seeds=int(r.seeds),
-        reached=int(r.reached),
-        med=num(r.matched_med, 2),
-        lo=num(r.matched_min, 2),
-        hi=num(r.matched_max, 2),
-    )
-    for r in v.itertuples()
-]
 # 4b: bloom against SilverTorch's exact clause filter (clause reference row), graph, seed 0
 cb = pd.read_csv(OUT + "clause_vs_bloom.csv")
 cb = cb[(cb.perf_mode == "graph") & (cb.seed == 0)]
@@ -772,33 +754,84 @@ for ds in REAL:
 D["mem"] = mt
 # seed variance summary per dataset (cells with all three seeds)
 vp = pd.read_csv(OUT + "variance_points.csv")
-vp = vp[vp.seeds == 3].assign(
+vp = vp[vp.seeds >= 2].assign(
     t_spread=lambda d: d.st_ms_max / d.st_ms_min - 1,
     r_spread=lambda d: d.recall_max - d.recall_min,
     w_spread=lambda d: d.ratio_max / d.ratio_min - 1,
 )
 vt = pd.read_csv(OUT + "variance_tuned.csv")
-vt = vt[(vt.seeds == 3) & (vt.reached == 3)]
+vt = vt[vt.seeds >= 2]
 vsum = []
 for ds, g in vp.groupby("dataset"):
     w = vt[vt.dataset == ds]
     vsum.append(
         dict(
             ds=lab.get(ds, ds),
+            seeds=int(g.seeds.max()),
             points=int(len(g)),
             t_med=num(100 * g.t_spread.median(), 1),
             t_max=num(100 * g.t_spread.max(), 1),
             r_max=num(g.r_spread.max(), 3),
             w_med=num(100 * g.w_spread.median(), 1),
             cells=int(len(w)),
-            flips=int(((w.matched_min < 1) & (w.matched_max > 1)).sum()),
+            fx_med=num(100 * (w.fixed_max / w.fixed_min - 1).median(), 1)
+            if len(w)
+            else None,
+            flips=int(((w.fixed_min < 1) & (w.fixed_max > 1)).sum()),
+            below=int((w.recall_min < w.target - 1e-9).sum()),
         )
     )
 D["vsum"] = vsum
+below = vt[vt.recall_min < vt.target - 1e-9]
+D["vbelow"] = dict(
+    n=int(len(below)),
+    gap=num((below.target - below.recall_min).max(), 4) if len(below) else None,
+    cells=sorted(
+        {
+            f"{lab.get(r.dataset, r.dataset)} "
+            + ("with no filter" if r.sweep == "p1" else r.sweep)
+            for r in below.itertuples()
+        }
+    ),
+)
+rp = vt[(vt.repick_min < 1) & (vt.repick_max > 1)]
 D["vflip"] = [
-    f"{lab.get(r.dataset, r.dataset)} {r.sweep}, bs {int(r.perf_bs)}, k {int(r.perf_k)}, {r.target:.2f}: {r.matched_min:.2f}–{r.matched_max:.2f}"
-    for r in vt[(vt.matched_min < 1) & (vt.matched_max > 1)].itertuples()
+    f"{lab.get(r.dataset, r.dataset)} {r.sweep}, bs {int(r.perf_bs)}, k {int(r.perf_k)}, {r.target:.2f}: {r.fixed_min:.2f}–{r.fixed_max:.2f} at the seed-0 pick, {r.repick_min:.2f}–{r.repick_max:.2f} re-picked"
+    for r in rp.itertuples()
 ]
+# machine effect: LiNR V1's time at seeds 1-2 over seed 0, same cell; V1 does not depend on the clustering
+hv = h[~h.dataset.str.contains("synth")].drop_duplicates(
+    ["pod", "seed"] + ["dataset", "sweep", "perf_bs", "perf_k"]
+)
+base = hv[hv.seed == 0].set_index(["pod", "dataset", "sweep", "perf_bs", "perf_k"]).V1
+mach = []
+for (pod, run, seed), g in hv[hv.seed > 0].groupby(["pod", "run_pod", "seed"]):
+    r = g.set_index(["pod", "dataset", "sweep", "perf_bs", "perf_k"]).V1 / base
+    r = r.dropna()
+    if len(r):
+        cells = ", ".join(sorted({lab[d] for d in g.dataset}, key=lambda x: x))
+        mach.append(
+            dict(
+                cells=cells,
+                other=bool(run != pod),
+                seed=int(seed),
+                n=int(len(r)),
+                med=num(r.median(), 3),
+                lo=num(r.min(), 3),
+                hi=num(r.max(), 3),
+            )
+        )
+D["machine"] = mach
+vs = D["vsum"]
+D["vtext"] = dict(
+    t=rng(pd.Series([v["t_med"] for v in vs]), 1),
+    r=f"{max(v['r_max'] for v in vs):.3f}",
+    fx=rng(pd.Series([v["fx_med"] for v in vs if v["fx_med"] is not None]), 1),
+    cells=sum(v["cells"] for v in vs),
+    flips=sum(v["flips"] for v in vs),
+    mach=f"{100 * max(max(1 - m['lo'], m['hi'] - 1) for m in mach):.1f}",
+    other=sum(m["other"] for m in mach),
+)
 # bloom against the exact filter, one row per filter, pooled over lists and batch sizes
 D["cbsum"] = [
     dict(

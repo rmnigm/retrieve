@@ -258,27 +258,57 @@ T["T10"] = md(
 T["T11"] = md(
     [
         "Dataset",
+        "Seeds",
         "Settings",
         "Time: median",
         "Time: max",
         "Recall: max",
-        "Ratio: median",
+        "vs exact LiNR",
         "Tuned cells",
+        "vs best LiNR",
         "Winner changes",
     ],
     [
         [
             r["ds"],
+            r["seeds"],
             r["points"],
             f"{f(r['t_med'], 1)} %",
             f"{f(r['t_max'], 1)} %",
             f(r["r_max"], 3),
             f"{f(r['w_med'], 1)} %",
             r["cells"],
+            "–" if r["fx_med"] is None else f"{f(r['fx_med'], 1)} %",
             r["flips"],
         ]
         for r in D["vsum"]
     ],
+)
+T["T11b"] = md(
+    ["Cells", "Seed", "Machine", "Settings", "Median", "Range"],
+    [
+        [
+            m["cells"],
+            m["seed"],
+            "another" if m["other"] else "same",
+            m["n"],
+            f(m["med"], 3),
+            f"{f(m['lo'], 3)}–{f(m['hi'], 3)}",
+        ]
+        for m in D["machine"]
+    ],
+)
+vt_, vb = D["vtext"], D["vbelow"]
+T.update(
+    v_t=vt_["t"],
+    v_r=vt_["r"],
+    v_fx=vt_["fx"],
+    v_flips="none" if vt_["flips"] == 0 else vt_["flips"],
+    v_cells=vt_["cells"],
+    v_mach=vt_["mach"],
+    v_below=f"At that setting {vb['n']} cells ({', '.join(vb['cells'])}) dip below the target at a later seed, by at most {vb['gap']}."
+    if vb["n"]
+    else "",
 )
 T["T12"] = md(
     ["", "Verdict", "The paper", "We measured"],
@@ -290,7 +320,7 @@ T["bridge"] = (
 T["fp"] = (
     f"at the timed settings at most {D['fp']['share_max']} % of the items the bloom passes actually fail the filter (none at {D['fp']['zero']} of {D['fp']['points']} graded settings), there are no false negatives, and recall moves by at most {D['fp']['cost_max']}"
 )
-T["vflip"] = "; ".join(D["vflip"]) or "none"
+T["vflip"] = "; ".join(D["vflip"]).replace(" p1,", " with no filter,") or "none"
 T["prov"] = (
     f"{D['prov']['legs']} subtrees and {D['prov']['records']:,} records; {D['prov']['flagged']} of {D['prov']['points']} timed points stay unstable in every run"
 )

@@ -29,7 +29,7 @@ LINR = {"linr_v1_filter_mask": "V1", "linr_v2": "V2", "linr_v3": "V3"}
 TARGETS = [0.9, 0.95]
 CELL = ["dataset", "dim", "sweep", "perf_bs", "perf_k"]
 RUN = re.compile(
-    r"(?P<leg>.+)-(?P<pod>pod1|pode|podf)-s(?P<seed>\d)(?P<rerun>-rerun)?$"
+    r"(?P<leg>.+)-(?P<pod>pod1|pode|podf)-s(?P<seed>\d)(?:-on(?P<on>pod1|pode|podf))?(?P<rerun>-rerun)?$"
 )
 
 
@@ -53,13 +53,17 @@ def load():
         x = pd.read_parquet(d / "results.parquet")
         owner = [re.search(r"-(pod1|pode)-", s.name) for s in d.iterdir() if s.is_dir()]
         owner = next((o[1] for o in owner if o), m["pod"])
-        if m["pod"] == "podf" and m["seed"] == "2":
+        if m["on"]:
+            owner = m[
+                "pod"
+            ]  # <leg>-<pod>-s<seed>-on<machine>: that pod's cells, run elsewhere
+        elif m["pod"] == "podf" and m["seed"] == "2":
             owner = "pod1"  # the scope note: pod f runs pod 1's cells at seed 2
         parts.append(
             x.assign(
                 leg=m["leg"],
                 pod=owner,
-                run_pod=m["pod"],
+                run_pod=m["on"] or m["pod"],
                 run_seed=int(m["seed"]),
                 rerun=bool(m["rerun"]),
             )
@@ -245,7 +249,7 @@ def at24(h):
 
 
 def variance(h, tn):
-    """Seed spread of the timed head-to-head: per point and per tuned cell, median and range over the seeds present."""
+    """Seed spread of the timed head-to-head: per point, and per tuned cell at its seed-0 pick, over the seeds present."""
     pt = ["leg", "pod"] + CELL + ["n_lists", "n_probe"]
     a = (
         h.groupby(pt)
@@ -263,18 +267,31 @@ def variance(h, tn):
         )
         .reset_index()
     )
-    tc = ["pod"] + CELL + ["target"]
+    # tuned cells at the fixed seed-0 pick (the design): that point's time and recall at every seed, over the best
+    # LiNR at that seed's target; the per-seed re-pick ratio is kept beside it as a note
+    pick = ["pod"] + CELL + ["n_lists", "n_probe"]
+    p0 = tn[(tn.seed == 0) & tn.n_probe.notna()][pick + ["target"]]
+    pts = h.drop_duplicates(["pod", "seed"] + CELL + ["n_lists", "n_probe"])
+    x = p0.merge(pts[pick + ["seed", "st_ms", "recall"]], on=pick).merge(
+        tn[["pod", "seed"] + CELL + ["target", "matched_ms", "st_over_matched"]],
+        on=["pod", "seed"] + CELL + ["target"],
+        how="left",
+    )
+    x["fixed"] = x.st_ms / x.matched_ms
     b = (
-        tn.groupby(tc)
+        x.groupby(pick + ["target"])
         .agg(
             seeds=("seed", "nunique"),
-            reached=("st_ms", "count"),
-            ratio_med=("st_over_linr", "median"),
-            ratio_min=("st_over_linr", "min"),
-            ratio_max=("st_over_linr", "max"),
-            matched_med=("st_over_matched", "median"),
-            matched_min=("st_over_matched", "min"),
-            matched_max=("st_over_matched", "max"),
+            st_ms_min=("st_ms", "min"),
+            st_ms_med=("st_ms", "median"),
+            st_ms_max=("st_ms", "max"),
+            recall_min=("recall", "min"),
+            recall_max=("recall", "max"),
+            fixed_med=("fixed", "median"),
+            fixed_min=("fixed", "min"),
+            fixed_max=("fixed", "max"),
+            repick_min=("st_over_matched", "min"),
+            repick_max=("st_over_matched", "max"),
         )
         .reset_index()
     )

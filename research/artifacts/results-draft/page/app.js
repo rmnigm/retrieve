@@ -389,16 +389,23 @@ table("t-mem", "Table 7. Index size (MiB) and SilverTorch build time, smallest t
     rows.map(r => `<tr><td>${r.ds} · ${r.sweep}</td><td>${pct(r.pass_rate)}</td>${r.pts.map(p => `<td>${p[1] >= 0.9 ? "<b>" + f(p[1], 3) + "</b>" : f(p[1], 3)}</td>`).join("")}</tr>`));
 })();
 
-/* Table 11: seed variance */
+/* Tables 11-12: seed variance at the seed-0 pick, machine check */
 (function () {
-  table("t-var", "Table 11. Spread over seeds 0–2 at the same setting, per dataset: SilverTorch's time (max ÷ min − 1), its recall (max − min), and its time over the best exact LiNR.",
-    ["Dataset", "Settings", "Time: median", "Time: max", "Recall: max", "Ratio: median", "Tuned cells", "Winner changes"],
-    D.vsum.map(r => `<tr><td>${r.ds}</td><td>${r.points}</td><td>${f(r.t_med, 1)} %</td><td>${f(r.t_max, 1)} %</td><td>${f(r.r_max, 3)}</td><td>${f(r.w_med, 1)} %</td><td>${r.cells}</td><td>${r.flips}</td></tr>`));
-  document.getElementById("vflip").textContent = D.vflip.length ? D.vflip.join("; ").replace(/ p1,/, " with no filter,").replace(/: ([\d.]+)–([\d.]+)$/, " (SilverTorch at $1–$2× LiNR V1's time)") : "none";
+  table("t-var", "Table 11. Spread over the seeds at the same setting, tuned cells at their seed-0 pick: SilverTorch's time (max ÷ min − 1), its recall (max − min), its time over the best exact LiNR, and over the best LiNR at each tuned cell.",
+    ["Dataset", "Seeds", "Settings", "Time: median", "Time: max", "Recall: max", "vs exact LiNR", "Tuned cells", "vs best LiNR", "Winner changes"],
+    D.vsum.map(r => `<tr><td>${r.ds}</td><td>${r.seeds}</td><td>${r.points}</td><td>${f(r.t_med, 1)} %</td><td>${f(r.t_max, 1)} %</td><td>${f(r.r_max, 3)}</td><td>${f(r.w_med, 1)} %</td><td>${r.cells}</td><td>${r.fx_med == null ? "–" : f(r.fx_med, 1) + " %"}</td><td>${r.flips}</td></tr>`));
+  table("t-mach", "Table 12. LiNR V1's time at seeds 1–2 over seed 0, same cell, by the machine that ran the seed.",
+    ["Cells", "Seed", "Machine", "Settings", "Median", "Range"],
+    D.machine.map(m => `<tr><td class="l">${m.cells}</td><td>${m.seed}</td><td>${m.other ? "another" : "same"}</td><td>${m.n}</td><td>${f(m.med, 3)}</td><td>${f(m.lo, 3)}–${f(m.hi, 3)}</td></tr>`));
+  const v = D.vtext, b = D.vbelow, set = (id, t) => { document.getElementById(id).textContent = t; };
+  set("v-t", v.t); set("v-r", v.r); set("v-fx", v.fx); set("v-cells", v.cells); set("v-mach", v.mach);
+  set("v-flips", v.flips === 0 ? "none" : v.flips);
+  set("v-below", b.n ? `At that setting ${b.n} cells (${b.cells.join(", ")}) dip below the target at a later seed, by at most ${b.gap}.` : "");
+  set("vflip", D.vflip.length ? D.vflip.join("; ").replace(/ p1,/, " with no filter,") : "none");
 })();
 
-/* Table 12: claims */
-table("t-claims", "Table 12. Each paper's claim against our measurement (Meta: C4–C7; LinkedIn: C1–C3).",
+/* Table 13: claims */
+table("t-claims", "Table 13. Each paper's claim against our measurement (Meta: C4–C7; LinkedIn: C1–C3).",
   ["", "Verdict", "The paper", "We measured"],
   D.verdicts.map(([id, c, v, claim, got]) => `<tr><td><b>${id}</b></td><td><span class="pill ${c}">${v}</span></td><td>${claim}</td><td>${got}</td></tr>`));
 

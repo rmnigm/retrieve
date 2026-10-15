@@ -38,14 +38,11 @@ shown here; the page has every filter and batch size.
 **Table 1c.** {T1c}
 
 The results show three main patterns. **First**, at 24 probes SilverTorch is 3–58× faster than V1 at a batch of 16, but
-it returns a different answer: recall@100 is 0.33–0.89. It scans 24 of 512–4,096 clusters, so its time barely moves with
-catalogue size (0.19–0.29 ms per batch from 0.8 M to 30 M items), while V1's grows with every item it scores (0.57 ms on
-Goodreads, 16.8 ms on LAION 30M). **Second**, held to recall 0.90, SilverTorch still wins by a wide margin wherever a
+it returns a different answer: recall@100 is 0.33–0.89. Its time barely moves with catalogue size (0.19–0.29 ms per batch from 0.8 M to 30 M items), while V1's grows with it (0.57 ms on Goodreads, 16.8 ms on LAION 30M), consistent with SilverTorch scanning only 24 of 512–4,096 clusters and V1 scoring every item. **Second**, held to recall 0.90, SilverTorch still wins by a wide margin wherever a
 modest share of clusters is enough: 15× V1 on PubMed's MeSH filter, 7.0× on LAION 30M's tag filter, 6.7× on arXiv's main
 category. Where it must probe half the clusters (LAION's domain filter at 1–10 M items, its tag filter at 1 M), it lands
 between 0.7× and 1.4× of V1's speed. **Third**, among LiNR's variants exact V1 is the fastest at a batch of 16 on every
-filter but one. The exception is PubMed's MeSH filter, where only 0.02 % of items pass and V2 halves the time by
-gathering just those. V3 at a pool reaching 0.90 beats the faster exact variant only on LAION's domain filter, by 2–7 %.
+filter but one. The exception is PubMed's MeSH filter, where only 0.02 % of items pass and V2 halves the time, consistent with it gathering just those. V3 at a pool reaching 0.90 beats the faster exact variant only on LAION's domain filter, by 2–7 %.
 
 ## 2. Speed at equal recall
 
@@ -64,22 +61,15 @@ Three patterns stand out. **First**, the share of clusters SilverTorch must prob
 0.29 of its time (about 3.4× faster). Another 51 cells reach the target only by probing half to three quarters of the
 clusters, and SilverTorch wins 13 of those. The other 42 do not reach it even at three quarters. **Second**, the hard
 cases are filters whose passing items are thinly spread across clusters: LAION's domain filter, and its tag filter on
-the small LAION subsets. This is the classic shortage of candidates. A query's nearest clusters hold few items that
-pass, so recall has to be bought with more probes, while an exact scan pays the same price whatever the filter.
-**Third**, SilverTorch's lead narrows at a batch of 64 (on LAION 30M's tag filter: 7.4× at one query, 4.4× at 64). V1's
-full scan is one matrix product shared by the whole batch, whereas each SilverTorch query probes its own clusters, so it
-amortises less.
+the small LAION subsets. This is consistent with the classic shortage of candidates: a query's nearest clusters hold few items that pass, so recall has to be bought with more probes, while an exact scan pays the same price whatever the filter.
+**Third**, SilverTorch's lead narrows at a batch of 64 (on LAION 30M's tag filter: 7.4× at one query, 4.4× at 64). This is consistent with V1's full scan being one matrix product shared by the whole batch, while each SilverTorch query probes its own clusters and so amortises less.
 
 ## 3. Effect of batch size on speed
 
 **Table 3.** Time per query (time per batch ÷ batch size). {T3}
 
-Batching helps the three methods very differently. LiNR V1 reads the whole index once per batch, so its cost per query
-falls 13× on arXiv from one query to 64 and 34× on PubMed. V2 gathers the passing items separately for each query, so its
-cost per query falls only about 2×. For one query, V2 is faster than V1 below a pass rate of 0.85–0.97; at a batch of 16
-the crossover drops to 0.014–0.065, and at 64 V1 wins on every filter. For one query SilverTorch takes about 0.19 ms at
-most settings on every dataset: it is bound by a fixed cost per call, not by the work done. That is why batching is
-nearly free for it until the probed work dominates: at 24 probes on arXiv its cost per query falls 34×, to 6 µs.
+Batching helps the three methods very differently. LiNR V1's cost per query falls 13× on arXiv from one query to 64 and 34× on PubMed, consistent with it reading the whole index once per batch. V2's falls only about 2×, consistent with it gathering the passing items separately for each query. For one query, V2 is faster than V1 below a pass rate of 0.85–0.97; at a batch of 16
+the crossover drops to 0.014–0.065, and at 64 V1 wins on every filter. For one query SilverTorch takes about 0.19 ms at most settings on every dataset, consistent with a fixed cost per call rather than the work done; batching is then nearly free until the probed work dominates: at 24 probes on arXiv its cost per query falls 34×, to 6 µs.
 
 ## 4. Scaling with catalogue size
 
@@ -97,13 +87,11 @@ the probed clusters, against building the filter over the whole index first. The
 {T5}
 
 The results show three patterns. **First**, at a fixed setting SilverTorch's lead grows in proportion to the catalogue:
-at 24 probes it is 3× V1 at 1 M and 55–58× at 30 M, because its own time stays near 0.2 ms. **Second**, at equal recall
+at 24 probes it is 3× V1 at 1 M and 55–58× at 30 M, while its own time stays near 0.2 ms. **Second**, at equal recall
 the lead also grows, from 0.4–1.0× at 1 M to 4.4–7.4× at 30 M on the tag filter. The share of clusters needed for 0.90
 falls from a half to an eighth. With the cluster counts used, a cluster at 30 M holds about 1,800 items against about
-120 at 1 M. Under the tag filter (0.27 % pass) that is about five passing items per probed cluster instead of 0.3, so
-far fewer probes find 100 passing neighbours. **Third**, the co-design pays only at 10–30 M items: 1.6× at a batch of 16
-and 3.2× at 64 at 30 M, against the paper's 1.79–2.15×, and about even or slower at 1–3 M. Checking the filter over the
-whole index is cheap when the index is small, so skipping it saves little.
+120 at 1 M. Under the tag filter (0.27 % pass) that is, on average, about five passing items per probed cluster instead of 0.3, consistent with far fewer probes being needed to find 100 passing neighbours. **Third**, the co-design pays only at 10–30 M items: 1.6× at a batch of 16
+and 3.2× at 64 at 30 M, against the paper's 1.79–2.15×, and about even or slower at 1–3 M. That is consistent with the whole-index filter being cheap when the index is small, so skipping it saves little.
 
 ## 5. Robustness to filter selectivity
 
@@ -112,11 +100,9 @@ changes.
 
 **Table 6.** {T6}
 
-The methods fall into three groups. **Exact V1** takes the same time at every pass rate, because it scores every item and
-masks afterwards. **Exact V2**'s cost grows with the number of passing items it gathers: on LAION-synth 30M it takes 14
+The methods fall into three groups. **Exact V1** takes the same time at every pass rate, consistent with it scoring every item and masking afterwards. **Exact V2**'s cost grows with the pass rate, consistent with it gathering the passing items: on LAION-synth 30M it takes 14
 ms at 0.1 % and 99 ms with no filter; on PubMed-synth, 5 ms and 146 ms. V2 is the right choice only for very selective
-filters. **SilverTorch** shows the shortage of candidates. At 24 probes its recall falls from 0.77 with no filter to 0.36
-at 0.1 %, because fewer of the items in its nearest clusters pass. Restoring 0.90 costs more probes at the rarest filter
+filters. **SilverTorch** behaves as the shortage of candidates predicts. At 24 probes its recall falls from 0.77 with no filter to 0.36 at 0.1 %, consistent with fewer of the items in its nearest clusters passing. Restoring 0.90 costs more probes at the rarest filter
 (1.9 ms against 1.2 ms at 1–10 %), but that is still 9–14× under V1.
 
 ## 6. Index memory and build time
@@ -125,8 +111,7 @@ at 0.1 %, because fewer of the items in its nearest clusters pass. Restoring 0.9
 
 {T7}
 
-SilverTorch's index is 0.54–0.72 of LiNR's. It stores each vector in int8 (one byte per dimension against fp16's two),
-but adds a 1,024-bit (128-byte) bloom filter per item. That overhead weighs most at d = 128 and least at d = 768. V3 adds
+SilverTorch's index is 0.54–0.72 of LiNR's, consistent with storing each vector in int8 (one byte per dimension against fp16's two) plus a 1,024-bit (128-byte) bloom filter per item. That overhead weighs most at d = 128 and least at d = 768. V3 adds
 its 1-bit codes to V1's index (+4–6 %). More clusters cost build time, not memory: 65,536 clusters make the index only
 0.5 % larger than 4,096, but take 17× longer to build (105 s against 1,738 s at 30 M).
 
@@ -142,12 +127,10 @@ identical for both.
 {T8}
 
 The picture is mixed. **First**, the bloom is faster where the filter is expensive to check exactly: PubMed's MeSH filter
-(0.71–0.87 of the exact time) and LAION's domain filter at deep probes (0.77–0.88). A few bitwise ANDs per item beat
-walking several exact clauses. **Second**, the exact filter is as fast or faster on LAION's four-tag filter when
+(0.71–0.87 of the exact time) and LAION's domain filter at deep probes (0.77–0.88). That is consistent with a few bitwise ANDs per item costing less than walking several exact clauses. **Second**, the exact filter is as fast or faster on LAION's four-tag filter when
 clusters are small: 1.1–1.6× with 120–370 items per cluster, about even at 450–600. With 1,800 items per cluster (LAION
-30M) the bloom is faster again (0.88). The bloom pays a fixed cost per probed cluster, which dominates when clusters are
-small, while the exact kernel reads only 5–24 bytes per item. At 24 probes on LAION 3M the exact filter is also about
-10 % faster, where there is little probed work for the bloom to save. On arXiv and Goodreads the two are within 6 %.
+30M) the bloom is faster again (0.88). That is consistent with the bloom paying a fixed cost per probed cluster, which dominates when clusters are small; the exact kernel reads only 5–24 bytes per item. At 24 probes on LAION 3M the exact filter is also about
+10 % faster, consistent with there being little probed work for the bloom to save. On arXiv and Goodreads the two are within 6 %.
 **Third**, the bloom's approximation costs nothing measurable at Meta's default width: {fp}. Narrower filters let more
 through: at 64 bits, 2.3 % of PubMed's failing items pass, and recall at a fixed setting falls from 0.69 to 0.50.
 
@@ -163,8 +146,7 @@ and the fastest timed setting reaching 0.90 at a batch of 16.
 {T10}
 
 For SilverTorch, recall follows the *share* of clusters probed, not their count. Finer clustering raises recall slightly
-at the same share (+0.03 at an eighth on the tag filter) but needs four times the probes for that share, and each probe
-has a fixed cost. The middle setting, 16,384 clusters (about three times √N), is the fastest to reach 0.90: 2.4 ms,
+at the same share (+0.03 at an eighth on the tag filter) but needs four times the probes for that share, consistent with each probe carrying a fixed cost. The middle setting, 16,384 clusters (about three times √N), is the fastest to reach 0.90: 2.4 ms,
 against 3.9 ms at 4,096 and 3.3 ms at 65,536. The best number of clusters sits near the usual √N rule of thumb. For LiNR
 V3, recall rises with the pool until the pool holds nearly every passing item. The pool never drops below 2,000
 candidates, which is why recall is flat at small shares. On PubMed's MeSH filter (0.02 % pass), even that floor holds all
@@ -173,21 +155,28 @@ passing items.
 
 ## 9. Seed to seed
 
-The timed comparison was rerun at seeds 1 and 2: a new clustering, a new synthetic draw and a new timing run, with seed 2
-on a second machine with the same GPU model. Table 11 gives the spread over the three seeds at the same setting:
-SilverTorch's time (max ÷ min − 1), its recall (max − min), and its time over the best exact LiNR.
+The timed comparison was rerun at seeds 1 and 2: a new clustering, a new synthetic draw and a new timing run. Some seeds
+ran on another machine with the same GPU model. Table 11 gives the spread over the seeds at the same setting, with each
+tuned cell held at the setting picked at seed 0: SilverTorch's time (max ÷ min − 1), its recall (max − min), its time
+over the best exact LiNR at each setting, and over the best LiNR at each tuned cell. Table 12 checks the machines
+against each other on LiNR V1, whose time does not depend on the clustering.
 
 **Table 11.**
 
 {T11}
 
-The comparison barely moves. Across the cells with all three seeds, SilverTorch's time varies by a median 0.5–2.7 % per
-dataset, and recall by at most 0.009. The second machine times LiNR V1 within 2 % of the first (median ratio 1.000), so
-there is no measurable machine effect. The largest spreads in SilverTorch's time come from PubMed's MeSH filter at deep
-probes (5.9–9.1 ms at a batch of 64). There a new clustering changes how many passing items the probed clusters hold,
-while V1's time on the same inputs stays put. Of the 54 tuned cells with all three seeds, one changes winner ({vflip}).
-There the seed-0 setting reaches exactly 0.950 at seed 0 and just under at seeds 1 and 2, so a slower setting is picked.
-LAION 1M's deep settings ran at seed 0 only.
+**Table 12.** LiNR V1's time at seeds 1–2 over seed 0, same cell.
+
+{T11b}
+
+The comparison barely moves. At the same setting, SilverTorch's time varies by a median {v_t} % per dataset, and recall
+by at most {v_r}. Held at its seed-0 setting, SilverTorch's time over the best LiNR's spreads by a median {v_fx} %, and
+{v_flips} of the {v_cells} tuned cells change winner. {v_below} LiNR V1 stays within {v_mach} % of its seed-0 time on
+every machine, so no machine effect is measurable. The largest spreads in SilverTorch's time come from PubMed's MeSH
+filter at deep probes (5.9–9.1 ms at a batch of 64), consistent with a new clustering changing how many passing items the
+probed clusters hold. Re-picking the setting at each seed instead changes one winner ({vflip}). That is a pick sitting
+exactly on the target, not a change in speed. LAION 1M's deep settings ran at seed 0 only, by design; the seed-2 runs of
+Goodreads, arXiv and LAION 30M are still running.
 
 ## 10. Conclusions
 
@@ -196,8 +185,7 @@ LAION 1M's deep settings ran at seed 0 only.
    30 M items. Its index is also 28–46 % smaller. Its weakness is a shortage of candidates: filters whose passing items
    are thinly spread across clusters force it to probe half the index or more, and there exact LiNR is as fast or
    faster.
-2. **LiNR V1** is the right exact method for batches: one pass over the index serves every query, and from a batch of
-   16 it beats V2 on all but the rarest filters. **LiNR V2** wins for one query at a time and for very selective
+2. **LiNR V1** is the right exact method for batches: its time per query falls fastest with batch size, and from a batch of 16 it beats V2 on all but the rarest filters. **LiNR V2** wins for one query at a time and for very selective
    filters. **LiNR V3** rarely beats the faster exact variant at equal recall.
 3. The **bloom filter** is a sound engineering choice at Meta's default width. It is faster than a well-built exact
    filter where the filter is expensive to check, at no measurable cost in recall. It is not faster everywhere, and the
