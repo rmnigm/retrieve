@@ -279,16 +279,18 @@ if (br) br.textContent = `on Goodreads the two move together: Pearson ${D.bridge
     return;
   }
   let h = "<table class='map'><thead><tr><th>dataset · filter</th><th>bs 1</th><th>bs 16</th><th>bs 64</th></tr></thead><tbody>";
-  [...new Map(D.clause_bloom.map(r => [r.ds + "|" + r.sweep, r])).values()].forEach(k => {
-    h += `<tr><td class="row">${k.ds} · ${k.sweep}</td>`;
+  [...new Map(D.clause_bloom.map(r => [r.ds + "|" + r.sweep + "|" + r.nl, r])).values()].forEach(k => {
+    h += `<tr><td class="row">${k.ds} · ${k.sweep} · ${k.nl.toLocaleString("en-US")} clusters</td>`;
     [1, 16, 64].forEach(bs => {
-      const r = D.clause_bloom.find(x => x.ds === k.ds && x.sweep === k.sweep && x.bs === bs);
+      const r = D.clause_bloom.find(x => x.ds === k.ds && x.sweep === k.sweep && x.nl === k.nl && x.bs === bs);
       h += !r ? `<td class="na">–</td>` : `<td class="${r.med < 1 ? "st" : "li"}" data-tip="bloom takes ${r.lo}–${r.hi}× the exact filter's time over ${r.n} points; median recall cost ${r.cost}; SM clock ${r.mhz_b} / ${r.mhz_c} MHz (bloom / exact runs)">${r.med.toFixed(2)}</td>`;
     });
     h += "</tr>";
   });
   box.innerHTML = h + "</tbody></table>";
   box.querySelectorAll("td[data-tip]").forEach(td => bindTip(td, td.dataset.tip));
+  const f = D.fp;
+  document.getElementById("fp-note").textContent = `at the timed settings at most ${f.share_max} % of the items the bloom passes are false (none at ${f.zero} of ${f.points} graded settings), and recall moves by at most ${f.cost_max} against the exact filter.`;
 })();
 
 /* 5. seed variance */
@@ -296,7 +298,7 @@ if (br) br.textContent = `on Goodreads the two move together: Pearson ${D.bridge
   const box = document.getElementById("c-var");
   if (!D.variance.length) {
     box.hidden = true;
-    document.getElementById("n-var").innerHTML = "<b>Still running:</b> the timed comparison at seeds 1 and 2 (a new clustering, a new synthetic draw, a new timing run). The median and range over the three seeds will appear here.";
+    document.getElementById("n-var").innerHTML = "<b>Still running:</b> the timed comparison at seeds 1 and 2 (a new clustering, a new synthetic draw, a new timing run). The median and range over the three seeds will appear here. Seed 2 of the 1–10 M LAION and PubMed cells runs on a second machine with the same GPU model, so its spread will also hold any machine-to-machine difference.";
     return;
   }
   const rows = D.variance.filter(r => r.k === 100 && r.t === 0.9);

@@ -184,6 +184,14 @@ D["counts"] = dict(
     ],
     v3_best=int((reached.matched_best == "V3").sum()),
     ratio_range=rng(reached.st_over_matched),
+    quarter=int((reached.probe_frac <= 0.25).sum()),
+    quarter_wins=int(
+        ((reached.probe_frac <= 0.25) & (reached.winner_matched == "SilverTorch")).sum()
+    ),
+    beyond=int((reached.probe_frac > 0.25).sum()),
+    beyond_wins=int(
+        ((reached.probe_frac > 0.25) & (reached.winner_matched == "SilverTorch")).sum()
+    ),
 )
 # 5: seed variance of the tuned head-to-head
 v = pd.read_csv(OUT + "variance_tuned.csv")
@@ -210,6 +218,7 @@ D["clause_bloom"] = [
     dict(
         ds=lab.get(ds, ds),
         sweep=sw,
+        nl=int(nl),
         bs=int(bs),
         n=len(g),
         med=num(g.bloom_over_clause.median(), 2),
@@ -219,8 +228,18 @@ D["clause_bloom"] = [
         mhz_b=num(g.perf_sm_mhz_bloom.median(), 0),
         mhz_c=num(g.perf_sm_mhz_clause.median(), 0),
     )
-    for (ds, sw, bs), g in cb.groupby(["dataset", "sweep", "perf_bs"])
+    for (ds, sw, nl, bs), g in cb.groupby(["dataset", "sweep", "n_lists", "perf_bs"])
 ]
+fpp = pd.read_csv(OUT + "c4_fp_points.csv")
+D["fp"] = dict(
+    points=int(len(fpp)),
+    zero=int((fpp.rejects_over_survivors == 0).sum()),
+    share_max=num(100 * fpp.rejects_over_survivors.max(), 3),
+    fail_max=float(f"{fpp.rejects_over_exact_failing.max():.1g}"),
+    fn=int(fpp.false_negative_rows.sum()),
+    cost_max=f"{cb.recall_cost.abs().max():.6f}",
+    graph_n=int(len(cb)),
+)
 # 6: LiNR V2 / V1
 cc = pd.read_csv(OUT + "c1_curves.csv")
 pick = [
@@ -311,34 +330,42 @@ if len(c2):
         ]
     )
 if len(c3):
-    e1 = c3[(c3.perf_bs == 1) & (c3.perf_mode == "eager")].torch_over_triton
-    e16 = c3[(c3.perf_bs == 16) & (c3.perf_mode == "eager")].torch_over_triton
+    e = c3[c3.perf_mode == "eager"]
+    pt = e[e.variant == "eager torch"]
+    ma = e[e.variant == "max-autotune"]
     claims.append(
         [
             "C3",
             "part",
-            "direction only",
-            f"<b>LiNR: native masking is about 100× slower than a custom kernel.</b> Against torch.compile (max-autotune, timed eagerly) the custom kernel is {rng(e1)}× faster at one query and {rng(e16)}× at bs 16, on PubMed and LAION-synth 30M so far. The rows against plain PyTorch and on Goodreads and arXiv are still running.",
+            "far smaller",
+            f"<b>LiNR: native masking is about 100× slower than a custom kernel.</b> Against plain PyTorch the custom kernel is {rng(pt[pt.perf_bs == 1].torch_over_triton, 1)}× faster at one query and {rng(pt[pt.perf_bs == 16].torch_over_triton, 1)}× at bs 16 (Goodreads-synth, timed eagerly). "
+            f"Against torch.compile (max-autotune) it is {rng(ma[ma.perf_bs == 1].torch_over_triton)}× at one query, so compiled PyTorch is sometimes faster, and {rng(ma[ma.perf_bs == 16].torch_over_triton)}× at bs 16, across Goodreads, arXiv, PubMed and the synthetic sets.",
         ]
     )
 pm = bw[bw.dataset == "pubmed"].groupby("m_bits").recall.max()
+fw = pd.read_csv(OUT + "c4_fp_width.csv")
+f1024 = fw[fw.m_bits == 1024]
 claims.append(
     [
         "C4",
-        "pend",
-        "pending",
-        f"<b>SilverTorch bloom filter: about 0.067 % false positives at 1024 bits.</b> The false-positive count on SilverTorch's own bloom is still running. At a fixed probe setting, recall stops improving at 256–512 bits: "
-        f"PubMed's rarest filter reaches {pm.max():.2f} there but only {pm.min():.2f} at 64 bits; arXiv and Goodreads are flat from 64 bits.",
+        "ok",
+        "holds",
+        f"<b>SilverTorch bloom filter: about 0.067 % false positives at 1024 bits.</b> At Meta's default of 1024 bits and 5 hashes, SilverTorch's own bloom lets through at most {100 * f1024[f1024.k_hash == 5].fp_rate_mean.max():.6f} % of the items that fail the filter ({100 * f1024.fp_rate_mean.max():.4f} % with 3 hashes; PubMed's MeSH filter), and none on Goodreads and arXiv. "
+        f"At the timed settings, at most {D['fp']['share_max']} % of the items it passes are false, and recall moves by at most {D['fp']['cost_max']} against the exact filter. Narrower filters let more through: {100 * fw[(fw.dataset == 'pubmed') & (fw.m_bits == 64)].fp_rate_mean.max():.1f} % on PubMed at 64 bits, where recall at a fixed probe setting falls to {pm.min():.2f} from {pm.max():.2f}.",
     ]
 )
-claims.append(
-    [
-        "C5",
-        "pend",
-        "pending",
-        "<b>SilverTorch co-design: 1.79–2.15× faster.</b> The rerun of Meta's code as published across 1–30 M items is still running.",
-    ]
-)
+c5n = pd.read_csv(OUT + "c5_meta.csv")
+c5n = c5n[c5n.suite == "nsweep-codesign"].groupby("n_items").full_over_partial
+if len(c5n.size()):
+    claims.append(
+        [
+            "C5",
+            "part",
+            "at 10–30 M only",
+            f"<b>SilverTorch co-design: 1.79–2.15× faster.</b> On Meta's code as published, filtering inside the probed clusters is {c5n.median()[30_000_000]:.2f}× faster (median) than filtering the whole index first at 30 M items, "
+            f"{c5n.median()[10_000_000]:.2f}× at 10 M, and slower below that ({c5n.median()[1_000_000]:.2f}× at 1 M).",
+        ]
+    )
 claims.append(
     [
         "C6",
@@ -362,6 +389,25 @@ try:
     )
 except FileNotFoundError:
     pass
+ce = pd.read_csv(OUT + "c6_ceiling.csv")
+if len(ce):
+    ce = ce.assign(
+        lift=ce.fp16 - ce.shipped,
+        scale=ce[["global", "per_row"]].max(axis=1) - ce.shipped,
+    )
+    ce = ce[ce.dataset.isin(REAL)]
+    big = ce[ce.lift >= 0.02]
+    small = ce[ce.lift < 0.02]
+    names = lambda t: sorted(  # noqa: E731
+        {
+            lab[d] if d not in set(big.dataset) else f"{lab[d]} {w}"
+            for d, w in zip(t.dataset, t.sweep)
+        }
+    )
+    claims[-1][3] += (
+        f" At a quarter of the clusters, fp16 scores instead of int8 would lift {', '.join(f'{lab[d]} {w}' for d, w in zip(big.dataset, big.sweep))} by {rng(big.lift)}; "
+        f"elsewhere ({', '.join(names(small))}) by under 0.02, so the clusters probed, not int8, set the limit. A finer int8 scale (per row or global) adds at most {ce.scale.max():.3f}."
+    )
 claims.append(
     [
         "C7",

@@ -28,7 +28,9 @@ OUT = Path(sys.argv[2])
 LINR = {"linr_v1_filter_mask": "V1", "linr_v2": "V2", "linr_v3": "V3"}
 TARGETS = [0.9, 0.95]
 CELL = ["dataset", "dim", "sweep", "perf_bs", "perf_k"]
-RUN = re.compile(r"(?P<leg>.+)-(?P<pod>pod1|pode)-s(?P<seed>\d)(?P<rerun>-rerun)?$")
+RUN = re.compile(
+    r"(?P<leg>.+)-(?P<pod>pod1|pode|podf)-s(?P<seed>\d)(?P<rerun>-rerun)?$"
+)
 
 
 def recall(df):
@@ -49,10 +51,13 @@ def load():
         if not m or not (d / "results.parquet").is_file():
             continue
         x = pd.read_parquet(d / "results.parquet")
+        owner = [re.search(r"-(pod1|pode)-", s.name) for s in d.iterdir() if s.is_dir()]
+        owner = next((o[1] for o in owner if o), m["pod"])
         parts.append(
             x.assign(
                 leg=m["leg"],
-                pod=m["pod"],
+                pod=owner,
+                run_pod=m["pod"],
                 run_seed=int(m["seed"]),
                 rerun=bool(m["rerun"]),
             )
@@ -135,6 +140,7 @@ def head_to_head(tb, mode="graph"):
         "st_over_linr",
         "flagged",
         "ext",
+        "run_pod",
         "index_mib",
         "build_s",
     ]
@@ -167,7 +173,8 @@ def tuned(h, v3):
     """Per cell, seed and target: the fastest SilverTorch point reaching the target, against exact LiNR and against the
     best LiNR at that recall (V1 / V2 exact, or V3 at its smallest pool reaching the target). A cell's points may come from
     its timed leg and a TUNE-EXT leg; each point's ratio is to the LiNR timed in its own run, the cell's LiNR columns are the
-    original leg's."""
+    original leg's. A point timed in another run (TUNE-EXT, possibly on another pod) keeps its own run's ratio: its ratio to
+    the best LiNR is its ratio to its run's exact LiNR, rescaled by the original leg's best-over-exact LiNR."""
     on = ["pod", "seed"] + CELL
     rows = []
     for key, g in h.groupby(on):
@@ -198,6 +205,7 @@ def tuned(h, v3):
                     recall=b.recall,
                     st_ms=b.st_ms,
                     st_over_linr=b.st_over_linr,
+                    run_pod=b.run_pod,
                     flagged=b.flagged,
                 )
             rows.append(row)
@@ -211,7 +219,7 @@ def tuned(h, v3):
     best = tn[["linr_ms", "v3_ms"]].min(axis=1)
     tn["matched_best"] = np.where(tn.v3_ms < tn.linr_ms, "V3", tn.linr_best)
     tn["matched_ms"] = best
-    tn["st_over_matched"] = tn.st_ms / best
+    tn["st_over_matched"] = tn.st_over_linr * tn.linr_ms / best
     tn["winner_exact"] = np.select(
         [tn.st_ms.isna(), tn.st_over_linr < 1],
         ["not reached", "SilverTorch"],
@@ -279,7 +287,7 @@ def clause_vs_bloom(df):
         & df.leg.str.contains("timed-clause|timed-bloom")
         & ~df.unstable
     ]
-    on = ["pod", "env_gpu", "seed", "perf_mode", "n_lists", "n_probe"] + CELL
+    on = ["pod", "run_pod", "env_gpu", "seed", "perf_mode", "n_lists", "n_probe"] + CELL
     val = ["perf_median_ms", "recall", "perf_sm_mhz", "leg"]
     cl = x[x.filter_kind == "clause"][on + val]
     bl = x[x.filter_kind == "bloom"][on + val + ["pass_rate", "n_items", "ext"]]
@@ -289,8 +297,47 @@ def clause_vs_bloom(df):
     return m
 
 
+def untimed():
+    """The untimed step's outputs, per pod whose cells they grade: SilverTorch bloom false positives at the timed points
+    (grade_bloom), the bloom width's false-positive rate (fp_adapted) and the C6 ceiling split (ceiling_adapted)."""
+    fp, fw, ceil = [], [], []
+    for d in sorted(FR.iterdir()):
+        m = RUN.match(d.name)
+        if not m:
+            continue
+        tag = dict(leg=m["leg"], run_pod=m["pod"])
+        for f in d.glob("grade_bloom-d*.csv"):
+            fp.append(pd.read_csv(f).assign(dim=int(f.stem.split("-d")[-1]), **tag))
+        for f in d.glob("fp_adapted.csv"):
+            fw.append(pd.read_csv(f).assign(**tag))
+        for f in d.glob("ceiling/ceiling-*.json"):
+            j = json.loads(f.read_text())
+            ceil.append(
+                dict(
+                    dataset=j["dataset"],
+                    sweep=j["sweep"],
+                    pass_rate=j["pass_rate"],
+                    n_lists=j["params"]["n_lists"],
+                    n_probe=j["params"]["n_probe"],
+                    **j["recall_oracle@100"],
+                    **tag,
+                )
+            )
+    cat = lambda xs: pd.concat(xs, ignore_index=True) if xs else pd.DataFrame()  # noqa: E731
+    fp = cat(fp)
+    if len(fp):
+        fp = fp.drop(columns="code_version").sort_values(
+            ["dataset", "sweep", "n_lists", "n_probe"]
+        )
+    fw = cat(fw)
+    if len(fw):
+        fw = fw.drop(columns="code_version")
+    return fp, fw, pd.DataFrame(ceil)
+
+
 def c1(df):
-    """LiNR V2 / V1 against pass rate on the synthetic sets, k 100, graph, seed 0, one leg per dataset (the first that has it)."""
+    """LiNR V2 / V1 against pass rate on the synthetic sets, k 100, graph, seed 0, one leg per dataset and batch (the first with
+    three pass rates)."""
     x = df[
         df.algo.isin(["linr_v1_filter_mask", "linr_v2"])
         & (df.backend == "triton")
@@ -304,17 +351,21 @@ def c1(df):
     ]
     rows, curves = [], []
     for (ds, dim, bs), grp in x.groupby(["dataset", "dim", "perf_bs"]):
-        leg = sorted(
+        legs = sorted(
             grp.leg.unique(), key=lambda s: (not s.startswith(("final", "linr")), s)
-        )[0]
-        grp = grp[grp.leg == leg]
-        pv = (
-            grp.pivot_table(index="pass_rate", columns="algo", values="perf_median_ms")
-            .dropna()
-            .sort_index()
         )
-        if len(pv) < 3 or pv.shape[1] < 2:
+        for leg in legs:
+            pv = (
+                grp[grp.leg == leg]
+                .pivot_table(index="pass_rate", columns="algo", values="perf_median_ms")
+                .dropna()
+                .sort_index()
+            )
+            if len(pv) >= 3 and pv.shape[1] == 2:
+                break
+        else:
             continue
+        grp = grp[grp.leg == leg]
         r = (pv.linr_v2 / pv.linr_v1_filter_mask).tolist()
         ps = pv.index.tolist()
         n = int(grp.n_items.iloc[0])
@@ -563,6 +614,7 @@ def main():
     var_pt, var_tn = variance(h, tn)
     c1t, c1c = c1(df)
     c6c, c6t = c6(df)
+    fp, fw, ceil = untimed()
     tables = {
         "tuned": tn,
         "at24": at24(h),
@@ -578,9 +630,12 @@ def main():
         "c2_pools": c2_pools(df),
         "c3_torch": c3(df),
         "c4_bloomwidth": c4(df),
+        "c4_fp_points": fp,
+        "c4_fp_width": fw,
         "c5_meta": c5(df),
         "c6_curves": c6c,
         "c6_top": c6t,
+        "c6_ceiling": ceil,
         "yambda": yambda(df),
         "memory": memory(df),
     }

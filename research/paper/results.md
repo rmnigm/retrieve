@@ -17,23 +17,30 @@ From the final run's records only (tag `final-freeze`; tables in Hub `artifacts/
 [`build_results.py`](../artifacts/results-draft/build_results.py)); the run's gate is open, so none of this is citable yet.
 SilverTorch is Meta's code, adapted, on its own bloom filter with no recheck; LiNR filters exactly.
 
-- **Head-to-head at a recall target.** Of 180 cells (dataset × filter × bs 1 / 16 / 64 × k 100 / 1000 / 2048 × target
-  0.90 / 0.95), SilverTorch reaches the target within a quarter of its clusters in 120, and in 119 of those it is faster
-  than the fastest LiNR at that recall (V1 or V2 exact, or V3 at its smallest pool reaching the target), taking 0.04-0.99
-  of its time. The exception: LAION 10M tags, bs 64, k 100, 0.95 (1.16× LiNR V1). V3 is the fastest LiNR in 3 cells.
-- **Where it falls short:** LAION's domain filter at every size and its tag filter at 1-3 M (top recall@100 0.83-0.91),
-  and about half the k 1000 / 2048 cells at 0.95. Filters with a NOT clause have no bloom form and are exact-LiNR only.
+- **Head-to-head at a recall target.** Of 276 cells (dataset × filter × bs 1 / 16 / 64 × k 100 / 1000 / 2048 × target
+  0.90 / 0.95), SilverTorch reaches the target within a quarter of its clusters in 183, and in 181 of those it is faster
+  than the fastest LiNR at that recall (V1 or V2 exact, or V3 at its smallest pool reaching the target). The two
+  exceptions: LAION 10M tags, bs 64, k 100, 0.95 (1.16× LiNR V1) and arXiv-synth with no filter, bs 64, 0.95 (1.21×).
+  V3 is the fastest LiNR in 6 cells.
+- **Where it falls short:** 45 more cells reach the target only by probing half or more of the lists (LAION's domain
+  filter at 1-10 M and its tag filter at 1 M); there LiNR is faster in 38. Filters with a NOT clause have no bloom form.
 - **At the papers' 24 probes** SilverTorch is 1.0-61× faster than the best exact LiNR, at recall@100 0.33-0.89.
-- **C1:** the bs 1 crossover sits at a pass rate of 0.81-0.94 (LiNR: 0.11); at bs 16 at 0.014-0.053; at bs 64 V1 wins
+- **C1:** the bs 1 crossover sits at a pass rate of 0.85-0.97 (LiNR: 0.11); at bs 16 at 0.014-0.065; at bs 64 V1 wins
   everywhere. **C2:** V3 at the smallest pool reaching 0.90 takes 0.84-1.37 of V2's time at bs 1, 0.71-1.07 at bs 16 / 64.
-  **C3** (so far PubMed and LAION-synth 30M, against torch.compile max-autotune, eager timing): 0.96-1.02× at bs 1,
-  1.96-2.20× at bs 16. **C6:** 0.95 is reached on 9 of 17 real filters. Recall bridge: on Goodreads, exact recall and
-  end-task recall correlate at Pearson 0.99 (k 100) over SilverTorch's bloom settings, 0.87-0.93 per filter over every method.
-- **New finding (user, 2026-10-14), pending its numbers:** on the adapted code the bloom filter is faster than a
-  well-engineered exact clause filter in the same fused search; its recall cost is the false-positive count from the
-  untimed step. Both the clause reference row and the untimed step are still running.
-- **Still running:** seeds 1-2 of the timed comparison (seed spread), the synth timed legs on Goodreads / arXiv / LAION
-  30M, the false positives, the clause row, co-design (C5), and the LiNR N-sweep.
+  **C3:** against plain PyTorch (Goodreads-synth, eager) the custom kernel is 1.4-1.9× faster at bs 1 and 5.8-6.7× at
+  bs 16, far from LiNR's ~100×; against torch.compile max-autotune 0.52-1.02× at bs 1, 1.48-2.72× at bs 16.
+  **C4:** at 1024 bits / 5 hashes the bloom passes ≤ 0.000004 % of failing items; at the timed points ≤ 0.049 % of its
+  survivors are false. **C5** (Meta's code as published): probe-then-filter over full-index filtering 2.14× at 30 M
+  (median), 1.18× at 10 M, 0.83× at 1 M. **C6:** 0.95 is reached on 9 of 17 real filters; fp16 instead of int8 lifts
+  only PubMed's MeSH and journal filters (by 0.03-0.07). Recall bridge: on Goodreads, exact and end-task recall correlate
+  at Pearson 0.99 (k 100) over SilverTorch's bloom settings, 0.87-0.93 per filter over every method.
+- **Bloom against an exact filter (user's finding, 2026-10-14).** In the same fused search on the adapted code, the
+  bloom takes 0.7-0.9 of a well-engineered exact clause filter's time on PubMed's MeSH filter and on LAION's domain
+  filter at deep probes; the exact filter is as fast or faster on LAION's four-tag filter from 8,192 lists up (1.0-1.7).
+  Separate runs on one GPU, not interleaved. The exact kernel reads 5-24 B per probed item at 0.3-0.5 of DRAM peak; the
+  bloom reads 6-30× fewer bytes. Recall cost against the exact filter ≤ 0.000002.
+- **Still running:** seeds 1-2 of the timed comparison (seed 2 of pod 1's cells on a second machine, same GPU model)
+  and pod e's remaining recall ceilings.
 
 The rest of this page predates the FULL-RERUN.
 
