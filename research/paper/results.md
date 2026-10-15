@@ -274,22 +274,24 @@ passing items.
 
 ## 9. Seed to seed
 
-The timed comparison was rerun at seeds 1 and 2: a new clustering, a new synthetic draw and a new timing run. Some seeds
-ran on another machine with the same GPU model. Table 11 gives the spread over the seeds at the same setting, with each
-tuned cell held at the setting picked at seed 0: SilverTorch's time (max ÷ min − 1), its recall (max − min), its time
-over the best exact LiNR at each setting, and over the best LiNR at each tuned cell. Table 12 checks the machines
-against each other on LiNR V1, whose time does not depend on the clustering.
+The timed comparison was rerun at seeds 1 and 2: a new clustering, a new synthetic draw and a new timing run. Seed 2 ran
+on a different machine from seeds 0–1, with the same GPU model. Table 11 gives the spread over the seeds at the same
+setting, with each tuned cell held at the setting picked at seed 0: SilverTorch's time (max ÷ min − 1), its recall (max
+− min), its time over the best exact LiNR at each setting, and over the best LiNR at each tuned cell. Table 12 checks
+the machines against each other on LiNR V1, whose time does not depend on the clustering.
 
 **Table 11.**
 
 | Dataset | Seeds | Settings | Time: median | Time: max | Recall: max | vs exact LiNR | Tuned cells | vs best LiNR | Winner changes |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| arXiv 3M | 2 | 54 | 0.7 % | 2.5 % | 0.002 | 0.7 % | 39 | 0.7 % | 0 |
-| Goodreads 0.8M | 2 | 30 | 0.4 % | 1.6 % | 0.002 | 0.5 % | 15 | 0.7 % | 0 |
+| arXiv 3M | 3 | 54 | 1.4 % | 10.2 % | 0.002 | 1.3 % | 39 | 1.2 % | 0 |
+| arXiv-synth 3M | 2 | 33 | 1.3 % | 9.8 % | 0.007 | 1.4 % | 21 | 0.5 % | 0 |
+| Goodreads 0.8M | 3 | 30 | 5.1 % | 8.7 % | 0.008 | 4.9 % | 15 | 4.4 % | 0 |
+| Goodreads-synth 0.8M | 2 | 27 | 5.0 % | 7.4 % | 0.013 | 5.4 % | 18 | 5.6 % | 0 |
 | LAION 10M | 3 | 15 | 0.6 % | 11.3 % | 0.002 | 0.7 % | 6 | 0.3 % | 0 |
 | LAION-synth 10M | 3 | 75 | 0.5 % | 10.5 % | 0.004 | 0.8 % | 21 | 0.8 % | 0 |
 | LAION 1M | 3 | 6 | 2.7 % | 12.3 % | 0.009 | 2.8 % | 0 | – | 0 |
-| LAION 30M | 2 | 33 | 0.1 % | 2.7 % | 0.001 | 0.1 % | 12 | 0.1 % | 0 |
+| LAION 30M | 3 | 33 | 0.5 % | 8.3 % | 0.002 | 0.5 % | 12 | 0.5 % | 0 |
 | LAION 3M | 3 | 12 | 0.8 % | 14.8 % | 0.003 | 0.8 % | 3 | 0.4 % | 0 |
 | PubMed 10M | 3 | 39 | 0.6 % | 53.6 % | 0.007 | 0.7 % | 9 | 0.8 % | 0 |
 | PubMed-synth 10M | 3 | 51 | 1.0 % | 11.4 % | 0.005 | 1.1 % | 15 | 0.5 % | 0 |
@@ -300,16 +302,23 @@ against each other on LiNR V1, whose time does not depend on the clustering.
 |---|--:|--:|--:|--:|--:|
 | LAION 10M, LAION 1M, LAION 3M, PubMed 10M | 1 | same | 27 | 1.000 | 0.995–1.018 |
 | LAION 10M, LAION 1M, LAION 3M, PubMed 10M | 2 | another | 27 | 1.000 | 0.998–1.003 |
+| Goodreads 0.8M, arXiv 3M | 2 | another | 30 | 1.000 | 0.988–1.004 |
 | Goodreads 0.8M, LAION 30M, arXiv 3M | 1 | same | 39 | 1.000 | 0.996–1.002 |
+| LAION 30M | 2 | another | 9 | 1.000 | 0.999–1.001 |
 
-The comparison barely moves. At the same setting, SilverTorch's time varies by a median 0.1–2.7 % per dataset, and recall
-by at most 0.009. Held at its seed-0 setting, SilverTorch's time over the best LiNR's spreads by a median 0.1–0.8 %, and
-none of the 120 tuned cells change winner. At that setting 3 cells (LAION-synth 10M with no filter) dip below the target at a later seed, by at most 0.0001. LiNR V1 stays within 1.8 % of its seed-0 time on
-every machine, so no machine effect is measurable. The largest spreads in SilverTorch's time come from PubMed's MeSH
-filter at deep probes (5.9–9.1 ms at a batch of 64), consistent with a new clustering changing how many passing items the
-probed clusters hold. Re-picking the setting at each seed instead changes one winner (LAION-synth 10M with no filter, bs 64, k 100, 0.95: 0.73–0.74 at the seed-0 pick, 0.73–1.26 re-picked). That is a pick sitting
-exactly on the target, not a change in speed. LAION 1M's deep settings ran at seed 0 only, by design; the seed-2 runs of
-Goodreads, arXiv and LAION 30M are still running.
+The comparison barely moves. At the same setting, SilverTorch's time varies by a median 0.5–5.1 % per dataset, and recall
+by at most 0.013. Held at its seed-0 setting, SilverTorch's time over the best LiNR's spreads by a median 0.3–5.6 %, and
+none of the 159 tuned cells change winner. At that setting 3 cells (LAION-synth 10M with no filter) dip below the target at a later seed, by at most 0.0001. LiNR V1 stays within 1.8 % of its seed-0 time on
+every machine. SilverTorch's shortest times are another matter: the settings under 0.25 ms, close to its fixed cost per
+call, run 5–9 % slower at seed 2 on Goodreads, arXiv, their synthetic sets and LAION 30M, whose seed 2 ran on a
+different machine from seeds 0–1. The cells moved between the other two machines show no such shift. This is consistent
+with the machines differing in fixed cost per call, not in GPU throughput, and it is the main source of spread on those
+datasets; it changes no winner. The largest spreads in SilverTorch's time come from PubMed's MeSH filter at deep probes
+(5.9–9.1 ms at a batch of 64), consistent with a new clustering changing how many passing items the probed clusters
+hold. Re-picking the setting at each seed instead changes one winner (LAION-synth 10M with no filter, bs 64, k 100, 0.95: 0.73–0.74 at the seed-0 pick, 0.73–1.26 re-picked). That is a pick sitting exactly on the
+target, not a change in speed. Seeds 0–2 cover every real dataset and the synthetic PubMed and LAION 10M sets. Synthetic
+Goodreads and arXiv have seeds 0 and 2, and synthetic LAION 30M has seed 0 so far, with seed 1 still running (it gets no
+seed 2). LAION 1M's deep settings ran at seed 0 only, by design.
 
 ## 10. Conclusions
 
@@ -346,7 +355,7 @@ LinkedIn's claims are C1–C3, Meta's C4–C7 ([claims](claims.md)).
   collected into one total `results.parquet`. The exact-filter row in section 7 is the same tree with the exact clause
   filter built in (tag `final-freeze-clause`, `500284e`); its bloom path is byte-identical.
 - **Records.** These are the Hub subtrees `fr/<leg>-<pod>-s<seed>[-rerun]` on `pinkmeme/eval-results`, each with its
-  manifest in [hub-index](../artifacts/hub-index.md): 89 subtrees and 9,535 records; 99 of 1011 timed points stay unstable in every run. The tables and the page data are published as
+  manifest in [hub-index](../artifacts/hub-index.md): 94 subtrees and 10,207 records; 138 of 1188 timed points stay unstable in every run. The tables and the page data are published as
   `artifacts/results-draft/<date>-fr` (manifest in the same index).
 - **Scripts.** [`build_results.py`](../artifacts/results-draft/build_results.py) builds the tables,
   [`product_recall.py`](../artifacts/results-draft/product_recall.py) the recall bridge,
@@ -360,7 +369,7 @@ LinkedIn's claims are C1–C3, Meta's C4–C7 ([claims](claims.md)).
 - **Rules behind the numbers.** SilverTorch's bloom recheck is off when timed, and its false positives are counted in a
   separate, untimed pass on Meta's bloom only. LiNR uses the exact filter only. Recall is exact filtered top-k recall,
   so no claim is called "not reproduced" on recall alone. The headline comparison sets SilverTorch against the fastest
-  LiNR at the same recall. Seed 2 of the LAION 1–10 M and PubMed cells ran on a second machine with the same GPU model.
+  LiNR at the same recall. Seed 2 of every cell ran on a different machine from its seeds 0–1, with the same GPU model.
   Every number is seed 0 except section 9.
 - **Citability.** Sections 1–9 and the claims table will become citable together when the final rerun's gate passes. C7
   quotes an earlier gate, at the adapted code's review head, which already stands. It was not rerun in the final rerun
