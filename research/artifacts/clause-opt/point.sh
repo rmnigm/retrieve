@@ -12,6 +12,7 @@ OPT_TREE=${OPT_TREE:-/scratch/wt/clause-opt} OPT_VENV=${OPT_VENV:-/venvs/clause-
 mkdir -p "$OUT"
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0} TORCHINDUCTOR_CACHE_DIR=/scratch/clause-opt/inductor
 for t in base opt; do
+  [ -s $OUT/$TAG-$t.pt ] && [ -s $OUT/$TAG-prof-$t.json ] && continue  # done in an earlier block
   if [ $t = base ]; then tree=$BASE_TREE venv=$BASE_VENV; else tree=$OPT_TREE venv=$OPT_VENV; fi
   (cd $tree/evaluation && $venv/bin/python $A/clause_bench.py --dataset $DS --dim $DIM \
     --n-lists $NL --n-probe $NP --sweeps $SW --bs $BS --k 100 1000 --mode both \
