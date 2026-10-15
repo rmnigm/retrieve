@@ -1,23 +1,21 @@
-"""Meta's official SilverTorch ops (``torch.ops.st.*``, meta-recsys/silvertorch @ 21aa35e)
-and our fork of them (``torch.ops.stfork.*``, ``official-fork/``) vs the pure-torch reference,
-the Triton kernels and the ``SilverTorch`` layer — the T1–T7 gates (the retired
-silvertorch-official-integration plan; see the "Official against our Triton reimplementation"
-section of research/validation.md).
+"""Meta's official SilverTorch ops (``torch.ops.st.*``, meta-recsys/silvertorch @ 21aa35e) and
+the adapted code (``torch.ops.stfork.*``, ``official-fork/``): the parity gates of Meta's code
+as published against an independent torch oracle, and of the adapted code against the published
+code, through the ops and through the ``SilverTorch`` layer.
 
-The official scorer and the Triton kernels read the same **cluster-sorted** int8 table
-through the same CSR (``cluster_offsets``), built here by ``make_probe_family``, so both arms
-score the very same candidate set and the
-int32 path must agree with Triton **bit for bit** on the ``[B, k]`` scores
-(``torch.equal``), ids up to permutation within tied scores. The fp16 path (the
-instantiation Meta ships for int8 serving) is gated by rank agreement and a relative
-error bound instead. The official bloom is a different hash from ours, so it is never
-bit-compared: the gates are semantic (no false negatives vs the exact predicate, FPR
-recorded, partial-mask ≡ full-mask scores).
+Both arms read the same cluster-sorted int8 table through the same CSR (``cluster_offsets``,
+built here by ``make_probe_family``), so they score the very same candidate set. On the int32
+path the ``[B, k]`` scores must agree **bit for bit** (``torch.equal``), ids up to permutation
+within tied scores. The fp16 path (the instantiation Meta ships for int8 serving) is gated by
+rank agreement and a relative error bound instead. The official bloom is Meta's hash, so it is
+never bit-compared against ours: its gates are semantic (no false negatives vs the exact
+predicate, FPR recorded, partial-mask ≡ full-mask scores).
 
 Every test runs once per official backend (``OB``, set by the autouse fixture; ``ofb`` is the
 adapter with ``backend=OB`` bound) and is gated by ``require_official(OB)``: it skips when the
 ``official`` extra is not installed (or there is no CUDA device) and fails when the package is
-present but its extension is broken.
+present but its extension is broken. The adapted-vs-published gates run on the ``official-fork``
+parametrisation and need both packages.
 """
 
 from __future__ import annotations
@@ -35,14 +33,8 @@ from retrieve.functional import clause_subset_match, masked_topk
 from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
 from retrieve.interfaces import OFFICIAL_BACKENDS
 from retrieve.modules.silvertorch import OfficialConfig, SilverTorch, SilverTorchBuilder
-from retrieve.ops import official as of, reference
+from retrieve.ops import official as of
 from retrieve.ops.triton.clause_mask import clause_mask
-from retrieve.ops.triton.codesigned_probe_score import (
-    _codesigned_probe_score_impl,
-)
-from retrieve.ops.triton.codesigned_probe_score_exact import (
-    _codesigned_probe_score_exact_impl,
-)
 from tests.conftest import (
     make_attrs,
     make_index,
@@ -56,15 +48,11 @@ from tests.parity.conftest import (
     make_probe_family,
 )
 
-# --- bit-order pin ----------------------------------------------------------------------
-#
-# The order in which the official scorer reads a ``filtering_bit_mask`` word — and in which
-# ``bloom_index_search_batch`` packs its output — was measured on the A100 on 2026-09-06
-# (plan §13.2, three independent probes): HIGH-first, doc ``d`` at bit ``63 - d % 64``. It is
-# pinned here as a *test-side* constant, independent of the adapter's, so T3 asserts
-# ``official.MASK_BIT_ORDER`` / ``official.BLOOM_OUTPUT_BIT_ORDER`` against the measurement
-# rather than against themselves; the other order is kept as a negative control (a mask
-# packed low-first scores nothing / does not round-trip). A3's probes are the tests below.
+# The order in which the official scorer reads a ``filtering_bit_mask`` word, and in which
+# ``bloom_index_search_batch`` packs its output, measured on the A100 (kernels.md § official,
+# "Bit order"): HIGH-first, doc ``d`` at bit ``63 - d % 64``. A test-side constant, so T3 asserts
+# the adapter's ``MASK_BIT_ORDER`` / ``BLOOM_OUTPUT_BIT_ORDER`` against the measurement rather
+# than against themselves; the other order is the negative control.
 OFFICIAL_BIT_ORDER: of.BitOrder = "high_first"
 OTHER_ORDER: of.BitOrder = "low_first"
 
@@ -100,9 +88,17 @@ def _needs_official(request, monkeypatch):
     require_official(request.param)
 
 
+def _adapted_only():
+    """Gate of the adapted-vs-published tests: they run on the ``official-fork`` parametrisation
+    and need the published package too."""
+    if OB != "official-fork":
+        pytest.skip("adapted vs published: runs on the official-fork parametrisation")
+    require_official("official")
+
+
 # The schemas of every op the adapter calls, at the pinned sha (pyproject: 21aa35e28b6d…). A
 # different installed build fails here, before any gate reads a renamed or re-ordered argument.
-# The fork registers the same strings under its own namespace until its own API replaces them.
+# The adapted code registers the same strings under its own namespace.
 PINNED_SCHEMAS = {
     "fused_kmean_ann": (
         "st::fused_kmean_ann(Tensor cluster_offsets, Tensor cluster_ids, Tensor cluster_length, "
@@ -159,7 +155,7 @@ def test_official_op_schemas_are_pinned():
 
 class Family:
     """One CSR probe family (``make_probe_family``) over one cluster-sorted int8 table, scored
-    by the official op, the Triton kernels and the reference."""
+    by the official ops and by the oracle."""
 
     def __init__(self, b, n_lists, max_size, n_probe, d, *, seed=7):
         lay = make_probe_family(b, n_lists, max_size, n_probe, seed=seed)
@@ -172,14 +168,10 @@ class Family:
         self.codes, self.global_scale = quantize_int8_global(embs)
         self.query = make_query(b, d)
 
-    def ours(self):
-        """The leading arguments of the Triton / reference probe ops."""
-        return self.query, self.probe_ids, self.offsets, self.codes, self.sort_perm
-
-    def official(self, k, **kw):
-        return ofb.official_probe_score(
+    def official(self, k, *, backend=None, **kw):
+        return of.official_probe_score(
             self.query, self.probe_ids, self.offsets, self.sizes, self.codes, self.sort_perm,
-            self.global_scale, k, self.width, **kw,
+            self.global_scale, k, self.width, backend=OB if backend is None else backend, **kw,
         )  # fmt: skip
 
     def official_full(self, **kw):
@@ -194,6 +186,30 @@ class Family:
             j for c in self.probe_ids[row].tolist()
             for j in range(int(self.offsets[c]), int(self.offsets[c + 1]))
         ]  # fmt: skip
+
+    def oracle(self, k, mask=None):
+        """Algorithm 1's phases 2+3 in plain torch, one row at a time: the row's probed positions
+        concatenated, the int8 query against their codes as an exact int32 dot, dequantised as
+        ``(dot · q_scale) · global_scale`` (the adapter's order), ``mask [B, N]`` (over sorted
+        positions) to ``-inf``, then ``masked_topk``. No slot arithmetic is shared with the
+        ops."""
+        q_codes, q_scales = quantize_int8(self.query)
+        rows, scores = [], []
+        for row in range(self.b):
+            pos = torch.tensor(self.probed_positions(row), dtype=torch.int64, device="cuda")
+            dot = (self.codes[pos].to(torch.int32) * q_codes[row].to(torch.int32)).sum(1)
+            s = dot.to(torch.float32) * q_scales[row] * self.global_scale
+            if mask is not None:
+                s = torch.where(mask[row, pos], s, float("-inf"))
+            rows.append(pos)
+            scores.append(s)
+        width = max(p.numel() for p in rows)
+        ids = torch.full((self.b, width), -1, dtype=torch.int64, device="cuda")
+        sc = torch.full((self.b, width), float("-inf"), device="cuda")
+        for row, (pos, s) in enumerate(zip(rows, scores, strict=True)):
+            ids[row, : pos.numel()] = self.sort_perm[pos]
+            sc[row, : pos.numel()] = s
+        return masked_topk(sc, k, valid=ids >= 0, gather_ids=ids)
 
 
 def _assert_bitexact(out, ref):
@@ -233,7 +249,7 @@ README_QUERIES = ["0:100", "0:100 AND NOT 1:201", "0:102 OR 1:203"]
 README_HITS = [[0, 1, 3], [1, 3], [2, 3]]
 
 
-# --- T1: int32 path, bit-exact vs the reference and vs Triton --------------------------
+# --- T1: int32 path, bit-exact vs the oracle; adapted vs published --------------------------
 
 
 @pytest.mark.parametrize(
@@ -249,42 +265,38 @@ README_HITS = [[0, 1, 3], [1, 3], [2, 3]]
 )
 @pytest.mark.parametrize("b", [1, 16])
 def test_t1_int32_path_bitexact(n_lists, max_size, n_probe, d, k, b):
-    """``divisor_for_int8=-1`` returns the raw int32 dot; after our host epilogue the
-    ``[B, k]`` scores equal the fp32 reference and the Triton kernel **bit for bit**
-    (same int32 dot, same two left-associated fp32 multiplies, same topk). Ids equal up
-    to permutation within tied scores. ``max_size=90`` exercises probed clusters whose
-    length is not a multiple of the warp (the official ``process_cluster_remaining``
-    path) and mask words with a pad tail; d = 96 / 192 / 768 are not powers of two (Triton
-    pads to ``D_PAD``, kernels.md § Padding)."""
+    """``divisor_for_int8=-1`` returns the raw int32 dot; after the host epilogue the ``[B, k]``
+    scores equal the oracle **bit for bit** (same int32 dot, same two left-associated fp32
+    multiplies, same topk), ids up to permutation within tied scores; on the adapted code they
+    also equal the published code's. ``max_size=90`` exercises probed clusters whose length is
+    not a multiple of the warp (the ``process_cluster_remaining`` path) and mask words with a
+    pad tail; d = 96 / 192 / 768 are not powers of two."""
     f = Family(b, n_lists, max_size, n_probe, d)
     out = f.official(k, score_path="int32")
-    ref = reference.codesigned_probe_score(*f.ours(), f.global_scale, k, f.width)
-    _assert_bitexact(out, ref)
-    tri = _codesigned_probe_score_impl(*f.ours(), f.global_scale, k, f.width)
-    _assert_bitexact(out, tri)
+    _assert_bitexact(out, f.oracle(k))
+    if OB == "official-fork":
+        require_official("official")
+        _assert_bitexact(out, f.official(k, score_path="int32", backend="official"))
 
 
 @pytest.mark.parametrize("reverse", ["none", "mixed"])
 @pytest.mark.parametrize("d", [64, 128, 192, 768])
-def test_t1_exact_mask_bitexact_vs_triton(d, reverse):
-    """Exact mode on the official scorer is our ``clause_mask`` packed into
-    ``filtering_bit_mask`` (phase 2 ours, full ``N``): the same AND-of-OR / reverse /
-    inactive predicate the Triton exact kernel fuses, so scores are bit-identical to
-    ``codesigned_probe_score_exact`` and to the reference, ids up to ties."""
+def test_t1_exact_mask_bitexact(d, reverse):
+    """Exact mode on the official scorer is our ``clause_mask`` packed into ``filtering_bit_mask``
+    (phase 2 ours, full ``N``): scores bit-identical to the oracle under the same mask, ids up
+    to ties; on the adapted code also to the published code's."""
     b, k = 16, 32
     f = Family(b, 64, 96, 8, d)
     attrs, rev, q_attrs = make_exact(f.n, b, reverse=reverse)
     mask = clause_mask(attrs, rev, q_attrs)  # [B, N] over sorted positions, like the attrs
     out = f.official(k, score_path="int32", filtering_bit_mask=of.pack_mask(mask))
-    tri = _codesigned_probe_score_exact_impl(
-        *f.ours(), f.global_scale, k, f.width, item_clause_attrs=attrs, clause_is_reverse=rev,
-        query_clause_attrs=q_attrs,
-    )  # fmt: skip
-    _assert_bitexact(out, tri)
-    ref = reference.codesigned_probe_score_exact(
-        *f.ours(), attrs, rev, q_attrs, f.global_scale, k, f.width
-    )
-    _assert_bitexact(out, ref)
+    _assert_bitexact(out, f.oracle(k, mask=mask))
+    if OB == "official-fork":
+        require_official("official")
+        pub = f.official(
+            k, score_path="int32", filtering_bit_mask=of.pack_mask(mask), backend="official"
+        )
+        _assert_bitexact(out, pub)
 
 
 def test_t1_raw_output_contract():
@@ -311,7 +323,7 @@ def test_t1_raw_output_contract():
 @pytest.mark.parametrize("b", [1, 16])
 def test_t2_fp16_path_close_to_int32(n_lists, max_size, n_probe, d, b, record_property):
     """``divisor_for_int8 = default_divisor(D)`` (a power of two ≥ 127²·D / 65504): the
-    kernel writes ``fp16(dot / divisor)`` — exact division, one fp16 rounding — so every
+    kernel writes ``fp16(dot / divisor)``, an exact division and one fp16 rounding, so every
     finite slot is within ``2⁻¹⁰`` relative of the int32 path, no slot overflows, and the
     top-32 sets agree at ``jaccard ≥ 0.99`` (fp16 ties can swap the boundary)."""
     f = Family(b, n_lists, max_size, n_probe, d)
@@ -346,10 +358,9 @@ def test_t2_default_divisor_is_the_overflow_bound():
 
 def test_t3_bloom_output_word_order():
     """``bloom_index_search_batch(return_bool_mask=False)`` packs doc ``d`` at bit
-    ``63 - d % 64`` (``store<bool>`` unpacks from bit 63 down — A3 probe A): ``pack_mask(
-    bool_mask, OFFICIAL_BIT_ORDER)`` round-trips the packed output and the other order does
-    not, and the adapter's constant agrees with the measurement. Also reproduces the
-    README's expected hits on its own corpus."""
+    ``63 - d % 64``: ``pack_mask(bool_mask, OFFICIAL_BIT_ORDER)`` round-trips the packed output
+    and the other order does not, and the adapter's constant agrees with the measurement. Also
+    reproduces the README's expected hits on its own corpus."""
     assert of.BLOOM_OUTPUT_BIT_ORDER == OFFICIAL_BIT_ORDER
     attrs = _readme_corpus()
     index, boff = ofb.build_bloom_index(attrs, b_multiplier=5.0, build_k=3)
@@ -362,7 +373,7 @@ def test_t3_bloom_output_word_order():
     packed = ofb.bloom_full_mask(index, boff, plans, 3, 7, return_bool_mask=False)
     assert packed.dtype == torch.int64 and packed.shape == (3, of.WORDS_PER_BUNDLE)
     assert torch.equal(of.pack_mask(full, OFFICIAL_BIT_ORDER), packed), (
-        f"packed bloom output is not {OFFICIAL_BIT_ORDER} — A3's measurement no longer holds"
+        f"packed bloom output is not {OFFICIAL_BIT_ORDER}: the measured order no longer holds"
     )
     assert not torch.equal(of.pack_mask(full, OTHER_ORDER), packed)
     assert torch.equal(of.unpack_mask(packed, of.DOCS_PER_BUNDLE, of.BLOOM_OUTPUT_BIT_ORDER), full)
@@ -388,20 +399,19 @@ def _scored_docs(doc: int, bit_order: of.BitOrder) -> list[int]:
 
 @pytest.mark.parametrize("doc", [0, 5, 40, 69])
 def test_t3_scorer_reads_filtering_bit_mask(doc):
-    """A3 probe B as a test: under the pinned read order the one set doc — and only it —
-    is scored; under the other order the *mirrored* doc ``63 - doc % 64`` of the same word
-    is scored instead (A3: "bit 0 set → doc 63 survives"), or nothing when the mirror lies
-    past the cluster (doc 69 → 122 ≥ 70). The adapter's ``MASK_BIT_ORDER`` must equal the
-    pinned measurement."""
+    """Under the pinned read order the one set doc, and only it, is scored; under the other order
+    the *mirrored* doc ``63 - doc % 64`` of the same word is scored instead, or nothing when the
+    mirror lies past the cluster (doc 69 → 122 ≥ 70). The adapter's ``MASK_BIT_ORDER`` must
+    equal the pinned measurement."""
     assert of.MASK_BIT_ORDER == OFFICIAL_BIT_ORDER
     scored = _scored_docs(doc, OFFICIAL_BIT_ORDER)
     assert scored == [doc], (
         f"with the mask packed {OFFICIAL_BIT_ORDER} the scorer scored docs {scored}, expected "
-        f"[{doc}]: A3's measured bit order no longer holds at this upstream sha"
+        f"[{doc}]: the measured bit order no longer holds at this upstream sha"
     )
     mirror = (doc // 64) * 64 + (63 - doc % 64)
     assert _scored_docs(doc, OTHER_ORDER) == ([mirror] if mirror < 70 else []), (
-        f"a mask packed {OTHER_ORDER} did not score the mirrored doc — the scorer no longer "
+        f"a mask packed {OTHER_ORDER} did not score the mirrored doc: the scorer no longer "
         f"reads {OFFICIAL_BIT_ORDER}"
     )
 
@@ -449,10 +459,10 @@ def _bloom_corpus(n=4096, c=2, a_max=2, n_vocab=50, cluster=256):
 
 
 def test_t4_bloom_superset_of_exact_and_fpr(record_property):
-    """Every doc the exact AND-of-terms predicate accepts, the official bloom accepts too
-    (no false negatives) — on the full-``N`` mask and on the partial masks over probed
-    clusters, which must equal the full mask restricted to those docs — and the false
-    positive rate at ``b_multiplier=10`` is recorded and below 5 %."""
+    """Every doc the exact AND-of-terms predicate accepts, the official bloom accepts too (no
+    false negatives), on the full-``N`` mask and on the partial masks over probed clusters
+    (which must equal the full mask restricted to those docs), and the false positive rate at
+    ``b_multiplier=10`` is recorded and below 5 %."""
     attrs, offsets, sizes, index, boff = _bloom_corpus()
     n, c, _ = attrs.shape
     qa = make_query_attrs(32, c=c, n_vocab=50, inactive_rate=0.0, seed=42)
@@ -482,11 +492,9 @@ def test_t4_bloom_superset_of_exact_and_fpr(record_property):
 
 def test_t4_not_expressions_have_no_false_positives(record_property):
     """A bloom ``NOT`` is the complement of a bloom term: false positives of the term become
-    false *negatives* of the NOT, so the guarantee flips — ``NOT c:v`` on the official bloom
-    never admits a doc that has ``v`` (⊆ the exact reverse clause) but may drop docs that
-    do not. Plan §5.2 phrases T4 as ⊇ for NOT too; that property does not hold for a
-    bloom and this test records the false-negative rate instead (a deviation for the
-    paper's table)."""
+    false *negatives* of the NOT, so the guarantee flips: ``NOT c:v`` on the official bloom
+    never admits a doc that has ``v`` (⊆ the exact reverse clause) but may drop docs that do
+    not. The false-negative rate is recorded (a deviation for the paper's table)."""
     attrs, _, _, index, boff = _bloom_corpus()
     n, c, _ = attrs.shape
     qa = make_query_attrs(32, c=c, n_vocab=50, inactive_rate=0.0, seed=44)
@@ -525,10 +533,10 @@ def test_t4_expression_mapping():
 
 @pytest.mark.parametrize("b", [1, 16])
 def test_t5_partial_masks_equal_full_mask_scores(b):
-    """``fused_kmean_ann_with_partial_masks`` (phase-2 masks only over the probed clusters,
-    the paper's co-design) returns exactly the scores of ``fused_kmean_ann`` with the
-    full-``N`` ``filtering_bit_mask`` from the same bloom search — paper §4.3 "the results
-    remain the same" — and both equal the unfiltered scores masked by the bloom."""
+    """``fused_kmean_ann_with_partial_masks`` (phase-2 masks only over the probed clusters, the
+    paper's co-design) returns exactly the scores of ``fused_kmean_ann`` with the full-``N``
+    ``filtering_bit_mask`` from the same bloom search (paper §4.3 "the results remain the
+    same"), and both equal the unfiltered scores masked by the bloom."""
     attrs, offsets, sizes, index, boff = _bloom_corpus()
     n, c, _ = attrs.shape
     n_lists, max_size = sizes.numel(), int(sizes[0].item())
@@ -556,19 +564,17 @@ def test_t5_partial_masks_equal_full_mask_scores(b):
     assert torch.equal(s_f[keep], s_n[keep]) and torch.equal(i_f[keep], i_n[keep])
 
 
-# --- T6: the layer ----------------------------------------------------------------------------
+# --- The adapted code's own gates (official-fork/CHANGES.md) ---------------------------------
 
 
 def test_c4_fork_prepared_searches_equal_upstream():
-    """META-FORK C4, gate X on the masks: the fork's prepared searches against the pinned
-    upstream's on one index and one batch of plans, over ragged clusters that start mid-column.
-    Full mask (packed and bool) ``torch.equal``; the partial triple equal up to the prepared
-    response's zero tail (cumsum and first offsets ``torch.equal``, the first ``cumsum[-1]`` words
-    ``torch.equal``, the rest 0), with one plan per distinct expression and a row → plan index;
-    the two bloom builds ``torch.equal``; every parsed plan within ``plan_capacity_bytes``."""
-    if OB != "official-fork":
-        pytest.skip("fork-only gate (META-FORK C4)")
-    require_official("official")
+    """The adapted code's prepared searches (CHANGES.md C4) against the published ones on one
+    index and one batch of plans, over ragged clusters that start mid-column. Full mask (packed
+    and bool) ``torch.equal``; the partial triple equal up to the prepared response's zero tail
+    (cumsum and first offsets ``torch.equal``, the first ``cumsum[-1]`` words ``torch.equal``,
+    the rest 0), with one plan per distinct expression and a row → plan index; the two bloom
+    builds ``torch.equal``; every parsed plan within ``plan_capacity_bytes``."""
+    _adapted_only()
     g = torch.Generator(device="cuda").manual_seed(5)
     n_lists, p, b, c = 40, 6, 16, 3
     sizes = torch.randint(0, 200, (n_lists,), generator=g, device="cuda")
@@ -616,14 +622,12 @@ def test_c4_fork_prepared_searches_equal_upstream():
 @pytest.mark.parametrize("partial", [True, False])
 @pytest.mark.parametrize("score_path", ["int32", "fp16"])
 def test_c8_fork_bloom_search_equals_upstream(partial, score_path):
-    """META-FORK C5 / C8, gate X end to end on the bloom paths: ``stfork.search`` (prep kernel,
-    payloads that evaluate the bloom in place on the partial path, the prepared full mask
-    otherwise, scorer, epilogue) against upstream's search ops + scorer + the adapter's epilogue,
-    on ragged clusters starting mid-column with repeated expressions: ids and scores
+    """``stfork.search`` end to end on the bloom paths (CHANGES.md C5 / C8: prep kernel, payloads
+    that evaluate the bloom in place on the partial path, the prepared full mask otherwise,
+    scorer, epilogue) against the published search ops + scorer + the adapter's epilogue, on
+    ragged clusters starting mid-column with repeated expressions: ids and scores
     ``torch.equal`` up to ties."""
-    if OB != "official-fork":
-        pytest.skip("fork-only gate (META-FORK C8)")
-    require_official("official")
+    _adapted_only()
     g = torch.Generator(device="cuda").manual_seed(15)
     n_lists, p, b, c, d, k = 64, 12, 16, 3, 128, 50
     sizes = torch.randint(0, 300, (n_lists,), generator=g, device="cuda")
@@ -658,14 +662,11 @@ def test_c8_fork_bloom_search_equals_upstream(partial, score_path):
 
 
 def test_c12_fork_configured_bloom_width():
-    """META-FORK C12: ``bloom_width="configured"`` builds every bundle ``m_bits`` bits per doc
-    (the index is ``N · m_bits / 8`` bytes rounded to whole bundles, as Triton's at equal
-    ``m_bits``), keeps no false negatives against the exact predicate, and
-    ``bloom_width="upstream"`` on the fork builds Meta's index ``torch.equal``; ``official``
-    refuses ``"configured"``."""
-    if OB != "official-fork":
-        pytest.skip("fork-only gate (META-FORK C12)")
-    require_official("official")
+    """``bloom_width="configured"`` (CHANGES.md C12) builds every bundle ``m_bits`` bits per doc
+    (the index is ``N · m_bits / 8`` bytes rounded to whole bundles), keeps no false negatives
+    against the exact predicate, and ``bloom_width="upstream"`` builds Meta's index
+    ``torch.equal``; ``official`` refuses ``"configured"``."""
+    _adapted_only()
     attrs, offsets, sizes, index, boff = _bloom_corpus()
     n = attrs.shape[0]
     fidx, fboff = ofb.build_bloom_index(attrs, b_multiplier=B_MULT, build_k=K_SEARCH)
@@ -687,25 +688,25 @@ def test_c12_fork_configured_bloom_width():
 
 
 def test_c13_fork_recheck_equals_exact(data, record_property):
-    """META-FORK C13: the fork's bloom with its survivors rechecked (``OfficialConfig.recheck``,
-    the fork's default) returns the exact filter's result on the same index: ids and scores
-    ``torch.equal`` up to ties to the fork's own exact path and to Triton's exact path at int32,
-    with no false positive; without the recheck the same index lets at least one through."""
-    if OB != "official-fork":
-        pytest.skip("fork-only gate (META-FORK C13)")
+    """The adapted bloom with its survivors rechecked (``OfficialConfig.recheck``, the default;
+    CHANGES.md C13) returns the exact filter's result on the same index: ids and scores
+    ``torch.equal`` up to ties to the adapted code's own exact path and to the published code's
+    exact path at int32, with no false positive; without the recheck the same index lets at
+    least one through."""
+    _adapted_only()
     cfg = {"score_path": "int32", "n_stored_hashes": HASH_K}
-    tri = _layer(data, "triton", "exact")
+    want = _layer(data, "official", "exact", official=OfficialConfig(score_path="int32"))
     exact = _layer(data, OB, "exact", official=OfficialConfig(score_path="int32"))
     rechecked = _layer(data, OB, "bloom", official=OfficialConfig(**cfg), m_bits=64)
     plain = _layer(data, OB, "bloom", official=OfficialConfig(recheck=False, **cfg), m_bits=64)
     for m in (exact, rechecked, plain):
-        _transplant(m, tri)
+        _transplant(m, want)
     q, qa = data["query"], data["q_attrs"]
-    want = tri(q, tri.prepare_queries(qa))
-    _assert_bitexact(exact(q, exact.prepare_queries(qa)), want)
-    _assert_bitexact(rechecked(q, rechecked.prepare_queries(qa)), want)
+    ref = want(q, want.prepare_queries(qa))
+    _assert_bitexact(exact(q, exact.prepare_queries(qa)), ref)
+    _assert_bitexact(rechecked(q, rechecked.prepare_queries(qa)), ref)
     ids, _ = plain(q, plain.prepare_queries(qa))
-    passing = clause_subset_match(data["attrs"][ids.clamp_min(0)], qa, tri.clause_is_reverse)
+    passing = clause_subset_match(data["attrs"][ids.clamp_min(0)], qa, want.clause_is_reverse)
     fp = int(((ids >= 0) & ~passing).sum())
     record_property("bloom_m64_false_positives_without_recheck", fp)
     assert fp > 0, "no false positive at m_bits 64: the gate cannot see the recheck"
@@ -714,13 +715,13 @@ def test_c13_fork_recheck_equals_exact(data, record_property):
 
 @pytest.mark.parametrize("d", [128, 192, 768])
 def test_c6_fork_probe_prep_equals_reference(d):
-    """META-FORK C6: the fork's prep kernel (``stfork.probe_prep``, ``search``'s first launch)
-    against our torch path, ``torch.equal`` throughout: codes and scales against
+    """The adapted code's prep kernel (``stfork.probe_prep``, ``search``'s first launch;
+    CHANGES.md C6) against our torch path, ``torch.equal`` throughout: codes and scales against
     ``quantize_int8`` on 10,000 queries (Gaussian, plus rows of zeros, of one tiny value and of
     exact ``.5`` code quotients), the probed clusters' ids / lengths / offsets against the
     gathers, and the warp sizes and three cumsums against ``round_cluster_to_warp`` + cumsum."""
     if OB != "official-fork":
-        pytest.skip("fork-only gate (META-FORK C6)")
+        pytest.skip("adapted code only")
     g = torch.Generator(device="cuda").manual_seed(9)
     q = torch.randn(10_000, d, generator=g, device="cuda")
     q[0] = 0.0
@@ -750,16 +751,14 @@ def test_c6_fork_probe_prep_equals_reference(d):
 @pytest.mark.parametrize("score_path", ["int32", "fp16"])
 @pytest.mark.parametrize("delta", [-1, 0, 1, None])
 def test_c7_fork_two_level_topk_equals_upstream(k, score_path, delta):
-    """META-FORK C7 / K fixes 2-7: ``stfork.search``'s top-k on wide rows (the chunked radix
-    select over ~34 chunks of 8192 slots; at k 1000 its candidates take a second round) against
-    upstream's scorer + the adapter's whole-width ``torch.topk``, under heavy ties (four distinct
-    code rows) and with exactly ``k + delta`` passing items a row (a full-``N`` mask; ``delta``
-    None: no filter, the unfiltered scorer with the block prefilter at k 100): scores
-    ``torch.equal``, ids up to ties (the boundary tie group included: both take ties in index
-    order), ``-1`` / ``-inf`` past the finite count."""
-    if OB != "official-fork":
-        pytest.skip("fork-only gate (META-FORK C7)")
-    require_official("official")
+    """``stfork.search``'s top-k on wide rows (CHANGES.md C7 and the select fixes: the chunked
+    radix select over ~34 chunks of 8192 slots; at k 1000 its candidates take a second round)
+    against the published scorer + the adapter's whole-width ``torch.topk``, under heavy ties
+    (four distinct code rows) and with exactly ``k + delta`` passing items a row (a full-``N``
+    mask; ``delta`` None: no filter, the unfiltered scorer with the block prefilter at k 100):
+    scores ``torch.equal``, ids up to ties (the boundary tie group included: both take ties in
+    index order), ``-1`` / ``-inf`` past the finite count."""
+    _adapted_only()
     b, d, n_lists = 64, 64, 1024
     lay = make_probe_family(b, n_lists, 600, n_lists)
     width = of.padded_rows(lay.width)
@@ -783,6 +782,9 @@ def test_c7_fork_two_level_topk_equals_upstream(k, score_path, delta):
     _assert_bitexact(out, ref)
     want = k if delta is None else min(k, k + delta)
     assert (torch.isfinite(out[1]).sum(1) == want).all()
+
+
+# --- T6: the layer ----------------------------------------------------------------------------
 
 
 N, D, B, K = 4096, 128, 16, 64
@@ -817,7 +819,7 @@ def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **
     if filter_mode == "bloom":
         args.update(
             filter_mode="bloom",
-            # Meta's own width on official; the fork's configured width is m_bits (C12)
+            # Meta's own width on official; the adapted code's configured width is m_bits.
             m_bits=kw.get("m_bits", None if backend == "official" else 512),
             k_hash=K_SEARCH,
         )
@@ -829,73 +831,80 @@ def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **
     return b.build()
 
 
-def _transplant(off: SilverTorch, tri: SilverTorch) -> None:
-    """Give the official module the Triton module's index, so a bit-exact layer comparison is
-    of the *kernels* and not of two index builds: both backends register the same CSR, so
-    every buffer is copied verbatim. (``KMeans.fit`` is reproducible run to run since
-    roadmap C4, so the two builds would agree anyway; sharing the index keeps this test
-    independent of that.)"""
+def _transplant(dst: SilverTorch, src: SilverTorch) -> None:
+    """Give ``dst`` the index of ``src`` (a module on the published backend), so a bit-exact layer
+    comparison is of the ops and not of two index builds: both backends register the same CSR,
+    so every buffer is copied verbatim (``KMeans.fit`` is reproducible, so the two builds would
+    agree anyway; sharing the index keeps the test independent of that)."""
     for name in ("centroids", "item_codes", "global_scale", "cluster_offsets",
                  "cluster_sizes", "sort_perm", "inv_perm"):  # fmt: skip
-        setattr(off, name, getattr(tri, name).clone())
-    off._global_scale_f = tri._global_scale_f
-    off._probe_width = tri._probe_width
-    if off.filter_mode == "exact":
-        off.item_clause_attrs = tri.item_clause_attrs.clone()
-        off.clause_is_reverse = tri.clause_is_reverse.clone()
-        if off.backend == "official-fork":  # the fork's own layout (CHANGES.md C14)
-            off.item_clause_attrs, off.clause_slots = of.fork_clause_attrs(off.item_clause_attrs)
+        setattr(dst, name, getattr(src, name).clone())
+    dst._global_scale_f = src._global_scale_f
+    dst._probe_width = src._probe_width
+    if dst.filter_mode == "exact":
+        dst.item_clause_attrs = src.item_clause_attrs.clone()
+        dst.clause_is_reverse = src.clause_is_reverse.clone()
+        if dst.backend == "official-fork":  # the adapted code's own layout (CHANGES.md C14)
+            dst.item_clause_attrs, dst.clause_slots = of.fork_clause_attrs(dst.item_clause_attrs)
 
 
 @pytest.mark.parametrize(
     "filter_mode,reverse", [("none", None), ("exact", None), ("exact", "mixed")]
 )
 @pytest.mark.parametrize("d", [64, 128, 192, 768])
-def test_t6_layer_int32_bitexact_vs_triton(d, filter_mode, reverse):
-    """``SilverTorch(backend="official", OfficialConfig(score_path="int32"))`` on the Triton
-    module's index: scores ``torch.equal``, ids up to ties, on the plain and the exact paths
-    (exact runs our ``clause_mask`` packed into the official scorer's bit mask — the same
-    predicate Triton fuses), at power-of-two and padded widths (192, 768: YFCC, PubMed)."""
+def test_t6_layer_int32_adapted_equals_published(d, filter_mode, reverse):
+    """``SilverTorch(backend="official-fork", OfficialConfig(score_path="int32"))`` on the
+    published module's index: scores ``torch.equal``, ids up to ties, on the plain and the exact
+    paths (the adapted code tests the clauses inside its search op; the published code runs our
+    ``clause_mask_packed``), at power-of-two and padded widths."""
+    _adapted_only()
     data = _make_data(d)
     rev = torch.tensor([True, False], device="cuda") if reverse else None
-    tri = _layer(data, "triton", filter_mode, reverse=rev)
-    off = _layer(data, OB, filter_mode, reverse=rev, official=OfficialConfig(score_path="int32"))
-    _transplant(off, tri)
+    cfg = OfficialConfig(score_path="int32")
+    pub = _layer(data, "official", filter_mode, reverse=rev, official=cfg)
+    fork = _layer(data, OB, filter_mode, reverse=rev, official=cfg)
+    _transplant(fork, pub)
     qa = data["q_attrs"] if filter_mode != "none" else None
-    _assert_bitexact(off(data["query"], _prep(off, qa)), tri(data["query"], _prep(tri, qa)))
+    _assert_bitexact(fork(data["query"], _prep(fork, qa)), pub(data["query"], _prep(pub, qa)))
     if filter_mode == "exact":
         # And with all clauses inactive: the predicate is identically true.
         qa_all = torch.full((B, C), -1, dtype=torch.long, device="cuda")
         _assert_bitexact(
-            off(data["query"], _prep(off, qa_all)), tri(data["query"], _prep(tri, qa_all))
+            fork(data["query"], _prep(fork, qa_all)), pub(data["query"], _prep(pub, qa_all))
         )
 
 
 @pytest.mark.parametrize("filter_mode", ["none", "exact"])
-def test_t6_layer_fp16_default_ranks_like_triton(data, filter_mode):
-    """The default (fp16, timed) path against Triton on the same index: shapes and dtypes
-    as every backend, ``jaccard@K ≥ 0.99`` on the id sets."""
-    tri = _layer(data, "triton", filter_mode)
+def test_t6_layer_fp16_default_ranks_like_int32(data, filter_mode):
+    """The default (fp16, timed) path against the int32 path on the same index: shapes and dtypes
+    as every backend, ``jaccard@K ≥ 0.99`` on the id sets; on the adapted code the fp16 layer
+    also equals the published fp16 layer bit for bit."""
+    exact = _layer(data, OB, filter_mode, official=OfficialConfig(score_path="int32"))
     off = _layer(data, OB, filter_mode)
     assert off.official.score_path == "fp16"
-    _transplant(off, tri)
+    _transplant(off, exact)
     qa = data["q_attrs"] if filter_mode != "none" else None
     ids_o, sc_o = off(data["query"], _prep(off, qa))
-    ids_t, sc_t = tri(data["query"], _prep(tri, qa))
+    ids_t, sc_t = exact(data["query"], _prep(exact, qa))
     assert ids_o.shape == ids_t.shape == (B, K) and ids_o.dtype == torch.long
     assert sc_o.dtype == torch.float32
     jac = _jaccard(ids_o, ids_t)
-    print(f"T6 fp16 {filter_mode}: jaccard@{K} vs triton = {jac:.4f}")
+    print(f"T6 fp16 {filter_mode}: jaccard@{K} vs int32 = {jac:.4f}")
     assert jac >= 0.99, jac
+    if OB == "official-fork":
+        require_official("official")
+        pub = _layer(data, "official", filter_mode)
+        _transplant(pub, exact)
+        _assert_bitexact((ids_o, sc_o), pub(data["query"], _prep(pub, qa)))
 
 
 @pytest.mark.parametrize("bloom_path", ["partial", "full"])
 def test_t6_layer_bloom(data, bloom_path, record_property):
-    """Official bloom through the layer (their hash, ``m_bits=None``): the result is the
-    exact-mode Triton result on the same index up to bloom false positives — every
-    returned id that passes the exact predicate is in Triton's exact top-K (or tied at its
-    boundary), and the two bloom paths (partial vs full mask) agree bit for bit. The fork has
-    one path and refuses ``bloom_path="full"``."""
+    """The official bloom through the layer (Meta's hash, ``m_bits=None``): the result is the
+    exact-mode result on the same index up to bloom false positives: every returned id that
+    passes the exact predicate is in the exact top-K (or tied at its boundary), and the two
+    bloom paths (partial vs full mask) agree bit for bit. The adapted code has one path and
+    refuses ``bloom_path="full"``."""
     if OB == "official-fork" and bloom_path == "full":
         with pytest.raises(ValueError, match="does not apply to backend='official-fork'"):
             _layer(data, OB, "bloom", official=OfficialConfig(bloom_path="full"))
@@ -903,15 +912,15 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
     cfg = OfficialConfig(
         score_path="int32", bloom_path=bloom_path, b_multiplier=B_MULT, n_stored_hashes=HASH_K
     )
-    tri = _layer(data, "triton", "exact")
+    exact = _layer(data, OB, "exact", official=OfficialConfig(score_path="int32"))
     off = _layer(data, OB, "bloom", official=cfg)
     assert off.m_bits == (0 if OB == "official" else 512) and off.k_hash == K_SEARCH
     assert off.bloom_index.dtype == torch.int64 and off.bundle_b_offsets.numel() == N // 2048 + 1
-    _transplant(off, tri)
+    _transplant(off, exact)
     ids_o, sc_o = off(data["query"], off.prepare_queries(data["q_attrs"]))
-    ids_t, sc_t = tri(data["query"], tri.prepare_queries(data["q_attrs"]))
-    exact = clause_subset_match(
-        data["attrs"][ids_o.clamp_min(0)], data["q_attrs"], tri.clause_is_reverse
+    ids_t, sc_t = exact(data["query"], exact.prepare_queries(data["q_attrs"]))
+    passing = clause_subset_match(
+        data["attrs"][ids_o.clamp_min(0)], data["q_attrs"], exact.clause_is_reverse
     ) & (ids_o >= 0)
     fp = 0
     for b in range(B):
@@ -922,17 +931,16 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
             i = int(ids_o[b, j].item())
             if i < 0:
                 continue
-            if not bool(exact[b, j].item()):
+            if not bool(passing[b, j].item()):
                 fp += 1
                 continue
             assert i in t_set or float(sc_o[b, j].item()) <= kth + 1e-6, (
                 f"row {b}: exact-passing id {i} (score {sc_o[b, j].item()}) missing from "
-                f"Triton's exact top-K (k-th score {kth})"
+                f"the exact top-K (k-th score {kth})"
             )
     record_property("bloom_topk_false_positives", fp)
     print(f"T6 bloom[{bloom_path}]: {fp} bloom false positives among {B * K} returned slots")
     if bloom_path == "full":
-        # The partial path: same result.
         off_p = _layer(
             data,
             OB,
@@ -941,14 +949,14 @@ def test_t6_layer_bloom(data, bloom_path, record_property):
                 score_path="int32", b_multiplier=B_MULT, n_stored_hashes=HASH_K
             ),
         )
-        _transplant(off_p, tri)
+        _transplant(off_p, exact)
         _assert_bitexact(
             off_p(data["query"], off_p.prepare_queries(data["q_attrs"])), (ids_o, sc_o)
         )
 
 
 def test_t6_layer_contract(data):
-    """Buffers, candidates path, attribute-less bloom index, state-dict round trip."""
+    """Buffers, the candidates path, an attribute-less bloom index, the state-dict round trip."""
     off = _layer(data, OB, "none")
     assert list(off.state_dict()) == [
         "centroids",
@@ -959,20 +967,14 @@ def test_t6_layer_contract(data):
         "sort_perm",
         "inv_perm",
     ]
-    assert not hasattr(off, "padded_cluster_items")
     assert torch.equal(off.item_codes, quantize_int8_global(data["embs"])[0][off.sort_perm])
-    # Candidate re-rank maps original ids through inv_perm.
+    # The candidate re-rank maps original ids through inv_perm.
     cand = torch.tensor([[10, 20, 30]] * B, device="cuda")
     ids, sc = off(data["query"], candidate_ids=cand)
     assert set(ids.flatten().tolist()) <= {10, 20, 30}
-    tri = _layer(data, "triton", "none")
-    _transplant(off, tri)
-    ids_t, sc_t = tri(data["query"], candidate_ids=cand)
-    ids_o, sc_o = off(data["query"], candidate_ids=cand)
-    assert torch.equal(sc_o, sc_t) and torch.equal(ids_o, ids_t)
     # State-dict round trip into a freshly registered module of the same shape (the CSR
-    # layout's buffer shapes do not depend on the k-means outcome); the load hook
-    # re-derives the cached scalars, nothing is patched by hand.
+    # layout's buffer shapes do not depend on the k-means outcome); the load hook re-derives the
+    # cached scalars.
     twin = _layer(data, OB, "none")
     twin.load_state_dict(off.state_dict())
     assert twin._probe_width == off._probe_width
@@ -980,7 +982,7 @@ def test_t6_layer_contract(data):
     a, b = off(data["query"]), twin(data["query"])
     assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])
     # Bloom configured without attributes: plain queries work, attribute queries raise.
-    fork_width = {} if OB == "official" else {"m_bits": 512}  # the fork's configured width
+    fork_width = {} if OB == "official" else {"m_bits": 512}
     bare = SilverTorch(
         k=K,
         n_lists=N_LISTS,
@@ -1012,11 +1014,11 @@ def test_t6_layer_contract(data):
 
 
 def test_t7_compile_refused(data):
-    """The official backend is eager-only (plan D7): ``module.compile()`` raises, a
-    ``fullgraph`` ``torch.compile`` of the forward raises (our error or dynamo's
-    ``Unsupported``, both ``RuntimeError``s), and a default-mode ``torch.compile`` either
-    raises or falls back to eager with identical results — never a silently different
-    path. The fork (META-FORK C4) compiles ``fullgraph`` to eager's exact result instead."""
+    """The published backend is eager-only: ``module.compile()`` raises, a ``fullgraph``
+    ``torch.compile`` of the forward raises (our error or dynamo's ``Unsupported``, both
+    ``RuntimeError``s), and a default-mode ``torch.compile`` either raises or falls back to eager
+    with identical results, never a silently different path. The adapted code compiles
+    ``fullgraph`` to eager's exact result instead."""
     off = _layer(data, OB, "none")
     eager_ids, eager_scores = off(data["query"])
     if OB == "official-fork":
@@ -1045,12 +1047,11 @@ def test_t7_compile_refused(data):
 
 
 def _count_syncs(fn) -> int:
-    """Host syncs ``fn`` performs under ``torch.cuda.set_sync_debug_mode("warn")``. Two
-    disjoint instruments (plan §13.2): a sync inside a C++ custom op is reported by c10's
-    own warning handler as a ``warn_or_error_on_sync`` line on **fd 2** and never becomes a
-    Python warning; a sync from Python-dispatched aten (``.item()``, ``nonzero``) surfaces
-    as a Python warning and not on fd 2. Both are counted; the "prototype feature" notice
-    the mode prints once is not a sync."""
+    """Host syncs ``fn`` performs under ``torch.cuda.set_sync_debug_mode("warn")``. Two disjoint
+    instruments: a sync inside a C++ custom op is reported by c10's own warning handler as a
+    ``warn_or_error_on_sync`` line on **fd 2** and never becomes a Python warning; a sync from
+    Python-dispatched aten (``.item()``, ``nonzero``) surfaces as a Python warning and not on fd
+    2. Both are counted; the "prototype feature" notice the mode prints once is not a sync."""
     torch.cuda.synchronize()
     with tempfile.TemporaryFile(mode="w+") as tf, warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -1077,12 +1078,10 @@ def _count_syncs(fn) -> int:
 
 
 def test_t7_sync_count_per_op(record_property):
-    """Records the host syncs each official op performs under
-    ``torch.cuda.set_sync_debug_mode("warn")`` — the fact behind D7 (plan §3 expects 2 for
-    ``fused_kmean_ann``, ≥ 1 for the partial-response search and the partial-mask scorer).
-    Asserted only to be > 0 for the scorer, which is what makes the backend uncapturable;
-    the exact numbers are A3's to confirm and are printed here. On the fork both scorers sync
-    0 times (META-FORK C3); its upstream-shaped searches are upstream's and are only recorded."""
+    """The host syncs each official op performs under ``torch.cuda.set_sync_debug_mode("warn")``,
+    recorded; asserted ``> 0`` for the published scorer, which is what makes that backend
+    uncapturable. On the adapted code both scorers sync 0 times; its upstream-shaped searches
+    are the published ones and are only recorded."""
     attrs, offsets, sizes, index, boff = _bloom_corpus()
     n, c, _ = attrs.shape
     codes, _ = quantize_int8_global(make_index(n, 64))
@@ -1119,20 +1118,18 @@ def test_t7_sync_count_per_op(record_property):
     }
     for name, n_sync in counts.items():
         record_property(f"syncs_{name}", n_sync)
-        print(f"T7 syncs per call — {name}: {n_sync}")
+        print(f"T7 syncs per call: {name}: {n_sync}")
     if OB == "official-fork":
         assert counts["fused_kmean_ann"] == counts["fused_kmean_ann_with_partial_masks"] == 0
         return
-    assert counts["fused_kmean_ann"] > 0, (
-        "plan §3: the scorer syncs the host (repeat_interleave + .item())"
-    )
+    assert counts["fused_kmean_ann"] > 0, "the published scorer syncs the host"
 
 
 def test_t7_layer_forward_sync_count(data, record_property):
-    """Host syncs of one ``SilverTorch(backend="official")`` forward per filter path, the filter
-    prepared beforehand (``prepare_queries``): the numbers behind plan D7's "eager only". Our
-    part (phase 1, the packed exact mask, the epilogue) adds none, so every count is Meta's ops'
-    (kernels.md § official). The fork's forward syncs 0 times on every path (META-FORK C3 / C4)."""
+    """Host syncs of one ``SilverTorch`` forward per filter path, the filter prepared beforehand
+    (``prepare_queries``): our part (phase 1, the packed exact mask, the epilogue) adds none, so
+    every count on the published backend is Meta's ops'; the adapted code's forward syncs 0
+    times on every path."""
     cfg = {"b_multiplier": B_MULT, "n_stored_hashes": HASH_K}
     modules = {
         "none": _layer(data, OB, "none"),
@@ -1150,5 +1147,5 @@ def test_t7_layer_forward_sync_count(data, record_property):
         module(data["query"], prepared)  # warm-up: first-call lazy work is not the steady state
         n_sync = _count_syncs(lambda m=module, p=prepared: m(data["query"], p))
         record_property(f"forward_syncs_{name}", n_sync)
-        print(f"T7 forward syncs — {name}: {n_sync}")
+        print(f"T7 forward syncs: {name}: {n_sync}")
         assert n_sync == 0 if OB == "official-fork" else n_sync > 0

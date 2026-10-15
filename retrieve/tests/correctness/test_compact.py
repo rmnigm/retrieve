@@ -30,7 +30,7 @@ def test_shape_and_counts_match_mask_sum():
     assert counts.dtype == torch.int64
     assert torch.equal(counts, mask.sum(dim=1))
 
-    # Full-width return: matches the bloom_compact / clause_compact contract.
+    # Full-width return: matches the clause_compact contract.
     assert ids.shape == (b, n)
     assert ids.dtype == torch.int64
 

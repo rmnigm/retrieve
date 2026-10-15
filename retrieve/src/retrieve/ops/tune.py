@@ -1,9 +1,8 @@
 """Offline tuner for the Triton kernels in ``retrieve.ops.triton``: run once on the target arch and
-paste the printed ``DEFAULT_CONFIG = ...`` line (a ``CONFIGS`` entry for the probe scorers, which
-ship one tile per ``D_PAD`` bound) into the kernel file (or pass it via the wrapper's
+paste the printed ``DEFAULT_CONFIG = ...`` line into the kernel file (or pass it via the wrapper's
 ``config=``). Each kernel is one ``KernelTuneSpec`` in ``KERNELS``, from which its click
 subcommand is generated (see ``--help``); ``--regime`` overrides the built-in eval shapes for the
-regime-swept kernels."""
+regime-swept kernels (kernels.md § Autotune separation)."""
 
 from __future__ import annotations
 
@@ -21,12 +20,6 @@ import torch
 import triton
 import triton.testing as ttesting
 
-from retrieve.ops.triton._host import width_tiles
-from retrieve.ops.triton.bloom_compact import (
-    DEFAULT_CONFIG as BLOOM_COMPACT_DEFAULT,
-    BloomCompactConfig,
-    _bloom_compact_impl,
-)
 from retrieve.ops.triton.clause_compact import (
     DEFAULT_CONFIG as CLAUSE_COMPACT_DEFAULT,
     ClauseCompactConfig,
@@ -36,16 +29,6 @@ from retrieve.ops.triton.clause_mask import (
     DEFAULT_CONFIG as CLAUSE_MASK_DEFAULT,
     ClauseMaskConfig,
     _clause_mask_impl,
-)
-from retrieve.ops.triton.codesigned_probe_score import (
-    CONFIGS as CODESIGNED_PROBE_SCORE_CONFIGS,
-    CodesignedProbeScoreConfig,
-    _codesigned_probe_score_impl,
-)
-from retrieve.ops.triton.codesigned_probe_score_exact import (
-    CONFIGS as CODESIGNED_PROBE_SCORE_EXACT_CONFIGS,
-    CodesignedProbeScoreExactConfig,
-    _codesigned_probe_score_exact_impl,
 )
 from retrieve.ops.triton.fused_masked_knn_topk import (
     _P_BUCKETS,
@@ -60,9 +43,9 @@ from retrieve.ops.triton.oporp_1bit_match_topk import (
     _oporp_1bit_match_topk_impl,
 )
 
-# The selection rule (kernels.md § Autotune separation): the shipped default stays unless a
-# candidate is faster by more than NOISE_BAND (geometric mean over regimes, the A/A spread of an
-# interleaved rerun) and slower by at most WORST_CAP in every single regime.
+# The selection rule: the shipped default stays unless a candidate is faster by more than
+# NOISE_BAND (geometric mean over regimes, the A/A spread of an interleaved rerun) and slower by
+# at most WORST_CAP in every single regime.
 NOISE_BAND = 0.03
 WORST_CAP = 0.05
 # A B = 1 regime whose own winner beats the chosen config by this much is flagged: the case for
@@ -71,41 +54,20 @@ B1_GAP = 0.10
 
 _FMKT_GRID = tuple((bn, nw) for bn in (32, 64, 128, 256) for nw in (4, 8))
 _OPORP_GRID = tuple((bn, nw) for bn in (64, 128, 256, 512) for nw in (4, 8))
-_CPS_GRID = tuple((bp, nw) for bp in (32, 64, 128, 256) for nw in (4, 8))
-# Past D_PAD 256 the probe scorers loop over D (kernels.md § SilverTorch kernels, "The D loop"):
-# (block_p, num_warps, num_stages, block_d, skip), the tile skip kept on.
-_CPS_WIDE_GRID = tuple(
-    (bp, nw, ns, bd, True)
-    for bp in (64, 128, 256)
-    for nw in (4, 8)
-    for ns in (1, 2, 3)
-    for bd in (64, 128, 256)
-)
-# Filter-index kernels sweep a wider BLOCK_N range since the inner body varies and the optimum can
-# land far from 256.
+# The filter kernels sweep a wider BLOCK_N range: the inner body varies and the optimum can land
+# far from 256.
 _FILTER_GRID = tuple((bn, nw) for bn in (128, 256, 512, 1024) for nw in (2, 4, 8))
 
-# Default filter regimes mirror real-eval shapes (goodreads N≈800K C=4, arxiv N≈3M C=5, A_MAX=4;
-# bloom W=16 from m_bits=1024). End-users override via --regime.
+# The default clause regimes mirror real-eval shapes (goodreads N≈800K C=4, arxiv N≈3M C=5,
+# A_MAX=4); callers override via --regime.
 _DEFAULT_CLAUSE_REGIMES = (
     # (N, B, C, A_MAX)
-    (797_085, 1, 4, 4),  # goodreads, single-query
-    (797_085, 16, 4, 4),  # goodreads, batched
-    (2_988_997, 1, 5, 4),  # arxiv-retrieval, single-query
-    (2_988_997, 16, 5, 4),  # arxiv-retrieval, batched
-    (15_000_001, 16, 5, 4),  # arxiv-synth-15m, batched (DRAM-streaming extreme)
+    (797_085, 1, 4, 4),
+    (797_085, 16, 4, 4),
+    (2_988_997, 1, 5, 4),
+    (2_988_997, 16, 5, 4),
+    (15_000_001, 16, 5, 4),
 )
-_DEFAULT_BLOOM_REGIMES = (
-    # (N, B, W) — W=16 from m_bits=1024 default
-    (797_085, 1, 16),
-    (797_085, 16, 16),
-    (2_988_997, 1, 16),
-    (2_988_997, 16, 16),
-    (15_000_001, 16, 16),  # arxiv-synth-15m, batched (DRAM-streaming extreme)
-)
-
-# Default CPS P-grid spanning typical IVF sizings; hard-coded since the kernel isn't bucketed on P.
-_DEFAULT_CPS_P_GRID = (1024, 8192, 65536)
 
 
 def _arch_str(device: torch.device) -> str:
@@ -114,14 +76,13 @@ def _arch_str(device: torch.device) -> str:
 
 
 def _bench(fn) -> float:
-    """Median ms for ``fn`` under do_bench — long enough to settle the JIT cache, short enough to
-    keep the sweep quick."""
+    """Median ms for ``fn`` under do_bench."""
     median, _, _ = ttesting.do_bench(fn, quantiles=[0.5, 0.2, 0.8], rep=500, warmup=100)
     return float(median)
 
 
 def _parse_regime(spec: str, arity: int) -> tuple[int, ...]:
-    """Parse a ``--regime N,B,C,A_MAX`` (or ``N,B,W``) flag value."""
+    """Parse a ``--regime N,B,C,A_MAX`` flag value."""
     parts = spec.split(",")
     if len(parts) != arity:
         raise click.BadParameter(
@@ -140,7 +101,7 @@ def _rand_bits(shape: tuple[int, ...], dev: torch.device) -> torch.Tensor:
 
 def _fmkt_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     p, d, b = regime
-    n = max(p * 2, 1 << 16)  # need N >= P; generous N keeps the gather realistic
+    n = max(p * 2, 1 << 16)  # N >= P; a generous N keeps the gather realistic
     torch.manual_seed(0)
     return {
         "query": torch.randn(b, d, device=dev),
@@ -172,37 +133,9 @@ def _oporp_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
     }
 
 
-def _probe_layout(dev: torch.device, n: int, p: int, b: int) -> dict[str, Any]:
-    """A synthetic CSR probe: equal 256-item clusters, ``p // 256`` distinct probes per row, so
-    every row fills the compact width ``p`` exactly."""
-    n_lists, n_probe = n // 256, max(p // 256, 1)
-    return {
-        "probe_ids": torch.stack([torch.randperm(n_lists, device=dev)[:n_probe] for _ in range(b)]),
-        "cluster_offsets": torch.arange(0, n_lists * 256 + 1, 256, device=dev),
-        "sort_perm": torch.randperm(n, device=dev),
-        "width": n_probe * 256,
-    }
-
-
-def _cps_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
-    p, has_qb, d, b, w = regime
-    n = max(p * 4, 1 << 16)
-    torch.manual_seed(0)
-    return dict(
-        query=torch.randn(b, d, device=dev),
-        item_codes=torch.randint(-128, 128, (n, d), dtype=torch.int8, device=dev),
-        global_scale=0.01,
-        k=min(64, p),
-        # ~C·k_hash = 10 set query bits over a 64·W-bit signature, the shipped bloom shape.
-        query_bit_positions=torch.randint(0, 64 * w, (b, 10), device=dev) if has_qb else None,
-        bloom_transposed=_rand_bits((64 * w, n // 64), dev) if has_qb else None,
-        **_probe_layout(dev, n, p, b),
-    )
-
-
 def _clause_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
-    """Build realistic (item_attrs, is_reverse, query_attrs) on ``dev`` — small vocab so random
-    queries get a non-trivial pass/fail mix."""
+    """``(item_attrs, is_reverse, query_attrs)`` on ``dev``; a small vocab so random queries get
+    a non-trivial pass/fail mix."""
     n, b, c, a_max = regime
     torch.manual_seed(0)
     n_vocab = 40
@@ -215,29 +148,9 @@ def _clause_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]
     }
 
 
-def _cpse_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
-    n, b, c, a_max, d = regime
-    inputs = _clause_inputs(dev, (n, b, c, a_max))
-    # The width is deployment-specific; the middle of the CPS P-grid (capped by N) stands in.
-    inputs.update(
-        query=torch.randn(b, d, device=dev),
-        item_codes=torch.randint(-128, 128, (n, d), dtype=torch.int8, device=dev),
-        global_scale=0.01,
-        k=64,
-        **_probe_layout(dev, n, min(n, 8192), b),
-    )
-    return inputs
-
-
-def _bloom_inputs(dev: torch.device, regime: tuple[int, ...]) -> dict[str, Any]:
-    n, b, w = regime
-    torch.manual_seed(0)
-    return {"qb": _rand_bits((b, w), dev), "sigs": _rand_bits((n, w), dev)}
-
-
 @dataclass(frozen=True)
 class KernelTuneSpec:
-    """Everything the generic ``_sweep``/``_print``/CLI machinery needs to tune one kernel.
+    """Everything the generic ``_sweep`` / ``_print`` / CLI machinery needs to tune one kernel.
 
     A regime is one benchmark shape (a tuple of ints named by ``regime_labels``). Regime-swept
     kernels (``regime_arity`` set) expose a repeatable ``--regime`` flag over ``default_regimes``;
@@ -245,55 +158,40 @@ class KernelTuneSpec:
     ``expand_regimes`` (crossing the flags with the module's bucket/P axes)."""
 
     name: str  # click subcommand, e.g. "clause-mask"
-    config_cls: type  # ClauseMaskConfig, ... — first dataclass field is the block size
+    config_cls: type  # ClauseMaskConfig, ...: the first dataclass field is the block size
     # Candidate configs as positional (block, num_warps) field values, splatted into config_cls.
     grid: tuple[tuple[int, ...], ...]
     regime_labels: tuple[str, ...]  # names for the regime fields, e.g. ("N", "B", "C", "A_MAX")
     make_inputs: Callable[[torch.device, tuple[int, ...]], dict[str, Any]]  # regime → kwargs
     run: Callable[[dict[str, Any], Any], Any]  # (inputs, config) → one _impl call
     paste_path: str  # file the DEFAULT_CONFIG line goes into
-    # regime → the kernel module's shipped config there, the incumbent of the rule
-    current: Callable[[tuple[int, ...]], Any]
+    current: Any  # the kernel module's shipped config, the incumbent of the rule
     smoke_regime: tuple[int, ...]  # one tiny regime for the CI smoke test
     # Regime-swept kernels (--regime):
     default_regimes: tuple[tuple[int, ...], ...] = ()
-    regime_arity: int | None = None  # 4 = N,B,C,A_MAX; 3 = N,B,W; None = dimension flags instead
+    regime_arity: int | None = None  # 4 = N,B,C,A_MAX; None = dimension flags instead
     regime_fmt: str = ""  # --regime metavar for --help
     # Dimension-swept kernels (--d/--b/--w):
     dims: tuple[tuple[str, int, str], ...] = ()  # (flag, default, help)
     expand_regimes: Callable[..., tuple[tuple[int, ...], ...]] | None = None
-    # The grid at regimes whose width pads past 256 (the probe scorers' D loop); () = ``grid``.
-    wide_grid: tuple[tuple[int, ...], ...] = ()
-    # The regime field that picks a per-width CONFIGS entry (the probe scorers' "D"); None for
-    # kernels with one DEFAULT_CONFIG.
-    width_label: str | None = None
 
 
 def _config_fields(spec: KernelTuneSpec, entry: tuple[int, ...]) -> tuple[str, ...]:
-    """Dataclass field names for a grid entry, positionally — the grid may be shorter than
-    the config (the Triton kernels never sweep ``num_stages``)."""
+    """Dataclass field names for a grid entry, positionally; the grid may be shorter than the
+    config (the kernels never sweep ``num_stages``)."""
     return tuple(f.name for f in fields(spec.config_cls))[: len(entry)]
 
 
 def _fmt_entry(spec: KernelTuneSpec, entry: tuple[int, ...]) -> str:
-    """One grid entry as ``block_p=256  num_warps=4``, padded so the sweep log
-    stays column-aligned across block sizes."""
+    """One grid entry as ``block_n=256  num_warps=4``, padded so the sweep log stays aligned."""
     return " ".join(
         f"{name}={v:<4}" for name, v in zip(_config_fields(spec, entry), entry, strict=True)
     ).rstrip()
 
 
-def _grid(spec: KernelTuneSpec, regime: tuple[int, ...]) -> tuple[tuple[int, ...], ...]:
-    """The candidate grid at ``regime``: ``wide_grid`` past ``D_PAD`` 256, else ``grid``."""
-    if spec.wide_grid and spec.width_label is not None:
-        d = regime[spec.regime_labels.index(spec.width_label)]
-        return spec.wide_grid if triton.next_power_of_2(d) > 256 else spec.grid
-    return spec.grid
-
-
-def _entry(spec: KernelTuneSpec, config: Any, grid: tuple[tuple[int, ...], ...]) -> tuple[int, ...]:
-    """A config as a grid entry: its first ``len(grid entry)`` fields."""
-    return tuple(getattr(config, n) for n in _config_fields(spec, grid[0]))
+def _entry(spec: KernelTuneSpec) -> tuple[int, ...]:
+    """The shipped config as a grid entry: its first ``len(grid entry)`` fields."""
+    return tuple(getattr(spec.current, n) for n in _config_fields(spec, spec.grid[0]))
 
 
 def _sm_mhz() -> int | None:
@@ -339,13 +237,9 @@ def _choose(
 
 def _sweep(spec: KernelTuneSpec, dev: torch.device, regimes: tuple[tuple[int, ...], ...]) -> dict:
     """Time every grid entry (plus the shipped default, if the grid lacks it) on every regime,
-    then pick with ``_choose``. Tuning is offline and out-of-kernel on purpose; see
-    docs/system/kernels.md § Autotune separation."""
-    incumbents = {(_entry(spec, spec.current(r), _grid(spec, r)), _grid(spec, r)) for r in regimes}
-    if len(incumbents) != 1:
-        raise click.ClickException("the regimes span several shipped tiles: tune one D at a time")
-    ((current, grid),) = incumbents
-    grid = grid if current in grid else (*grid, current)
+    then pick with ``_choose``."""
+    current = _entry(spec)
+    grid = spec.grid if current in spec.grid else (*spec.grid, current)
     per_regime: dict[str, dict] = {}
     timings: dict[str, dict[tuple[int, ...], float]] = {}
     sm_mhz: list[int | None] = []
@@ -356,9 +250,7 @@ def _sweep(spec: KernelTuneSpec, dev: torch.device, regimes: tuple[tuple[int, ..
         results: list[dict] = []
         for entry in grid:
             cfg = spec.config_cls(*entry)
-            # Warm the JIT cache before measuring; do_bench's warmup wouldn't cover a cold compile
-            # of this config.
-            for _ in range(3):
+            for _ in range(3):  # a cold compile of this config is not do_bench's warmup's job
                 spec.run(inputs, cfg)
             torch.cuda.synchronize()
             ms = _bench(partial(spec.run, inputs, cfg))
@@ -378,14 +270,8 @@ def _sweep(spec: KernelTuneSpec, dev: torch.device, regimes: tuple[tuple[int, ..
         for k in timings
         if "B=1," in k + "," and timings[k][pick] / per_regime[k]["winner_ms"] - 1 >= B1_GAP
     }
-    width = (
-        None
-        if spec.width_label is None
-        else triton.next_power_of_2(regimes[0][spec.regime_labels.index(spec.width_label)])
-    )
     return {
         "per_regime": per_regime,
-        "d_pad": width,
         "current": current,
         "default": pick,
         "rule": {"noise_band": NOISE_BAND, "worst_cap": WORST_CAP, **rule},
@@ -405,18 +291,13 @@ def _print(spec: KernelTuneSpec, arch: str, result: dict) -> None:
     args = ", ".join(
         f"{name}={v}" for name, v in zip(_config_fields(spec, entry), entry, strict=True)
     )
-    cls_name = spec.config_cls.__name__
     click.echo("")
     if entry == result["current"]:
         click.echo(f"# Keep the shipped default: no candidate beats it by > {NOISE_BAND:.0%}")
         click.echo(f"# within a {WORST_CAP:.0%} worst-regime cap.")
     click.echo(f"# Paste into {spec.paste_path}")
     click.echo(f"# Tuned on {arch}; per-regime details in JSON output if --json-out was used.")
-    if result["d_pad"] is None:
-        click.echo(f"DEFAULT_CONFIG = {cls_name}({args})")
-    else:
-        click.echo(f"# The CONFIGS entry whose bound covers D_PAD = {result['d_pad']}:")
-        click.echo(f"{cls_name}({args})")
+    click.echo(f"DEFAULT_CONFIG = {spec.config_cls.__name__}({args})")
     for key, gap in result["b1_gaps_over_threshold"].items():
         click.echo(f"# [{key}] its own winner is {gap:.0%} faster: a batch-1 config may pay.")
 
@@ -430,7 +311,7 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_fmkt_inputs,
         run=lambda inputs, config: _fused_masked_knn_topk_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/fused_masked_knn_topk.py",
-        current=lambda _: FUSED_MASKED_KNN_TOPK_DEFAULT,
+        current=FUSED_MASKED_KNN_TOPK_DEFAULT,
         smoke_regime=(256, 64, 2),
         dims=(("d", 128, "Embedding dimension."), ("b", 16, "Batch size.")),
         expand_regimes=lambda d, b: tuple((p, d, b) for p in _P_BUCKETS),
@@ -443,50 +324,10 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_oporp_inputs,
         run=lambda inputs, config: _oporp_1bit_match_topk_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/oporp_1bit_match_topk.py",
-        current=lambda _: OPORP_1BIT_MATCH_TOPK_DEFAULT,
+        current=OPORP_1BIT_MATCH_TOPK_DEFAULT,
         smoke_regime=(4096, 1, 2, 2),
         dims=(("w", 2, "int64 words per bit-vector (D=64*W)."), ("b", 16, "Batch size.")),
         expand_regimes=lambda w, b: tuple((n, hi, w, b) for n in _N_BUCKETS for hi in (0, 1)),
-    ),
-    KernelTuneSpec(
-        name="codesigned-probe-score",
-        config_cls=CodesignedProbeScoreConfig,
-        grid=_CPS_GRID,
-        wide_grid=_CPS_WIDE_GRID,
-        regime_labels=("P", "HAS_QB", "D", "B", "W"),
-        make_inputs=_cps_inputs,
-        run=lambda inputs, config: _codesigned_probe_score_impl(**inputs, config=config),
-        paste_path="retrieve/src/retrieve/ops/triton/codesigned_probe_score.py",
-        current=lambda r: width_tiles(CODESIGNED_PROBE_SCORE_CONFIGS, r[2])[0],
-        width_label="D",
-        smoke_regime=(1024, 1, 64, 2, 4),
-        dims=(
-            ("d", 128, "Embedding dimension."),
-            ("b", 16, "Batch size."),
-            ("w", 4, "int64 words per bloom signature."),
-        ),
-        expand_regimes=lambda d, b, w: tuple(
-            (p, hq, d, b, w) for p in _DEFAULT_CPS_P_GRID for hq in (0, 1)
-        ),
-    ),
-    # (N, B, C, A_MAX) defaults mirror the shipped clause regimes at D = 128; the exact kernel's
-    # optimum also tracks P = n_probe × max_cluster_size (approximated inside _cpse_inputs), so
-    # re-tune with --regime per deployment rather than trusting these defaults.
-    KernelTuneSpec(
-        name="codesigned-probe-score-exact",
-        config_cls=CodesignedProbeScoreExactConfig,
-        grid=_CPS_GRID,
-        wide_grid=_CPS_WIDE_GRID,
-        regime_labels=("N", "B", "C", "A_MAX", "D"),
-        make_inputs=_cpse_inputs,
-        run=lambda inputs, config: _codesigned_probe_score_exact_impl(**inputs, config=config),
-        paste_path="retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py",
-        current=lambda r: width_tiles(CODESIGNED_PROBE_SCORE_EXACT_CONFIGS, r[4])[0],
-        smoke_regime=(4096, 2, 2, 2, 64),
-        default_regimes=tuple((*r, 128) for r in _DEFAULT_CLAUSE_REGIMES),
-        regime_arity=5,
-        regime_fmt="N,B,C,A_MAX,D",
-        width_label="D",
     ),
     KernelTuneSpec(
         name="clause-mask",
@@ -496,7 +337,7 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_clause_inputs,
         run=lambda inputs, config: _clause_mask_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/clause_mask.py",
-        current=lambda _: CLAUSE_MASK_DEFAULT,
+        current=CLAUSE_MASK_DEFAULT,
         smoke_regime=(4096, 2, 2, 2),
         default_regimes=_DEFAULT_CLAUSE_REGIMES,
         regime_arity=4,
@@ -510,25 +351,11 @@ KERNELS: tuple[KernelTuneSpec, ...] = (
         make_inputs=_clause_inputs,
         run=lambda inputs, config: _clause_compact_impl(**inputs, config=config),
         paste_path="retrieve/src/retrieve/ops/triton/clause_compact.py",
-        current=lambda _: CLAUSE_COMPACT_DEFAULT,
+        current=CLAUSE_COMPACT_DEFAULT,
         smoke_regime=(4096, 2, 2, 2),
         default_regimes=_DEFAULT_CLAUSE_REGIMES,
         regime_arity=4,
         regime_fmt="N,B,C,A_MAX",
-    ),
-    KernelTuneSpec(
-        name="bloom-compact",
-        config_cls=BloomCompactConfig,
-        grid=_FILTER_GRID,
-        regime_labels=("N", "B", "W"),
-        make_inputs=_bloom_inputs,
-        run=lambda inputs, config: _bloom_compact_impl(**inputs, config=config),
-        paste_path="retrieve/src/retrieve/ops/triton/bloom_compact.py",
-        current=lambda _: BLOOM_COMPACT_DEFAULT,
-        smoke_regime=(4096, 2, 4),
-        default_regimes=_DEFAULT_BLOOM_REGIMES,
-        regime_arity=3,
-        regime_fmt="N,B,W",
     ),
 )
 

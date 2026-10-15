@@ -13,23 +13,23 @@ A filter evaluates a conjunction of **clauses** (attribute keys) against each it
   `-1`-padded. `C` is the number of clauses.
 - `query_clause_attrs: [B, C]` int64 — one queried value per clause per query; `-1` means the
   clause is **inactive** (always passes).
-- `clause_is_reverse: [C]` bool — invert (NOT) a clause. Only `ExactAttributeFilter` /
-  `SilverTorch(filter_mode="exact")` support reverse; `BloomFilter` is paper-strict and rejects it.
+- `clause_is_reverse: [C]` bool — invert (NOT) a clause; `ExactAttributeFilter` and
+  `SilverTorch(filter_mode="exact")` support it.
 
 Semantics: a query passes an item iff, for **every** active clause, the query value appears among
 that item's values (OR over the `A_max` slot, AND across clauses).
 
 ### Two ways to filter
 
-1. **SilverTorch inline** — the predicate is fused into the probe+score kernel; nothing
-   intermediate touches HBM.
+1. **SilverTorch inline** — the predicate is evaluated inside Meta's search op, over the probed
+   clusters only.
 2. **LiNR decoupled** — a standalone `FilterModule` computes a mask or candidate set. The
    `LiNRV1`–`LiNRV3` modules hold one as `filter=` and call it for you; the primitives take the
    mask or candidate set explicitly.
 
 ### SilverTorch inline filtering
 
-Pass the item attributes at `register_index` and the query attributes at `forward`:
+Pass the item attributes at `register_index` and the prepared query attributes at `forward`:
 
 ```python
 import torch
@@ -38,7 +38,8 @@ from retrieve import SilverTorch
 item_embs = torch.randn(N, 128, device="cuda")
 item_attrs = ...  # [N, C, A_max] int64, -1 padded
 
-# Bloom: false-positive-tolerant, needs m_bits (power of 2, mult. of 64) and k_hash.
+# Bloom: Meta's bloom index; m_bits (power of 2, mult. of 64) is the width per item, k_hash
+# the search k (at most 10). The adapted code rechecks the bloom's survivors exactly by default.
 ann = SilverTorch(k=10, n_lists=1024, n_probe=16,
                   filter_mode="bloom", m_bits=1024, k_hash=4).cuda()
 ann.register_index(item_embs, item_clause_attrs=item_attrs)
@@ -58,15 +59,16 @@ ann.register_index(item_embs, item_clause_attrs=item_attrs,
 topk_ids, topk_scores = ann(query, ann.prepare_queries(query_attrs))
 ```
 
-`bloom` trades hash flexibility for a small false-positive rate; `exact` is bandwidth-cheaper at
-small `C × A_max` and exact. Calling `forward` without a prepared filter skips filtering and runs
+`bloom` is Meta's co-designed filter (a bloom per item, tested over the probed clusters; on the
+adapted code its survivors are rechecked exactly, so it returns no false positives); `exact`
+tests the clauses directly. Calling `forward` without a prepared filter skips filtering and runs
 plain ANN.
 
 ### LiNR decoupled filtering
 
-A `FilterModule` (`BloomFilter`, `ExactAttributeFilter`) encodes a batch's query attrs once with
-`q = f.prepare_queries(query_clause_attrs)` (the bloom query signatures; the int64 attrs for the
-exact filter) and exposes three evaluation paths over a registered item set, each taking `q`:
+The `FilterModule` (`ExactAttributeFilter`) encodes a batch's query attrs once with
+`q = f.prepare_queries(query_clause_attrs)` (the int64 attrs) and exposes three evaluation paths
+over a registered item set, each taking `q`:
 
 - `evaluate_mask(q, start=0, end=None) -> [B, end - start]` bool — dense, over
   items `[start, end)` (default: all `N`). A range is evaluated on a slice of the item table, so
@@ -108,9 +110,7 @@ pre = PrefilterKNN(k=10).cuda(); pre.register_index(item_embs)
 ids, scores = pre(query, candidate_ids=cand_ids, counts=counts)
 ```
 
-`BloomFilter(m_bits, k_hash)` registers via `register_index(item_clause_attrs)` (use keyword args —
-its parameter order differs from `ExactAttributeFilter`). Bloom raises if `clause_is_reverse` has
-any `True`.
+
 
 Composition helpers (in `retrieve.functional`):
 

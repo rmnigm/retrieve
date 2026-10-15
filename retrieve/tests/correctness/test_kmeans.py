@@ -2,7 +2,7 @@
 
 SilverTorch's whole IVF layout — centroids, cluster membership, the int8 codes' scale — is a
 pure function of ``fit``'s output, so a non-reproducible ``fit`` makes every SilverTorch quality
-number non-reproducible with it. Roadmap C4 measured exactly that: two seed-0 builds of the same
+number non-reproducible with it. Measured: two seed-0 builds of the same
 index differed by 1.8e-2 in the centroids, because the centroid update reduced with
 ``index_add_``'s floating-point atomics, whose summation order follows block scheduling. Quality
 then only reproduced to ~1e-4, under the golden gate's 1e-6.
@@ -10,7 +10,7 @@ then only reproduced to ~1e-4, under the golden gate's 1e-6.
 The reduction is now order-fixed (``KMeans._cluster_sums``: integer ``bincount`` for the
 counts, a float64 one-hot GEMM accumulated panel by panel for the sums). These tests are the
 gate on that, and on the claim that the replacement is the same algorithm at the same
-precision — the pre-C4 atomic reduction is kept here and compared against.
+precision: the float-atomic reduction is kept here and compared against.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from tests.conftest import make_index
 
 
 def _atomic_cluster_sums(embs, assignments, n_lists):
-    """The pre-C4 reduction, verbatim: ``index_add_`` with float atomics."""
+    """The float-atomic reduction: ``index_add_`` with float atomics."""
     sums = torch.zeros(n_lists, embs.shape[1], dtype=torch.float32, device=embs.device)
     counts = torch.zeros(n_lists, dtype=torch.float, device=embs.device)
     sums.index_add_(0, assignments, embs.float())
@@ -34,7 +34,7 @@ def _atomic_cluster_sums(embs, assignments, n_lists):
 
 
 def _atomic_fit(km: KMeans, embs):
-    """``KMeans.fit`` with the pre-C4 atomic reduction, everything else identical."""
+    """``KMeans.fit`` with the float-atomic reduction, everything else identical."""
     n = embs.shape[0]
     g = torch.Generator(device="cpu")
     g.manual_seed(km.seed)
@@ -52,7 +52,7 @@ def _atomic_fit(km: KMeans, embs):
     return centroids, km.assign(embs, centroids)
 
 
-# (N, D, n_lists, n_iter). 200k/128/1024 is the gate size from roadmap C4; both N values sit
+# (N, D, n_lists, n_iter). 200k/128/1024 is the gate size; both N values sit
 # above the 1 << 14 assignment chunk and are non-multiples of it, so both the assignment chunk
 # tail and `_cluster_sums`' short final one-hot panel are exercised.
 SIZES = [(200_000, 128, 1024, 4), (20_001, 16, 32, 4)]
@@ -122,7 +122,7 @@ def test_fit_quality_matches_atomic_reference():
 
     Centroids are deliberately *not* compared elementwise: Lloyd's iteration is chaotic, a
     single flipped assignment cascades, and the atomic reference is not even stable against
-    itself (roadmap C4 measured 1.8e-2 run to run on real embeddings; on this synthetic index
+    itself (1.8e-2 run to run on real embeddings; on this synthetic index
     the two implementations were seen both 6e-8 and 2.1e-2 apart on different runs, purely by
     which side flipped first). What must hold is that the objective is unchanged — the
     reduction was replaced, not the algorithm. Measured relative difference: 5.4e-9.
@@ -142,7 +142,7 @@ def test_fit_quality_matches_atomic_reference():
 
 
 # ---------------------------------------------------------------------------
-# init="kmeans++" (plan L D9: opt-in; the default stays "random").
+# init="kmeans++" (opt-in; the default stays "random").
 # ---------------------------------------------------------------------------
 
 

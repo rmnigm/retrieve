@@ -33,10 +33,10 @@ cpu_sources = [
     "silvertorch_fork/ops/csrc/bloom_index_search.cpp",
     "silvertorch_fork/ops/csrc/expression_query_parser.cpp",
     "silvertorch_fork/ops/csrc/fused_kmean_ann.cpp",
-    # fork (OF-6): registered upstream but absent from its build
+        # registered upstream but absent from its build
     "silvertorch_fork/ops/csrc/is_topk.cpp",
     "silvertorch_fork/ops/csrc/fresh_index_post_processing.cpp",
-    # fork (C5): stfork::search
+    # stfork::search, the adapted forward (CHANGES.md)
     "silvertorch_fork/ops/csrc/fork_search.cpp",
 ]
 
@@ -46,15 +46,14 @@ cuda_sources = [
     "silvertorch_fork/ops/csrc/expression_query_parser_cuda.cu",
     "silvertorch_fork/ops/csrc/faster_repeat_interleave.cu",
     "silvertorch_fork/ops/csrc/fused_kmean_ann_cuda.cu",
-    # fork (OF-6): registered upstream but absent from its build
+        # registered upstream but absent from its build
     "silvertorch_fork/ops/csrc/is_topk_cuda.cu",
     "silvertorch_fork/ops/csrc/fresh_index_post_processing_cuda.cu",
-    # fork (C5): stfork::search
+    # stfork::search, the adapted forward (CHANGES.md)
     "silvertorch_fork/ops/csrc/fork_search_cuda.cu",
 ]
 
-# fork: sources stay relative to this file (setuptools' editable build rejects absolute paths;
-# the build runs from this directory)
+# Sources stay relative to this file: setuptools' editable build rejects absolute paths.
 include_dirs = [os.path.join(ROOT_DIR, "silvertorch_fork", "ops", "csrc")]
 
 extra_compile_args = {
@@ -71,7 +70,7 @@ extra_compile_args = {
 }
 
 if CUDA_HOME is not None:
-    # fork (OF-11): upstream passes no -O to nvcc, so the .cu host code built at gcc's -O0
+        # Upstream passes no -O to nvcc, so its .cu host code built at gcc's -O0 (CHANGES.md).
     extra_compile_args["nvcc"] = [
         "-O3",
         "-Xcompiler",

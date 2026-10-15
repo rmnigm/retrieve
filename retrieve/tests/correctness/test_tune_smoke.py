@@ -1,7 +1,5 @@
 """One tiny invocation per tuner benchmark body, so schema drift between ``tune.py`` and the
-kernel ``_impl`` signatures breaks CI instead of a tuning session (the
-``codesigned-probe-score`` subcommand rotted exactly this way when Stage 2b moved kwargs off the
-public op)."""
+kernel ``_impl`` signatures breaks CI instead of a tuning session."""
 
 from __future__ import annotations
 
@@ -17,18 +15,15 @@ def test_registry_covers_all_kernels():
     assert tuple(spec.name for spec in tune.KERNELS) == (
         "fused-masked-knn-topk",
         "oporp-1bit-match-topk",
-        "codesigned-probe-score",
-        "codesigned-probe-score-exact",
         "clause-mask",
         "clause-compact",
-        "bloom-compact",
     )
 
 
 @pytest.mark.parametrize("spec", tune.KERNELS, ids=lambda spec: spec.name)
 def test_tune_bodies_run_one_point(spec):
-    # One real _impl call per spec at its tiny smoke regime with the cheapest grid point — exactly
-    # the call _sweep's warmup loop and _bench lambda make. Checks call schemas, not timings.
+    """One real _impl call per spec at its tiny smoke regime with the cheapest grid point, the
+    call _sweep's warmup loop and _bench lambda make. Checks call schemas, not timings."""
     dev = torch.device("cuda:0")
     cfg = spec.config_cls(*spec.grid[0])
     out = spec.run(spec.make_inputs(dev, spec.smoke_regime), cfg)

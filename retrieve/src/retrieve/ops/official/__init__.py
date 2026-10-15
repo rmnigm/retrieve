@@ -92,8 +92,7 @@ class OfficialConfig:
       ``"official-fork"`` only ``"partial"`` (the fork evaluates the bloom over the probed
       clusters only; ``SilverTorch`` refuses ``"full"`` there).
     - ``b_multiplier``: bloom width per bundle = ``max_terms_per_doc · k · b_multiplier``
-      bits per doc (``bloom_indexer.cpp:52-66``); must be ``> 1.0``. Matched-memory /
-      matched-FPR calibration against our ``m_bits`` is roadmap D3.
+      bits per doc (``bloom_indexer.cpp:52-66``); must be ``> 1.0``.
     - ``n_stored_hashes``: raw murmur hashes precomputed per query term at parse time (the
       ops' ``hash_k`` argument — renamed here because the library-wide ``k_hash`` is the
       *search* ``k``, ``SilverTorch.k_hash``); the search ANDs the first ``k`` *distinct*
@@ -105,10 +104,11 @@ class OfficialConfig:
     - ``fast_build``: the CUDA builder's single-pass signature-free build (ignored by the
       CPU builder).
     - ``bloom_width``: ``"upstream"`` → each 2048-doc bundle ``max_terms · k · b_multiplier``
-      bits wide per doc (OF-10); ``"configured"`` → ``m_bits`` bits per doc in every bundle (our
-      fork, META-FORK C12; the layer's ``m_bits`` is then required). ``None`` → the backend's
+      bits wide per doc; ``"configured"`` → ``m_bits`` bits per doc in every bundle (the adapted
+      code, CHANGES.md C12; the layer's ``m_bits`` is then required). ``None`` → the backend's
       own: ``"upstream"`` on ``official`` (its only width), ``"configured"`` on ``official-fork``.
-    - ``recheck``: test the bloom's survivors exactly (the fork, META-FORK C13): bloom ∧ exact is
+    - ``recheck``: test the bloom's survivors exactly (the adapted code, CHANGES.md C13): bloom ∧
+      exact is
       the exact filter, so no false positive is returned and the bloom only spares the exact
       test its failing docs; the layer then keeps the exact attrs beside the bloom index.
       ``None`` → the backend's own: off on ``official`` (Meta's bloom, false positives

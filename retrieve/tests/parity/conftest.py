@@ -7,12 +7,6 @@ from functools import partial
 
 import torch
 
-from retrieve.indexing.bloom_hash import (
-    build_query_bit_positions,
-    build_signatures,
-    build_transposed_sigs,
-    generate_seeds,
-)
 from retrieve.indexing.ivf import probe_width
 from tests.conftest import assert_topk_id_sets_match, make_attrs, make_query_attrs
 
@@ -47,27 +41,11 @@ def make_probe_family(b, n_lists, max_size, n_probe, *, empty_rate=0.1, seed=7):
     return ProbeLayout(probe_ids, offsets, sort_perm, probe_width(sizes, n_probe), n)
 
 
-def make_bloom(n, b, *, m_bits=512, k_hash=5, seed=3, n_vocab=50):
-    """Bloom inputs over ``n`` cluster-sorted items: ``(query_bit_positions [B, C·k_hash],
-    bloom_transposed [m_bits, ceil(N/64)], sigs [N, W], qb [B, W])`` — the last two the
-    row-wise form, the independent oracle of the transposed subset test."""
-    attrs = make_attrs(n, c=2, a_max=2, seed=seed, n_vocab=n_vocab)
-    q_attrs = make_query_attrs(b, c=2, seed=seed + 1, n_vocab=n_vocab)
-    seeds = generate_seeds(k_hash=k_hash, device=attrs.device)
-    w = m_bits // 64
-    sigs = build_signatures(attrs.long(), seeds, m_bits=m_bits, k_hash=k_hash, word_count=w)
-    qb = build_signatures(
-        q_attrs.long().unsqueeze(-1), seeds, m_bits=m_bits, k_hash=k_hash, word_count=w
-    )
-    qpos = build_query_bit_positions(q_attrs.long(), seeds, m_bits, k_hash)
-    return qpos, build_transposed_sigs(sigs), sigs, qb
-
-
 def make_exact(n, b, *, c=2, a_max=2, reverse="none", n_vocab=8):
-    """Item / query clause attrs + reverse flags. The small vocabulary keeps the
-    predicate's pass rate high enough that top-K is not all ``-inf``; ``make_query_attrs``
-    leaves ~20% of clauses inactive (``-1``). ``reverse="mixed"`` flips clause 0 only, so
-    one call exercises both branches of the XOR."""
+    """Item / query clause attrs + reverse flags. The small vocabulary keeps the predicate's pass
+    rate high enough that top-K is not all ``-inf``; ``make_query_attrs`` leaves ~20% of clauses
+    inactive (``-1``). ``reverse="mixed"`` flips clause 0 only, so one call exercises both
+    branches of the XOR."""
     attrs = make_attrs(n, c=c, a_max=a_max, n_vocab=n_vocab).long()
     q_attrs = make_query_attrs(b, c=c, n_vocab=n_vocab).long()
     rev = torch.zeros(c, dtype=torch.bool, device="cuda")
@@ -81,18 +59,11 @@ def assert_ids_equal_up_to_ties(
     ids_b: torch.Tensor,
     scores: torch.Tensor,
 ) -> None:
-    """Assert two top-K id tensors agree, allowing permutation *within tied scores*.
-
-    For the bit-exact backend comparisons the score tensor is the hard gate: the
-    caller asserts ``torch.equal(scores_a, scores_b)`` first and passes that tensor
-    here. Ids are one notch weaker on purpose — ``torch.topk``'s documentation says
-    tie order is "not guaranteed stable across invocations", and ties genuinely occur
-    in this data (int32 dots of ~±1e5 magnitude over P≈768 candidates land on roughly
-    one tied pair per row). So the honest gate is: ids equal, or every mismatching
-    position lies inside a run of equal scores whose id *multisets* match.
-
-    ``scores`` comes from ``topk`` and is therefore sorted descending, so tie runs are
-    contiguous; a run of length 1 makes the comparison exact equality at that slot."""
+    """Two top-K id tensors agree up to a permutation within tied scores. The caller asserts
+    ``torch.equal(scores_a, scores_b)`` first and passes that tensor here; ``torch.topk``'s tie
+    order is not guaranteed stable, and ties occur in this data, so the gate is: ids equal, or
+    every mismatching position lies inside a run of equal scores whose id multisets match.
+    ``scores`` is sorted descending (a top-k output), so tie runs are contiguous."""
     assert ids_a.shape == ids_b.shape == scores.shape, "ids/scores shape mismatch"
     if torch.equal(ids_a, ids_b):
         return
@@ -146,13 +117,10 @@ def assert_topk_matches(
     atol: float,
     rtol: float,
 ) -> None:
-    """Assert two top-K implementations agree on finite-id sets and sorted scores.
-
-    Tie-breaking on the id permutation can differ between backends, so every row goes through
+    """Two top-K implementations agree on finite-id sets and sorted scores: every row through
     ``assert_topk_id_sets_match`` (sets of finite-score ids, boundary ties within ``atol``) and
-    the *sorted* descending scores through ``assert_scores_match`` (exact non-finite pattern,
-    finite values within tolerance). No default tolerance: each caller states its own.
-    """
+    the sorted descending scores through ``assert_scores_match``. No default tolerance: each
+    caller states its own."""
     for bi in range(out_ids.shape[0]):
         assert_topk_id_sets_match(
             out_ids, out_scores, ref_ids, ref_scores, bi, atol=atol, rtol=rtol
@@ -193,23 +161,10 @@ def poison_empty(
 
 
 def _poisoned_empty(real_empty, target_shape, target_dtype, value, hits, *args, **kwargs):
-    """``target_shape``/``target_dtype`` (not ``shape``/``dtype``) so a caller that explicitly
-    passes ``torch.empty(..., dtype=...)`` doesn't collide with this function's own bound
-    parameter of the same name (a real call would otherwise raise "multiple values for
-    argument 'dtype'" through the ``partial``)."""
+    # ``target_shape`` / ``target_dtype``, not ``shape`` / ``dtype``: a caller's own
+    # ``torch.empty(..., dtype=...)`` would otherwise collide with the bound parameter.
     t = real_empty(*args, **kwargs)
     if t.dtype == target_dtype and tuple(t.shape) == target_shape:
         t.fill_(value)
         hits.append(target_shape)
     return t
-
-
-def make_words(n, w, seed):
-    """``[N, W]`` dense signatures and ``[8, W]`` queries: half are subsets of an item's
-    signature (sparse bits of it), half random sparse words, so both outcomes occur."""
-    g = torch.Generator(device="cuda").manual_seed(seed)
-    sigs = torch.randint(-(2**63), 2**63 - 1, (n, w), generator=g, device="cuda")
-    sparse = torch.randint(-(2**63), 2**63 - 1, (8, 4, w), generator=g, device="cuda")
-    sparse = sparse[:, 0] & sparse[:, 1] & sparse[:, 2] & sparse[:, 3]
-    rows = torch.randint(0, n, (4,), generator=g, device="cuda")
-    return sigs, torch.cat([sigs[rows] & sparse[:4], sparse[4:]])

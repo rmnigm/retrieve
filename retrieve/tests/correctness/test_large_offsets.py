@@ -4,7 +4,7 @@ value or an illegal address rather than as noise.
 
 - output axis, ``B·N ≥ 2³¹``: ``B = 144``, ``N = 16M`` (row 143 starts past 2³¹);
 - item axis, ``N·row_stride ≥ 2³¹``: one ``[140M, 16]`` int64 table (``N·W = 2.24e9``), read as
-  bloom signatures, as ``[N, 2, 8]`` clause attrs and as OPORP bits.
+  ``[N, 2, 8]`` clause attrs and as OPORP bits.
 
 Skipped when the device lacks the free memory."""
 
@@ -85,19 +85,6 @@ def item_axis():
     )
     table[marked, 0] = 1
     return n, table, marked
-
-
-def test_item_axis_bloom(item_axis):
-    n, table, marked = item_axis
-    qb = torch.zeros(2, 16, dtype=torch.int64, device="cuda")
-    qb[0, 0] = 1  # row 1 has no bits: every item passes
-    mask = T.bloom_match(qb, table)
-    assert torch.equal(mask[0].nonzero().squeeze(1), marked)
-    assert mask[1].all()
-    del mask
-    pos, counts = T.bloom_compact(qb[:1], table)
-    assert counts.tolist() == [marked.numel()]
-    assert torch.equal(pos[0, : marked.numel()], marked)
 
 
 def test_item_axis_clause(item_axis):
