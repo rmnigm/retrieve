@@ -1,6 +1,6 @@
-"""``bench merge`` on two tiny trees: the accept rule per cell and host (ok over failed, stable
-over unstable, latest start), hosts never superseding each other, the samples pairing, a missing
-sidecar, a sidecar that does not pair, and the manifest's counts."""
+"""``bench merge`` on two tiny trees: the accept rule per cell (ok over failed, stable over
+unstable, latest start), the samples pairing, a missing sidecar, a sidecar that does not pair,
+and the manifest's counts."""
 
 from __future__ import annotations
 
@@ -67,13 +67,13 @@ def trees(tmp_path):
             _rec(seed=3, perf=None),  # W: quality-only
             _rec(seed=4, env={"host": "box-b"}),  # V: run on another machine ...
         ],
-    )
+    )  # fmt: skip
     b = _write(
         tmp_path / "leg-s0-rerun",
         [
             _rec(env=later),  # X's stable rerun
             _rec(seed=1, unstable=True, env=later),  # Y's unstable rerun
-            _rec(seed=4, env=later),  # ... V again on box-a: both stay accepted
+            _rec(seed=4, env=later),  # ... and later on box-a: the later one wins
         ],
         sidecar=False,
     )
@@ -94,7 +94,7 @@ def test_accept_rule_tables_and_manifest(trees, tmp_path):
         ("leg-s0", 1, "ok", 2): True, ("leg-s0-rerun", 1, "ok", 2): False,
         ("leg-s0", 2, "failed", 3): False, ("leg-s0", 2, "ok", 4): True,
         ("leg-s0", 3, "ok", 5): True,
-        ("leg-s0", 4, "ok", 6): True, ("leg-s0-rerun", 4, "ok", 3): True,
+        ("leg-s0", 4, "ok", 6): False, ("leg-s0-rerun", 4, "ok", 3): True,
     }  # fmt: skip
     assert by["leg-s0", 0, "ok", 1]["superseded_by"] == "leg-s0-rerun"
     assert by["leg-s0-rerun", 1, "ok", 2]["superseded_by"] == "leg-s0"
@@ -107,13 +107,13 @@ def test_accept_rule_tables_and_manifest(trees, tmp_path):
     assert json.loads(x["params"]) == {} and x["file"] == "filter/goodreads-d128.jsonl"
     timings = records.read_table(out / "timings.parquet")
     assert len(timings) == 3 * 7  # every perf entry of every record with perf
-    assert sum(t["accepted"] for t in timings) == 3 * 5
+    assert sum(t["accepted"] for t in timings) == 3 * 4
     assert {t["perf_mode"] for t in timings} == {"eager", "graph"}
     assert {t["perf_reason"] for t in timings if t["perf_mode"] == "graph"} == {"cuda_unavailable"}
     samples = records.read_table(out / "samples.parquet")
     assert len(samples) == 2 * 4  # leg-s0's four timed records; the rerun has no sidecar
     assert [s["accepted"] for s in sorted(samples, key=lambda s: (s["seed"], s["bs"]))] == [
-        False, False, True, True, True, True, True, True
+        False, False, True, True, True, True, False, False
     ]  # fmt: skip
     assert samples[0]["ms"] == [1.0, 1.0, 1.0] and samples[0]["n"] == 3
     man = yaml.safe_load((out / "manifest.yaml").read_text())
@@ -122,17 +122,15 @@ def test_accept_rule_tables_and_manifest(trees, tmp_path):
     s = man["subtrees"]
     assert list(s) == ["leg-s0", "leg-s0-rerun"]
     assert s["leg-s0"]["records"] == {"failed": 1, "ok": 5} and s["leg-s0"]["unstable"] == 1
-    assert (s["leg-s0"]["accepted"], s["leg-s0"]["superseded"]) == (4, 2)
+    assert (s["leg-s0"]["accepted"], s["leg-s0"]["superseded"]) == (3, 3)
     assert s["leg-s0"]["supersedes"] == ["leg-s0", "leg-s0-rerun"]
     assert s["leg-s0-rerun"]["supersedes"] == ["leg-s0"] and s["leg-s0-rerun"]["samples"] == 0
     assert s["leg-s0"]["hosts"] == ["box-a", "box-b"] and s["leg-s0"]["path_in_repo"] is None
     assert s["leg-s0"]["started"] == ["2026-10-14T10:00:00+00:00", "2026-10-14T12:00:00+00:00"]
     (cell,) = man["cells"]
     assert cell["subtrees"] == ["leg-s0", "leg-s0-rerun"] and cell["cells"] == 5
-    assert (cell["accepted_ok"], cell["accepted_failed"], cell["seeds"]) == (6, 0, [0, 1, 2, 3, 4])
-    (dup,) = man["cross_host_duplicates"]
-    assert dup["hosts"] == ["box-a", "box-b"] and dup["subtrees"] == ["leg-s0", "leg-s0-rerun"]
-    assert dup["key"]["seed"] == 4 and dup["cell"] == by["leg-s0", 4, "ok", 6]["cell"]
+    assert (cell["accepted_ok"], cell["accepted_failed"], cell["seeds"]) == (5, 0, [0, 1, 2, 3, 4])
+    assert "cross_host_duplicates" not in man
 
 
 def test_a_sidecar_that_does_not_pair_raises(tmp_path):

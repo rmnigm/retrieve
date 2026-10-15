@@ -1,22 +1,5 @@
-"""Config matrix (docs/system/evaluation.md § Config).
-
-One YAML per dataset (``config/<dataset>.yaml``) plus one ``config/suites.yaml``;
-``load_matrix`` expands ``(dataset, suite)`` into ``Job``s. A ``Job`` is one index *build*:
-``(dataset, dim, filter_kind, sweep, algo, backend, build params, seed)`` carrying the query-param
-combos measured against that build (the ``QUERY_PARAMS`` mutate via ``set_query_params``,
-they never rebuild), its ``ks`` / ``batch_sizes``, its bloom (the defaults or the arm's gridded
-widths) and the resolved ``Dataset`` (paths with ``{dim}`` substituted). A suite is a list of
-*arms*: one algo on its backends with optional filter kinds, sweeps, grids and per-dataset
-overrides. One *cell* is ``(job, params)``
-with ``params = build | query combo``; ``Job.key(params)`` is the record's key block and the input
-to ``records.resume_key``.
-
-Backends that run the same code collapse to one job (``PATHS``: ``linr_v1`` on ``none``
-is cuBLAS whatever the flag says) and ``(algo, filter_kind, backend)`` triples
-``PATHS`` marks ``None`` are skipped; both are logged once. Sweep entries accept the long
-form ``{clauses: [...], disabled: true}``. No anchors, no env interpolation, no
-schema library: unknown keys and malformed values raise ``ConfigError`` naming the file.
-"""
+"""The config matrix (docs/system/evaluation.md § Config): one YAML per dataset plus
+``suites.yaml``, expanded by ``load_matrix`` into ``Job``s, one per index build."""
 
 from __future__ import annotations
 
@@ -40,7 +23,7 @@ from bench.algos import (
     official_config,
 )
 
-# set_query_params, no rebuild; candidate_pool_frac is resolved per sweep to candidate_pool (run.py)
+# applied with set_query_params, no rebuild; candidate_pool_frac resolves per sweep (run.py)
 QUERY_PARAMS = frozenset({"n_probe", "candidate_pool", "candidate_pool_frac", "alpha"})
 BLOOM_PARAMS = frozenset({"m_bits", "k_hash"})  # gridded on silvertorch/bloom: the job's bloom
 COMPILE_MODES = ("max-autotune",)
@@ -60,10 +43,8 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class Dataset:
-    """One dataset at one dim, every path resolved. ``checkpoint`` set = SASRec-encoded
-    queries; ``content_dir`` set = pre-encoded text embeddings (arxiv). ``attrs`` /
-    ``reverse`` are ``None`` without a ``filters:`` block; ``query_attrs`` is the query side,
-    ``eval_split.parquet`` unless ``filters.query_attrs`` names a file. ``gt_dir`` is derived."""
+    """One dataset at one dim, every path resolved: ``checkpoint`` (SASRec-encoded queries) or
+    ``content_dir`` (pre-encoded text)."""
 
     name: str
     dim: int
@@ -85,8 +66,8 @@ class Dataset:
 
     @property
     def inputs(self) -> str:
-        """The record key's input identity: the checkpoint's directory name, or the
-        ``content_dir`` name (docs/system/evaluation.md, "The key block")."""
+        """The key's input identity: the checkpoint's or the ``content_dir``'s name
+        (docs/system/evaluation.md § Resume)."""
         return self.checkpoint.parent.name if self.checkpoint else self.content_dir.name
 
 
@@ -122,8 +103,8 @@ class Job:
         return self.data.self_match and self.filter_kind != "none"
 
     def key(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """The record's key block; ``params`` defaults to the build params. ``self_excluded``
-        is present only when true, so every other cell keeps its key."""
+        """The record's key block; ``self_excluded`` only when true, so every other cell keeps
+        its key."""
         key = {
             "dataset": self.dataset,
             "dim": self.dim,
@@ -142,9 +123,6 @@ class Job:
     def group(self) -> tuple[str, int, str, str]:
         """The campaign's process boundary."""
         return (self.dataset, self.dim, self.algo, self.backend)
-
-
-# ----- parsing --------------------------------------------------------------------------
 
 
 def _read(path: Path) -> dict:
@@ -184,8 +162,8 @@ def _template(where: str, v: Any, dim: int) -> Any:
 
 
 def _sweeps(where: str, kind: str, raw: Any) -> dict[str, tuple[int, ...]]:
-    """``name: [clauses]`` or ``name: {clauses: [...], disabled: true}``; disabled entries
-    are dropped here, once, with a log line."""
+    """``name: [clauses]`` or ``name: {clauses: [...], disabled: true}``; disabled entries are
+    dropped here, once, with a log line."""
     out: dict[str, tuple[int, ...]] = {}
     for name, spec in (raw or {}).items():
         disabled = False
@@ -203,7 +181,7 @@ def _sweeps(where: str, kind: str, raw: Any) -> dict[str, tuple[int, ...]]:
 
 def load_dataset(path: Path, dim: int, checkpoint: str | None = None) -> Dataset:
     """Resolve ``config/<dataset>.yaml`` at one dim; ``checkpoint`` (``{dim}`` templated)
-    replaces the YAML's, for a run pinned to another encoder (the golden cells)."""
+    replaces the YAML's."""
     raw, where = _read(path), str(path)
     _check_keys(where, raw, _DATASET_KEYS, ["data_dir", "dims"])
     if dim not in _ints(f"{where}: dims", raw["dims"]):
@@ -381,10 +359,8 @@ def shared_key(job: Job, params: dict[str, Any], by: tuple[str, ...]) -> dict[st
 
 
 def interleave_units(jobs: Sequence[Job]) -> list[tuple[tuple[str, ...] | None, list[Job]]]:
-    """Partition ``jobs`` into ``(by, members)`` units in first-member order: the jobs of one
-    suite comparison group (same key but for the ``by`` fields, query params aside) form one
-    unit, every other job is a unit of its own (``by`` None). A job in two groups of two or
-    more is a ``ConfigError``."""
+    """``(by, members)`` units in first-member order: one per interleave group (same key but
+    for the ``by`` fields), every other job alone (``by`` None); a job in two groups raises."""
     clusters: dict[str, list[Job]] = {}
     for j in jobs:
         for by, values in j.interleave:
@@ -410,9 +386,6 @@ def interleave_units(jobs: Sequence[Job]) -> list[tuple[tuple[str, ...] | None, 
     return units
 
 
-# ----- expansion ------------------------------------------------------------------------
-
-
 def load_matrix(
     dataset_yaml: Path,
     suites_yaml: Path,
@@ -428,15 +401,9 @@ def load_matrix(
     batch_sizes: Sequence[int] | None = None,
     checkpoint: str | None = None,
 ) -> list[Job]:
-    """Expand one ``(dataset, suite)`` into jobs, grouped by ``Job.group`` in the order
-    ``dim → algo → backend → arm → filter_kind → sweep → build → seed``. Each of a suite's
-    ``arms`` names an algo and its backends, optionally the filter kinds, sweeps, ``build`` /
-    ``query`` grids and the datasets it runs on, each with its own overrides
-    (docs/system/evaluation.md § Config). Keyword narrows are the CLI overrides: they
-    filter the lists *before* the PATHS collapse, so ``backends=["torch"]`` on a ``none`` cell
-    yields the cuBLAS job labelled ``torch``. ``ks`` / ``batch_sizes`` *replace* the suite's
-    lists rather than select cells, so when they differ the jobs are ``narrowed`` and ``run``
-    records them as ``partial``."""
+    """Expand one ``(dataset, suite)`` into jobs grouped by ``Job.group``
+    (docs/system/evaluation.md § Config). The keyword narrows filter the lists before the
+    ``PATHS`` collapse; ``ks`` / ``batch_sizes`` replace the suite's lists (``narrowed``)."""
     suites = _read(suites_yaml)
     if suite not in suites:
         raise ConfigError(f"{suites_yaml}: no suite {suite!r}; have {sorted(suites)}")

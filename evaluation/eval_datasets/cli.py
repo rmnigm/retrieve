@@ -1,7 +1,5 @@
-"""``eval-data`` — one console script over the per-dataset ETL scripts (``etl/``) and the Hub
-commands (``hub``). The ETL modules are ``argparse`` programs; each is mounted as a
-pass-through subcommand, so ``eval-data arxiv prep --output-dir …`` is ``arxiv.main([...])``
-and ``eval-data arxiv --help`` is argparse's help."""
+"""The ``eval-data`` console script: the per-dataset ETL programs (``etl/``, argparse, mounted
+as pass-through subcommands) and the Hub, ingest, subset and synth-filter commands."""
 
 from __future__ import annotations
 

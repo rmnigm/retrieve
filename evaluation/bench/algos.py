@@ -1,18 +1,5 @@
-"""The algorithm table (docs/system/evaluation.md § Algorithms and the `PATHS` table):
-harness name → library class, the filter kinds and backends, ``PATHS`` derived from
-``retrieve.interfaces.DISPATCH``, and ``build`` — the one factory the cell loop calls.
-
-``PATHS[(algo, filter_kind, backend)]`` is the code path that actually runs, or ``None`` when there
-is no such cell: ``DISPATCH``'s label for the module's backend (``cublas`` where the flag is a
-no-op, ``None`` where the constructor raises — ``official`` / ``official-fork`` outside
-SilverTorch), suffixed with the filter's backend on clause cells of the cuBLAS algos
-(``cublas+triton``: cuBLAS scoring, Triton ``clause_mask``); ``None`` on ``linr_v2 / none`` (its
-candidate source *is* the filter) and on every bloom cell but SilverTorch's (the bloom filter is
-SilverTorch's own; LiNR runs the exact filter). ``postfilter`` is the harness's own baseline
-(``bench.postfilter``), not a library module: ``DISPATCH`` gains its row here, torch only, clause
-cells only. ``tests/bench/test_paths.py`` pins the derived table. The standalone filter modules of
-``official`` / ``official-fork`` cells are Triton: ``filter_backend``.
-"""
+"""The algorithm table (docs/system/evaluation.md § Algorithms and the `PATHS` table) and
+``build``, the one factory the cell loop calls."""
 
 from __future__ import annotations
 
@@ -79,13 +66,9 @@ def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
 def official_config(
     algo: str, filter_kind: str, backend: str, params: dict[str, Any]
 ) -> OfficialConfig | None:
-    """The ``bloom_path``, ``score_path`` (fp16 | int32) and ``recheck`` build params as
-    ``OfficialConfig`` on the two official backends; ``None`` (the library default, ``partial`` /
-    ``fp16`` / the backend's own recheck) when all keys are absent. ``bloom_path`` means something
-    on ``silvertorch / bloom`` on official and official-fork (``partial`` only there; the layer
-    refuses ``full``), ``score_path`` on ``silvertorch`` on the official backends, ``recheck`` on
-    ``silvertorch / bloom`` on official-fork (``false`` only on official); each raises anywhere
-    else."""
+    """``bloom_path`` / ``score_path`` / ``recheck`` as an ``OfficialConfig``, ``None`` when all
+    are absent; each key raises on an arm where it means nothing (docs/system/evaluation.md
+    § Algorithms and the `PATHS` table)."""
     kw = {k: params[k] for k in ("bloom_path", "score_path", "recheck") if k in params}
     if not kw:
         return None
@@ -121,8 +104,8 @@ def build_filter(
     m_bits: int = BLOOM_DEFAULTS["m_bits"],
     k_hash: int = BLOOM_DEFAULTS["k_hash"],
 ) -> FilterModule | None:
-    """One standalone FilterModule per (filter_kind, filter backend); ``None`` for ``none``.
-    Bloom is paper-strict forward-only, so it never sees ``clause_is_reverse``."""
+    """One standalone ``FilterModule``; ``None`` for ``none``. Bloom is forward-only, so it never
+    sees ``clause_is_reverse``."""
     if filter_kind == "none":
         return None
     if item_attrs is None:
@@ -151,13 +134,8 @@ def build(
     params: dict[str, Any] | None = None,
     seed: int = 0,
 ) -> nn.Module:
-    """Construct and register one cell's module. ``params`` = build + query params merged
-    (``n_lists``, ``n_probe``, ``n_iter``, ``m_bits``, ``k_hash``, ``candidate_pool``, ``alpha``,
-    ``k_bits``, ``compile``); ``seed`` drives the k-means and the OPORP projection (whose scores
-    ignore it at ``k_bits = D``, docs/system/kernels.md § OPORP layout). SilverTorch fuses the
-    predicate (the attribute buffers live inside it, ``filter_mod`` is unused); the LiNR modules
-    and ``postfilter`` take the standalone filter as ``self.filter``. ``compile`` wraps the built
-    module in place (``compile_module``). Raises on cells ``PATHS`` marks ``None``."""
+    """Construct and register one cell's module from its merged build + query ``params``;
+    raises on cells ``PATHS`` marks ``None``."""
     p = dict(params or {})
     compile_mode = p.pop("compile", None)
     if PATHS[algo, filter_kind, backend] is None:
@@ -193,10 +171,8 @@ def build(
 
 
 def compile_module(module: nn.Module, mode: str) -> nn.Module:
-    """``torch.compile(mode=mode)`` in place (``nn.Module.compile``), so ``k``,
-    ``set_query_params`` and the buffers stay the module's own. Compilation is lazy: the first
-    forward pays it. ``max-autotune`` already replays inductor's own CUDA graphs, so the module
-    is marked uncapturable and ``graph`` mode records a null entry (``not_capturable``)."""
+    """``nn.Module.compile`` in place; ``max-autotune`` replays inductor's own CUDA graphs, so
+    the module is marked uncapturable (docs/system/evaluation.md § Compiled arms)."""
     module.compile(mode=mode)
     cls = type(module)  # SilverTorch's capturable is a read-only property: override per instance
     module.__class__ = type(cls.__name__, (cls,), {"capturable": False})

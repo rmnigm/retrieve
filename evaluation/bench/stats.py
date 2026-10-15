@@ -1,9 +1,5 @@
-"""The report's statistics (docs/system/evaluation.md § Statistics): percentile-bootstrap
-CIs on medians, means and ratios, and latency interpolated at a matched recall.
-
-Pure numpy over plain lists, so the known-answer tests need no records. Every resample uses
-one fixed generator seed: a report regenerated from the same records prints the same CIs.
-"""
+"""The report's statistics (docs/system/evaluation.md § Statistics): bootstrap CIs and
+latency at a matched recall, pure numpy, one fixed generator seed."""
 
 from __future__ import annotations
 
@@ -39,10 +35,8 @@ def median_ci(x: Sequence[float]) -> tuple[float, float, float] | None:
 
 
 def mean_ci(x: Sequence[float]) -> tuple[float, float, float] | None:
-    """Mean over units (per-query recall) and its CI. A resample's mean depends only on how
-    often it draws each distinct value, so the counts are drawn as one multinomial over the
-    distinct values: the same bootstrap distribution in O(B x distinct) rather than O(B x n)
-    (per-query recall@k takes few distinct values)."""
+    """Mean over units and its CI. A resample's mean depends only on how often it draws each
+    distinct value, so the counts come from one multinomial over the distinct values."""
     a = np.asarray(x, dtype=np.float64)
     if a.size == 0:
         return None
@@ -78,10 +72,8 @@ def differs(ci: tuple[float, float, float] | None) -> bool:
 
 
 def at_recall(points: Sequence[tuple[float, float, str]], target: float) -> dict:
-    """Latency at ``recall == target`` on one curve of ``(recall, latency, label)`` points:
-    piecewise-linear between the two adjacent points of the recall-sorted curve that bracket
-    the target, never extrapolated. ``latency`` is ``None`` with a ``reason`` when the curve
-    does not reach the target or starts above it."""
+    """Latency at ``recall == target`` on one curve, piecewise-linear between the bracketing
+    points, never extrapolated; ``None`` with a ``reason`` otherwise."""
     pts = sorted(points)
     if not pts or pts[-1][0] < target:
         return {"latency": None, "reason": "not reached"}

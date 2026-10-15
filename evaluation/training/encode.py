@@ -1,9 +1,5 @@
-"""History → query vector with a trained ``Encoder``: model load, ``predict_last`` over the eval
-split, and the on-disk cache next to the checkpoint (``encoded_queries_v2.pt``, keyed on the
-checkpoint's mtime + ``max_seq_length``, the *full* split — ``users_limit`` is applied by the
-harness after loading). Yambda / goodreads configs point at a checkpoint; pre-encoded text
-datasets never call into this module.
-"""
+"""History → query vector with a trained ``Encoder``, cached beside the checkpoint
+(docs/system/checkpoints.md § Encoding a user history into a query)."""
 
 from __future__ import annotations
 
@@ -23,7 +19,7 @@ from training.model import Encoder, build_encoder
 
 ENCODE_CACHE = "encoded_queries_v2.pt"
 _CACHE_FREE_FRACTION, _CACHE_RESERVE_BYTES = 0.7, 4 * 2**30
-# The legacy 500M checkpoints ship no config.json; they all share these.
+# the published checkpoints ship no config.json
 D128_DROP05_DEFAULTS = {
     "max_seq_length": 200,
     "embedding_dim": 128,
@@ -37,9 +33,8 @@ D128_DROP05_DEFAULTS = {
 
 
 def load_model_for_eval(checkpoint_path: Path, num_items: int, device: torch.device) -> Encoder:
-    """An ``Encoder`` from ``checkpoint_path``, hyperparameters from the sibling ``config.json``
-    when present, else ``D128_DROP05_DEFAULTS``. State dicts saved by the retired ``GSASRec``
-    (``encoder.layers.N.``) load into ``blocks.N.``: the math is the same."""
+    """An ``Encoder`` from ``checkpoint_path`` and its sibling ``config.json`` (else the
+    published defaults); the published ``encoder.layers.N.`` keys load into ``blocks.N.``."""
     cfg_path = checkpoint_path.parent / "config.json"
     cfg = TrainConfig.load(cfg_path) if cfg_path.exists() else TrainConfig(**D128_DROP05_DEFAULTS)
     model = build_encoder(cfg, num_items).to(device).eval()
@@ -58,8 +53,8 @@ def encode_queries(
     num_workers: int,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """``model.predict_last`` over the whole eval split: ``(queries [N, D], targets [N, T_max]
-    -1-padded, num_targets [N])`` on CPU, target ids as stored (1-indexed)."""
+    """``predict_last`` over the eval split: ``(queries, targets -1-padded, num_targets)`` on CPU,
+    target ids 1-indexed."""
     dataset = EvalDataset(str(data_path), max_length=max_length)
     loader = DataLoader(
         dataset,
@@ -100,10 +95,8 @@ def encode_split(
     num_workers: int,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """``(item_embs [N, D] on device, queries [U, D], targets [U, T] 0-indexed, n_targets [U])``
-    for ``data_dir/test.parquet`` — from the cache when its key matches, else encoded and
-    cached (atomically, within a free-disk budget). The training-side padding row (item id
-    0) is dropped from ``item_embs`` and the target ids shifted ``-1`` to match."""
+    """``(item_embs, queries, targets 0-indexed, n_targets)`` for ``data_dir/test.parquet``, from
+    the cache when its key matches; the padding row is dropped and the targets shifted."""
     cache = checkpoint.parent / ENCODE_CACHE
     key = {"ckpt_mtime": checkpoint.stat().st_mtime, "max_seq_length": max_seq_length}
     if cache.exists():

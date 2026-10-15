@@ -42,8 +42,8 @@ def load(tree: Path) -> list[dict[str, Any]]:
 
 
 def _pair_samples(path: Path, lines: list[dict[str, Any]], recs: list[dict[str, Any]]) -> None:
-    """The j-th sidecar line of a variant is the j-th record of that key with that variant timed:
-    both files are appended in cell order, the samples right before their record."""
+    """The j-th sidecar line of a variant belongs to the j-th record of that key with that
+    variant timed: both files are appended in cell order, samples first."""
     slots = [
         (rec, i)
         for rec in recs
@@ -62,13 +62,12 @@ def _pair_samples(path: Path, lines: list[dict[str, Any]], recs: list[dict[str, 
 
 
 def accept(recs: list[dict[str, Any]]) -> None:
-    """Per cell and host, the accepted record: ``ok`` over ``partial`` over ``failed``, stable over
-    unstable, the latest ``env.started``, the later line; the rest are ``_superseded_by`` it.
-    Hosts never supersede each other: a cell with accepted records on two hosts keeps them all."""
-    by: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    """Per cell, the accepted record: ``ok`` over ``partial`` over ``failed``, stable over unstable,
+    the latest ``env.started``, the later line; the rest are ``_superseded_by`` it."""
+    by: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for pos, rec in enumerate(recs):
         rec["_pos"] = pos
-        by[rec["_cell"], rec["env"]["host"]].append(rec)
+        by[rec["_cell"]].append(rec)
     for cands in by.values():
         best = max(
             cands,
@@ -156,9 +155,8 @@ def _sorted_set(values) -> list:
 
 
 def manifest(trees: list[Path], recs: list[dict[str, Any]], rows: dict) -> dict[str, Any]:
-    """``subtrees`` (provenance and counts per input tree, with what it supersedes), ``cells``
-    (per dataset / suite / algo / backend, the subtrees the accepted records come from) and
-    ``cross_host_duplicates`` (cells accepted on more than one host)."""
+    """``subtrees`` (provenance and counts per input tree, with what it supersedes) and ``cells``
+    (per dataset / suite / algo / backend, the subtrees the accepted records come from)."""
     by_tree: dict[str, list] = {t.name: [] for t in trees}
     for r in recs:
         by_tree[r["_subtree"]].append(r)
@@ -211,27 +209,12 @@ def manifest(trees: list[Path], recs: list[dict[str, Any]], rows: dict) -> dict[
                 "sweeps": _sorted_set(r["sweep"] for r in rs),
             }
         )
-    hosts: dict[str, list] = defaultdict(list)
-    for r in recs:
-        if r["_accepted"]:
-            hosts[r["_cell"]].append(r)
-    dups = [
-        {
-            "cell": cell,
-            "key": records.key_columns(rs[0]),
-            "hosts": _sorted_set(r["env"]["host"] for r in rs),
-            "subtrees": _sorted_set(r["_subtree"] for r in rs),
-        }
-        for cell, rs in sorted(hosts.items())
-        if len(rs) > 1
-    ]
     return {
         "tables_version": TABLES_VERSION,
         "built": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "rows": {name: len(r) for name, r in rows.items()},
         "subtrees": subtrees,
         "cells": cells,
-        "cross_host_duplicates": dups,
     }
 
 
@@ -261,6 +244,5 @@ def merge(trees: tuple[Path, ...], out: Path) -> None:
         click.echo(f"{out / name}.parquet: {n} rows")
     click.echo(
         f"{out / 'manifest.yaml'}: {len(man['subtrees'])} subtrees, {len(man['cells'])} "
-        f"(dataset, suite, algo, backend) groups, "
-        f"{len(man['cross_host_duplicates'])} cross-host duplicate cells"
+        "(dataset, suite, algo, backend) groups"
     )

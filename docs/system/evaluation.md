@@ -1116,25 +1116,22 @@ run) and writes four files under `DIR`, `merge.TABLES_VERSION` = 1. The
 records are read as they are, never rewritten.
 
 **The accepted record.** A cell is a resume key (key block +
-`code_version`). Among the records of one cell **on one host**
-(`env.host`), the accepted one is the `ok` record over a `partial` over a
-`failed` one, a stable (`unstable` false) over an unstable one, then the
-latest `env.started`, then the later line; every other record of that cell
-and host is superseded by it (`superseded_by` names the accepted record's
-subtree). This is the rerun policy as data: a `-rerun` subtree's stable
-record replaces its leg's unstable one, a cell unstable in every run keeps
-its record and the flag, an OOM `failed` line gives way to the retry that
-followed it. Hosts never supersede each other: a cell with accepted records
-on two hosts keeps them all (the machine effect is the analysis's to weigh,
-not the merge's), and the manifest lists them under
-`cross_host_duplicates`.
+`code_version`). Among the records of one cell, wherever they ran, the
+accepted one is the `ok` record over a `partial` over a `failed` one, a
+stable (`unstable` false) over an unstable one, then the latest
+`env.started`, then the later line; every other record of that cell is
+superseded by it (`superseded_by` names the accepted record's subtree).
+This is the rerun policy as data: a `-rerun` subtree's stable record
+replaces its leg's unstable one, a cell unstable in every run keeps its
+record and the flag, an OOM `failed` line gives way to the retry that
+followed it. The host is a plain column (`env_host`), not part of the rule.
 
 | file | one row per | columns |
 |---|---|---|
 | `records.parquet` | record line of every input tree | `subtree`, `cell` (sha1 of the resume key, 16 hex), `accepted`, `status`, `unstable`, the key block (`params` as canonical JSON), `env_host`, `env_started`, `env_code_version`, `env_commit`, `tag` (the git tags at `env_commit` in the checkout the merge runs in, comma-joined; null without), `file`, `line`, `superseded_by`; then every column `results.parquet` gives a record (`records.record_columns`: the scalars, `env_*`, `quality_source_seed`, `interleave_*`, `heldout_*`, `oracle_*`, `quality_*`) and the rest of `env` flattened (`env_driver` … `env_config_sha`, `env_official_build_so_sha256`, `env_official_fork_build_so_sha256`) |
 | `timings.parquet` | perf entry of every record | the same first thirteen columns, then the `perf_*` columns of `results.parquet` (`records.perf_columns`: `perf_k`, `perf_bs`, `perf_mode`, the stats, `perf_window_medians_ms`, `perf_sm_mhz`, `perf_ids_sha256(_canon)`, `perf_rounds`, `perf_kernels_<scope>_us` / `_calls`, `perf_reason` on a variant that did not run) |
 | `samples.parquet` | samples-sidecar line | the same first thirteen columns, `k`, `bs`, `mode`, `n`, `ms` (list of double: the chosen window's per-call vector). A sidecar line is paired with its record by file order (the j-th line of a variant is the j-th record of that key with that variant timed; the sidecar and the record file are appended in the same cell order, samples first); a sidecar whose lines do not pair raises, a tree without one gives no rows |
-| `manifest.yaml` | — | `tables_version`, `built`, `rows`; `subtrees`: per input tree `path_in_repo`, `manifest_sha256`, `uploaded` (from its `MANIFEST.json` when `bench fetch` kept one, else null), `hosts`, `gpus`, `commits`, `tags`, `branches`, `code_versions`, `started` [first, last], `records` {status: n}, `unstable`, `accepted`, `superseded`, `supersedes` (the subtrees whose records it replaced), `samples`; `cells`: per `(dataset, suite, algo, backend)` the `subtrees` its accepted records come from, `cells`, `accepted_ok`, `accepted_failed`, `seeds`, `code_versions`, `filter_kinds`, `sweeps`; `cross_host_duplicates`: `cell`, `key`, `hosts`, `subtrees` |
+| `manifest.yaml` | — | `tables_version`, `built`, `rows`; `subtrees`: per input tree `path_in_repo`, `manifest_sha256`, `uploaded` (from its `MANIFEST.json` when `bench fetch` kept one, else null), `hosts`, `gpus`, `commits`, `tags`, `branches`, `code_versions`, `started` [first, last], `records` {status: n}, `unstable`, `accepted`, `superseded`, `supersedes` (the subtrees whose records it replaced), `samples`; `cells`: per `(dataset, suite, algo, backend)` the `subtrees` its accepted records come from, `cells`, `accepted_ok`, `accepted_failed`, `seeds`, `code_versions`, `filter_kinds`, `sweeps` |
 
 The tables carry the same values as the per-leg `results.parquet` (both are
 built from `records.record_columns` and `records.perf_columns`); they add the
@@ -1143,7 +1140,7 @@ of `timings` with `accepted` false is a superseded measurement, kept so the
 tables are lossless. The per-query sidecars stay files, referenced by
 `per_query`. `tests/bench/test_merge.py` pins the rule (an unstable original
 and its stable rerun, a stable original and its unstable rerun, an OOM line
-and its retry, two hosts both accepted and listed), the samples pairing and
+and its retry, a later record from another machine), the samples pairing and
 its two refusals, and the manifest's counts.
 
 ### Oracle blob v4
@@ -1541,7 +1538,7 @@ trailing-whitespace hooks (the last two never on `articles/`, `research/artifact
 | `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name (its row sample ending on the last row past 2^24 rows), an unreadable blob rebuilt, bloom FP rate, `code_version`; the item-chunked oracle and pass counts equal to a one-shot stable-sort reference at three chunk sizes, ties to the lower id; TF32 refused (G-oracle); `slice_wider` cutting a wider blob of the same inputs only, writing nothing |
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig`, `modes` stamped per job (an eager-only uncapturable record `ok`, a capturable one `partial`), `postfilter`'s `recall_oracle` per `k` (equal to a pass at that `k`, never above the exact V1's); G-cache (seed-free arms copy, V3 / SilverTorch never, misses on other `ks` / `code_version`); a quality-only suite `ok`; G-ids (exact hash, and the canonical hash equal across a tied pair's two orders); G-dump (sidecar mean = record, upload lists it, aggregate skips it); G-interleave (same keys, one group per sweep and seed, `rounds`, whole-group resume); `frac_windows_below_max` against the device max, whichever cell ran first; `clocks_drift` against the first under-load sample (never the idle one) and `unstable` from drift or a perf entry's spread, each alone; a perf-phase OOM failing its whole interleaved group, not sticky, and resume re-running only that group; the spill's int32 ids exact past 2^24 and a `shape_mismatch`; `score_path` arms sharing the triton parity spill; [self-match](#self-match): an exact arm at oracle recall 1.0 with its own item excluded on both sides (key and record flags, the `none` cell untouched), and a finder of only the own item scoring 1.0 before the rule and 0 after |
 | `bench/test_cli.py` | `bench run` via `CliRunner`, `--checkpoint` landing as the record's `inputs` (encoder faked), a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, a restart mid-group keeping its parity spill (in-process children), zero cells → exit 1, a failed cell → `bench run` exit 1 and `bench campaign` exiting with its worst child's code, `bench report` over the campaign's own records, `bench env`'s JSON keys, the child log's start / end clock blocks and histogram, `bench oracle` prebuilding every sweep so `bench run` builds none |
-| `bench/test_merge.py` | `bench merge` on two tiny trees: the accept rule per cell and host (an unstable original and its stable rerun, a stable original and its unstable rerun, an OOM `failed` line and its retry, two hosts both accepted and listed as `cross_host_duplicates`), the three tables' rows and provenance columns, the samples pairing and its two refusals, a tree without a sidecar, the manifest's counts, two trees sharing a name refused |
+| `bench/test_merge.py` | `bench merge` on two tiny trees: the accept rule per cell (an unstable original and its stable rerun, a stable original and its unstable rerun, an OOM `failed` line and its retry, a later record from another machine winning), the three tables' rows and provenance columns, the samples pairing and its two refusals, a tree without a sidecar, the manifest's counts, two trees sharing a name refused |
 | `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, `n_records` counting only `<suite>/*.jsonl` (0 from a suite directory or a JSON-only tree), evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations (with the regenerated `results.parquet`) and `private=True`; `bench fetch` restoring a tree resume reads (its `MANIFEST.json` kept, never re-listed) and refusing to overwrite a different local copy |
 | `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with its labels and no unescaped `_`; one row per postfilter alpha; an unlabelled algo (`linr_v4`) in no table; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record; paired speedups from interleaved arms and recall CIs from sidecars; T3 ids `=` / `= (ties)` / `≠` and kernel-only from `kernels_us` (top-8 fallback marked); F3 one panel per sweep × bs |
 | `bench/test_stats.py` | G-stats: a constant's CI is a point; A = 2B pairs to 2.0 with a CI excluding 1; identical arms are no difference; interpolation exact on a linear curve, never extrapolated |

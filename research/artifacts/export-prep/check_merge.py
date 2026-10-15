@@ -5,8 +5,7 @@ Usage: uv run --no-sync --with pandas python check_merge.py FR TABLES SUMMARY
 FR holds the fetched `fr/*` subtrees, TABLES is `bench merge FR/* --out TABLES`, SUMMARY is the results-draft run's
 `summary.json` (Hub `artifacts/results-draft/20261015e-fr`). Three checks: (1) the set of (subtree, resume key, k, bs,
 mode) rows `build_results.load()` keeps equals the accepted `ok` non-YFCC rows of `timings.parquet` plus the accepted
-quality-only records; (2) its per-run counts and total equal SUMMARY's; (3) the manifest's cross-host duplicates are
-printed (expected none in the FR legs).
+quality-only records; (2) its per-run counts and total equal SUMMARY's.
 """
 
 import json
@@ -90,9 +89,6 @@ def main() -> None:
         sys.exit(1)
     print("row for row equal")
     man = yaml.safe_load((TABLES / "manifest.yaml").read_text())
-    print(f"cross-host duplicate cells: {len(man['cross_host_duplicates'])}")
-    for d in man["cross_host_duplicates"]:
-        print("  ", d)
     print(f"subtrees {len(man['subtrees'])}, cell groups {len(man['cells'])}, rows {man['rows']}")
 
 

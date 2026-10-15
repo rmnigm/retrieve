@@ -26,38 +26,9 @@ def sequential_split_train_val_test(
     drop_non_train_items: bool = False,
     engine: str = "streaming",
 ) -> tuple[pl.LazyFrame, pl.LazyFrame | None, pl.LazyFrame]:
-    """
-    Splits the dataset into training, validation, and test segments based on the provided
-    timestamps.
-
-    The segments are defined as follows:
-    - Training set: [0, test_timestamp - gap_size - val_size - gap_size) if val_size != 0,
-                    otherwise [0, test_timestamp - gap_size)
-    - Validation set: [test_timestamp - val_size - gap_size, test_timestamp - gap_size),
-                      if val_size != 0
-    - Test set: [test_timestamp, +inf)
-
-    It retains only those users and items in the validation and test sets that exist in the
-    training set.
-
-    Parameters:
-    ----------
-    df : LazyFrame
-        The dataset in Polars' LazyFrame format.
-    test_timestamp : int | None
-        The timestamp marking the start of the test set;
-    val_size : int | None
-        The size of validation. If 0, no validation set is created.
-    gap_size : int
-        The duration of gap between training and validation/test sets.
-    drop_non_train_items : bool
-        Whether to drop items that are not in the training set.
-
-    Returns:
-    -------
-    tuple[LazyFrame, LazyFrame | None, LazyFrame]
-        A tuple containing LazyFrames for the training, validation (if applicable), and test sets.
-    """
+    """``(train, val | None, test)`` by timestamp: test from ``test_timestamp``, validation the
+    ``val_size`` before it, a ``gap_size`` between the segments; users and items absent from
+    training are dropped from the later segments."""
     train_timestamp = test_timestamp - gap_size - val_size - (gap_size if val_size != 0 else 0)
     if gap_size < 0 or val_size < 0 or train_timestamp <= 0:
         raise ValueError(

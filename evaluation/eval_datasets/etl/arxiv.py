@@ -11,38 +11,19 @@
 #   "numpy>=1.26",
 # ]
 # ///
-"""End-to-end ETL for the arxiv filter-bench dataset.
-
-Source: HuggingFace ``open-index/open-arxiv`` — full-corpus arxiv metadata
-mirror (~2.99M papers, monthly parquet shards at ``data/YYYY/YYYY-MM.parquet``,
-last refreshed 2026-03-24). Same upstream source the Kaggle Cornell-University/
-arxiv snapshot was derived from; no auth required.
+"""The arxiv ETL (docs/system/datasets.md § arxiv): the ``open-index/open-arxiv`` metadata
+mirror → ``item_id_map``, ``papers``, ``heldout``, nomic-embed-text-v1.5 embeddings (items
+"search_document: ", queries "search_query: ", Matryoshka 256-d) and the filter attrs.
 
 Subcommands::
 
-    download       Pull all monthly parquet shards into raw/ via snapshot_download.
-    convert        Merge raw/ shards into processed/arxiv_papers.parquet.
-    prep           processed/ → bench-side <output-dir>/ (item_id_map, papers,
-                   heldout). No interactions / no time-split — arxiv has no
-                   user sequences.
-    encode_text    Encode item-side text embeddings ("search_document: " prefix)
-                   with nomic-embed-text-v1.5 truncated to 256-d (Matryoshka).
-    encode_queries Encode held-out query-side text embeddings ("search_query: "
-                   prefix). Same encoder, different prefix — nomic-specific.
-    attrs          Build item_attrs_narrow / item_attrs_wide / vocabs /
-                   eval_split.parquet for the filter bench.
-    all            download → convert → prep → encode_text → encode_queries → attrs.
-
-Examples::
-
-    uv run eval-data arxiv all --output-dir data/arxiv-papers
-    uv run eval-data arxiv encode_text --output-dir data/arxiv-papers --batch-size 256
-
-Layout (under hub.data_root(): $RETRIEVE_DATA_ROOT, default evaluation/data)::
-
-    data/_raw/arxiv/      <- snapshot_download destination (data/YYYY/YYYY-MM.parquet)
-    data/_raw/arxiv/processed/   <- arxiv_papers.parquet (merged)
-"""
+    download        the monthly parquet shards into _raw/arxiv/
+    convert         the shards → processed/arxiv_papers.parquet
+    prep            processed/ → <output-dir>/ (item_id_map, papers, heldout)
+    encode_text     item embeddings
+    encode_queries  held-out query embeddings
+    attrs           item_attrs_narrow / item_attrs_wide / vocabs / eval_split.parquet
+    all             download → convert → prep → encode_text → encode_queries → attrs"""
 
 from __future__ import annotations
 
@@ -231,11 +212,7 @@ def cmd_all(args) -> int:
     return cmd_attrs(args)
 
 
-# ----- prep ------------------------------------------------------------------
-#
-# processed/ -> bench-side <output-dir>/. No interactions and no time-split: arxiv
-# has no user sequences, and held-out items stay in the index. Output file list:
-# docs/system/datasets.md § arxiv.
+# prep: processed/ -> <output-dir>/ (docs/system/datasets.md § arxiv)
 
 
 def cmd_prep(args) -> int:
@@ -254,8 +231,7 @@ def cmd_prep(args) -> int:
     n_raw = df.height
     print(f"  raw rows: {n_raw:,}", flush=True)
 
-    # Drop rows missing the fields the encoder will read. abstract is the
-    # load-bearing one; title is sometimes empty for old papers.
+    # the encoder reads title and abstract; old papers may lack a title
     df = (
         df.with_columns(
             pl.col("title").fill_null("").str.strip_chars().alias("title"),
@@ -384,8 +360,7 @@ def _encode_with_prefix(
 
     print(f"STEP load papers + text-build (prefix={prefix!r})", flush=True)
     papers = pl.read_parquet(papers_path, columns=["item_id", "title", "abstract"])
-    # Build a lookup item_id → (title, abstract). Polars-side join would also work;
-    # since we know the row-order maps to dense item_ids 1..N, we just sort.
+    # the row order is the dense item_id order, so a sort is the lookup
     papers = papers.sort("item_id")
     p_item_ids = papers["item_id"].to_numpy()
     p_titles = papers["title"].to_list()
@@ -493,8 +468,7 @@ def _encode_with_prefix(
     # Scatter into the final d_max output tensor.
     out_dmax = torch.zeros((n_rows_out, d_max), dtype=torch.float16)
     if out_basename == "text_emb":
-        # Items: 1-indexed item_ids stored at the 0-indexed dense position
-        # ``item_id - 1``. No padding row — retrieval files are real-items-only.
+        # item_id i at row i - 1, no padding row
         for j, k in enumerate(valid_local_idx):
             iid = int(item_ids[k])
             out_dmax[iid - 1] = text_emb_local[j]
@@ -775,9 +749,7 @@ def cmd_attrs(args) -> int:
         .select("item_id", "year_id", "ver_id")
     )
 
-    # ---- C1 license bucket per paper -------------------------------------
-    # skip_nulls=False: a null license is the "none" bucket, not a null that
-    # to_numpy() turns into INT64_MIN (docs/system/datasets.md § arxiv).
+    # C1 license: skip_nulls=False keeps a null licence as the "none" bucket, not INT64_MIN
     plic = papers.with_columns(
         pl.col("license")
         .map_elements(_license_to_bucket, return_dtype=pl.Int64, skip_nulls=False)
@@ -798,14 +770,11 @@ def cmd_attrs(args) -> int:
         )
     )
 
-    # ---- assemble item_attrs_narrow [N, 5, 4] ----------------------------
-    # 1-indexed item_ids stored at 0-indexed position ``item_id - 1``.
-    # No padding row — retrieval files are real-items-only.
+    # item_attrs_narrow [N, 5, 4]: item_id i at row i - 1, no padding row
     print("STEP assemble item_attrs_narrow", flush=True)
     narrow_t = torch.full((n_items, C_NARROW, A_MAX_NARROW), -1, dtype=torch.long)
 
-    # Fast bulk fill for single-value clauses via numpy index assignment.
-    # C0 main
+    # single-value clauses: one numpy index assignment
     main_arr = pmain["main_id"].to_numpy()
     main_iid = pmain["item_id"].to_numpy() - 1
     narrow_t[main_iid, 0, 0] = torch.from_numpy(main_arr.astype(np.int64))

@@ -6,52 +6,14 @@
 #   "tqdm>=4.66",
 # ]
 # ///
-"""Synthetic-scale arxiv catalog generator.
-
-Reads an existing encoded arxiv dataset directory and writes a drop-in
-sibling at arbitrary N (15M / 30M / 50M etc) by SLERPing between
-same-cluster parents. Recall is measured against the exact-kNN oracle
-on the same catalog, so synthesis is unconstrained — no anti-shadowing.
+"""The synthetic-scale arxiv catalog (docs/system/datasets.md § synth_arxiv): a drop-in sibling of
+an encoded arxiv directory at a larger N by SLERP between same-cluster parents.
 
 Subcommands::
 
-    cluster    Spherical k-means on the source ``text_emb.pt``; cache
-               ``clusters.pt`` into the source content subdir. Reused
-               across all target-N runs from the same source variant.
-    synth      Generate sharded ``text_emb_shard_*.pt`` +
-               ``item_attrs_narrow.pt``; copy vocabs / queries / heldout /
-               eval_split into <output-dir>. Wide attrs are not synthesized
-               (the arxiv filter bench is narrow-only).
-    all        ``cluster`` + ``synth``.
-
-Examples::
-
-    uv run eval-data synth-arxiv all \\
-        --source-dir data/arxiv/papers \\
-        --output-dir data/arxiv-synth-15m \\
-        --target-n 15000000 \\
-        --source-content-subdir content_d128
-
-Layout of an output directory (drop-in for the existing arxiv loader)::
-
-    <output-dir>/
-      content/
-        text_emb_shard_00000.pt        # [shard_size, D] fp16
-        text_emb_shard_00001.pt
-        ...
-        shard_index.json
-        text_emb.meta.json             # copied from source content dir
-        query_emb.pt                   # copied verbatim
-        query_emb.meta.json
-      item_attrs_narrow.pt             # [N_target+1, 5, 4] int64
-      heldout.parquet                  # copied verbatim
-      eval_split.parquet               # copied verbatim
-      cat_main_vocab.json              # copied verbatim
-      author_vocab.json
-      license_vocab.json
-      clause_is_reverse_narrow.pt
-      item_id_map.json
-"""
+    cluster    spherical k-means on the source text_emb.pt, cached as clusters.pt
+    synth      sharded text_emb_shard_*.pt + item_attrs_narrow.pt; vocabs, queries, heldout copied
+    all        cluster + synth"""
 
 from __future__ import annotations
 
@@ -69,9 +31,7 @@ from tqdm import tqdm
 C_NARROW = 5
 A_MAX_NARROW = 4
 
-# Hard cap. Above this the attribute tensors blow past comfortable host RAM
-# and the existing single-file oracle path cannot serve them on a single GPU.
-# See docs/system/datasets.md for the path needed at 1B.
+# above this the attribute tensors outgrow host RAM and the single-file oracle path
 MAX_TARGET_N = 200_000_000
 
 # Per-iteration chunk for the assignment matmul in spherical k-means.

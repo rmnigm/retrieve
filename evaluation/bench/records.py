@@ -1,9 +1,5 @@
-"""What a record *is* (docs/system/evaluation.md § Output): the schema version, the key
-block, the resume key, the JSONL append with its ``fsync``, the samples sidecar,
-``read_records`` (one torn trailing line tolerated) and ``aggregate`` — one row per ``(record,
-perf entry)`` as ``results.parquet`` for ``report.py``. A record older than schema 3 has no
-``inputs``; :func:`inputs_of` supplies it.
-"""
+"""What a record is (docs/system/evaluation.md § Output): the key, the JSONL append and read,
+the flat columns and ``results.parquet``."""
 
 from __future__ import annotations
 
@@ -37,26 +33,20 @@ KEY_FIELDS = (
     "params",
     "seed",
 )
-# Record scalars and env fields that go into results.parquet next to the key block.
 _RECORD_COLUMNS = (
     "status", "path", "n_items", "n_queries", "n_kept", "n_queries_heldout", "n_queries_oracle",
     "n_targets_in_filter", "pass_rate", "bloom_fp_rate", "k_max", "build_s", "index_mib",
     "filter_mib", "candidate_pool", "pool_passing_mean", "unstable", "memory_reserved_mib",
     "elapsed_s", "schema_version", "stage", "error", "partial_reasons", "seed_scope", "per_query",
 )  # fmt: skip
-# results.parquet is shipped as a paper artifact, so it has to carry why a row is incomplete,
-# not only that it is: `stage`/`error` on a failure, `partial_reasons` on a narrowed cell,
-# `schema_version` because records of several schemas can share one file.
 ENV_COLUMNS = (
     "code_version", "commit", "dirty", "gpu", "sm_mhz_load", "clocks_drift", "git_branch",
     "frac_windows_below_max",
 )  # fmt: skip
-# window_medians_ms stays (perf_window_medians_ms): the bootstrap CIs resample it
 _PERF_SKIP = ("window_sm_mhz", "kernels")
 
 
-# Before schema 3 goodreads ran on gSASRec and the text datasets' content_dir never changed;
-# other checkpoint datasets (kuairand's E4 cell, yambda's retired suite) have no identity left.
+# the one encoder every schema-2 goodreads record ran on
 _LEGACY_CHECKPOINTS = {"goodreads": "gsasrec-d{dim}-drop0.5-id"}
 _CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
@@ -81,8 +71,7 @@ def key_block(rec: dict[str, Any]) -> dict[str, Any]:
 
 
 def resume_key(key: dict[str, Any], code_version: str) -> str:
-    """Canonical JSON of ``Job.key(params)`` plus the library's ``code_version``:
-    a kernel change invalidates a cell instead of silently reusing it."""
+    """Canonical JSON of the key block plus the library's ``code_version``."""
     return json.dumps({**key, "code_version": code_version}, sort_keys=True, separators=(",", ":"))
 
 
@@ -134,8 +123,8 @@ def append_record(path: Path, rec: dict[str, Any]) -> None:
 
 
 def read_records(path: Path) -> list[dict[str, Any]]:
-    """Every record in ``path``. A malformed *last* line — the cell in flight when the process
-    died — is logged and dropped; a malformed line anywhere else is corruption and raises."""
+    """Every record in ``path``; a torn last line (the cell in flight at a crash) is dropped, a
+    malformed line anywhere else raises."""
     out: list[dict[str, Any]] = []
     if not path.exists():
         return out

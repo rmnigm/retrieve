@@ -1,5 +1,4 @@
-"""``train`` — the trainer's console script: ``run`` (``training.train``) and
-``upload-checkpoint`` (``training.checkpoints``)."""
+"""The ``train`` console script: ``run`` and ``upload-checkpoint``."""
 
 from __future__ import annotations
 

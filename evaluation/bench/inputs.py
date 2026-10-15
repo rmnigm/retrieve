@@ -1,18 +1,5 @@
-"""Inputs of a ``(dataset, dim)`` process (§2.2): item embeddings, queries, held-out targets,
-query attrs, item attrs — loaded once — plus the per-sweep query attrs, the standalone
-filter modules keyed by *filter* backend, the oracle's exact mask source and the fixed-seed
-perf pool.
-
-``load_inputs`` dispatches on the ``Dataset``: ``checkpoint`` → ``training.encode.encode_split``
-(SASRec over the full test split, cached next to the checkpoint); ``content_dir`` → the
-pre-encoded text layout through ``eval_datasets.layout``. ``users_limit`` is applied once,
-here, as a prefix over queries / targets / query attrs together.
-
-Returned dict: ``item_embs [N, D]`` fp32 on device; ``queries [U, D]`` fp32, ``targets [U, T]``
-int64 ``-1``-padded 0-indexed, ``n_targets [U]`` — all CPU; ``qa [U, C]`` int64 CPU or ``None``;
-``item_attrs [N, C, A]`` int64 and ``clause_is_reverse [C]`` bool on device or ``None``;
-``attrs_digest`` (``oracle.attrs_digest`` of those two, hashed once); ``n_items``, ``n_queries``.
-"""
+"""The inputs of a ``(dataset, dim)`` process (docs/system/evaluation.md § Inputs): embeddings,
+queries, targets, attrs, the per-sweep query attrs, the filter modules and the perf pool."""
 
 from __future__ import annotations
 
@@ -73,9 +60,8 @@ def load_inputs(ds: Dataset, device: torch.device, *, with_filters: bool = True)
 def sweep_qa(
     qa: torch.Tensor | None, clauses: tuple[int, ...] | None
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-    """``(qa_sweep, skip_mask)`` for one sweep: inactive clauses coded ``-1`` (exact: match
-    anything; bloom: no bits queried), rows with no live clause skip-masked. ``clauses``
-    ``None`` (a ``none`` cell) → ``(None, None)``."""
+    """``(qa_sweep, skip_mask)`` of one sweep: inactive clauses coded ``-1``, rows with no live
+    clause skip-masked; ``(None, None)`` on a ``none`` cell."""
     if clauses is None:
         return None, None
     if qa is None:
@@ -93,8 +79,7 @@ def sweep_qa(
 def build_filters(
     filter_kind: str, inputs: dict[str, Any], backends: list[str], *, bloom: dict[str, int]
 ) -> dict[str, FilterModule]:
-    """One standalone ``FilterModule`` per *filter* backend the cell backends map to
-    (``official`` → ``triton``, so ``[triton, official]`` builds one module). Empty for ``none``."""
+    """One standalone ``FilterModule`` per *filter* backend the cell backends map to."""
     mods: dict[str, FilterModule] = {}
     if filter_kind == "none":
         return mods
@@ -114,8 +99,8 @@ def build_filters(
 def exact_filter(
     filter_kind: str, filters: dict[str, FilterModule], inputs: dict[str, Any], backend: str
 ) -> FilterModule | None:
-    """The oracle's exact mask source for a cell: the clause module itself on ``clause``
-    cells, a fresh ``ExactAttributeFilter`` on ``bloom`` cells, ``None`` on ``none``."""
+    """The oracle's exact mask: the clause module on ``clause`` cells, a fresh
+    ``ExactAttributeFilter`` on ``bloom`` cells, ``None`` on ``none``."""
     fb = algos.filter_backend(backend)
     if filter_kind == "clause":
         return filters[fb]
@@ -139,9 +124,8 @@ def query_pool(
     n_pool: int = 4096,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
-    """The fixed-seed perf pool (§2.5): ``[n_pool, bs, D]`` query batches drawn with
-    ``torch.Generator().manual_seed(seed)`` from the kept rows, plus the matching
-    ``[n_pool, bs, C]`` attr batches on filter cells. Identical across backends and modes."""
+    """The fixed-seed perf pool (§2.5): ``[n_pool, bs, D]`` query batches from the kept rows
+    and the matching ``[n_pool, bs, C]`` attr batches on filter cells."""
     g = torch.Generator(device="cpu").manual_seed(seed)
     queries = inputs["queries"]
     if skip_mask is not None:

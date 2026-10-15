@@ -1,10 +1,5 @@
-"""``train upload-checkpoint`` — push a local checkpoint directory (or every one under
-``data/<dataset>/checkpoints/`` with ``--ckpt-id all``) to ``<repo>/checkpoints/<ckpt-id>/``
-of the dataset's HF eval repo, through ``eval_datasets.hub.upload_checkpoint``. Needs a
-write-scoped HF token (``hf auth login`` or ``HF_TOKEN``).
-
-    uv run train upload-checkpoint --dataset goodreads-work-id --ckpt-id all --dry-run
-"""
+"""``train upload-checkpoint``: a checkpoint directory (or every one, ``--ckpt-id all``) to the
+dataset's Hub repo (docs/system/checkpoints.md § Uploading a new checkpoint)."""
 
 from __future__ import annotations
 

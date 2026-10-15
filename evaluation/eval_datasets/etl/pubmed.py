@@ -1,74 +1,20 @@
 #!/usr/bin/env -S uv run --script
-"""End-to-end ETL for the PubMed + MedCPT filter-bench dataset (roadmap E2).
-
-Source: the NCBI FTP MedCPT article-embedding release
-``https://ftp.ncbi.nlm.nih.gov/pub/lu/MedCPT/pubmed_embeddings/`` — 38 chunks of
-
-* ``embeds_chunk_{i}.npy``  — ``(N_i, 768)`` **float32** (verified from the npy
-  header: ``descr='<f4'``),
-* ``pmids_chunk_{i}.json``  — the row-aligned PMID list,
-* ``pubmed_chunk_{i}.json`` — ``{pmid: {"d": date, "t": title, "a": abstract,
-  "m": mesh}}``.
-
-``plan`` measures the sizes and row counts from the server; the last measurement is in
-docs/system/datasets.md § pubmed. ``m`` is a ``|``-separated list of ``descriptor!qualifier``
-entries where a trailing ``*`` marks a major topic, e.g.::
-
-    "humans!|rectal neoplasms!|rectal neoplasms*|rectal neoplasms!therapy|"
-
-Journal and language are **not** in the chunk JSON; they come from a join
-against the MEDLINE baseline (``https://ftp.ncbi.nlm.nih.gov/pubmed/baseline/``,
-1334 × ``pubmed26n*.xml.gz`` ≈ 52 GB, each with a published ``.md5``).
-MeSH tree-top category letters come from the MeSH descriptor file
-(``xmlmesh/desc2026.gz``, 17 MB).
+"""The PubMed + MedCPT ETL (docs/system/datasets.md § pubmed): the NCBI MedCPT article-embedding
+release (38 chunks of fp32 768-d vectors with PMIDs, dates, titles, abstracts and MeSH), joined
+with the MEDLINE baseline for journal and language, streamed shard by shard into the sharded
+layout at the encoder's native dim; ``--keep-items N`` keeps a seeded hash slice of the PMIDs.
 
 Subcommands::
 
-    plan            Dry run: HEAD every remote file, compute rows, peak disk and
-                    wall time for a given --keep-items / --prefetch. No download.
-    download        Resumable parallel mirror of any raw source (``--what pmids``
-                    is the 0.42 GB the streaming convert needs up front).
-    verify          Structural check of staged shards (+ MEDLINE md5).
-    medline         Stream the MEDLINE baseline → pmid/journal/language parquet.
-    convert         **Streaming**: PMID lists → item_id_map.json; then shard by
-                    shard (fetch → parse → fold → delete) → per-shard article
-                    parquet and ``content_d768/text_emb_shard_NN.pt`` +
-                    ``shard_index.json`` at the encoder's **native** 768 dims.
-    attrs           Article parquet + MEDLINE join → item_attrs_narrow.pt,
-                    clause_is_reverse_narrow.pt, vocab JSONs, heldout.parquet,
-                    eval_split.parquet.
-    queries         Build the query sets (held-out articles; NFCorpus if staged).
-    encode_queries  Encode query text with ``ncbi/MedCPT-Query-Encoder``
-                    (``--device cuda``) → content_d768/query_emb.pt.
-
-**No dimensionality reduction.** Every dataset is benchmarked at its encoder's
-native dim (research/decisions.md § datasets); there is no PCA step here.
-
-**Why streaming, and what it costs (docs/system/datasets.md § pubmed).** Raw
-(163.7 GB) plus the fp16 item matrix (35.9 M × 768 × 2 B = 55.2 GB) would be
-219 GB before the MEDLINE join — more than the overlay can spare next to anything
-else. ``convert`` therefore never holds the raw mirror whole: it fetches the
-0.42 GB of PMID lists first (they fix the id map), then walks the shards one at a
-time — download the next shard while parsing this one (``--prefetch``), gather the
-kept rows, L2-normalise, cast to fp16, ``torch.save`` them as *their own* output
-shard, and ``--delete-raw`` the input. The peak is the processed output plus
-``1 + prefetch`` raw shards, never the mirror. There is no accumulator and no
-second copy: the sharded layout (``shard_index.json`` +
-``text_emb_shard_*.pt``) is what ``eval_datasets.layout.load_sharded`` already
-reads for the synthetic arXiv catalogs.
-
-**Slice, not the whole.** ``--keep-items N`` keeps exactly ``N`` articles chosen
-by a seeded hash of the PMID (``select_pmids``): the same set whatever the shard
-order, spread uniformly over 1781–2024 rather than "the oldest ``N``". The full
-36 M does **not** fit the harness on one 80 GB A100 at 768-d — items are held
-fp32 on the device (110 GB) — so the slice is the target, not a stopgap.
-
-Layout (under ``hub.data_root()``: ``$RETRIEVE_DATA_ROOT``, default ``evaluation/data``)::
-
-    data/_raw/pubmed/                       pmids_chunk_*.json (kept), the shard in flight
-    data/_raw/pubmed/medline_baseline/      pubmed26n*.xml.gz (+ .md5), streamed
-    data/pubmed-medcpt/                     the bench-side output dir
-"""
+    plan            dry run: remote sizes, rows, peak disk and wall time; no download
+    download        resumable parallel mirror of a raw source
+    verify          structural check of staged shards (+ MEDLINE md5)
+    medline         the MEDLINE baseline → pmid / journal / language parquet
+    convert         streaming: PMID lists → item_id_map, then per shard the article parquet and
+                    content_d768/text_emb_shard_NN.pt + shard_index.json
+    attrs           item_attrs_narrow.pt, clause_is_reverse_narrow.pt, vocabs, heldout, eval_split
+    queries         the query sets (held-out articles; NFCorpus if staged)
+    encode_queries  ``ncbi/MedCPT-Query-Encoder`` → content_d768/query_emb.pt"""
 
 from __future__ import annotations
 
@@ -141,12 +87,9 @@ _QUERY_SCHEMA = {"query_id": pl.Utf8, "text": pl.Utf8, "target_id": pl.Int64}
 # MeSH tree-top category letters (the first character of a tree number).
 MESH_CATEGORIES = list("ABCDEFGHIJKLMNVZ")
 
-# `plan`'s per-row allowance for the zstd article parquet (pmid, year, has_abstract,
-# mesh list, title): the measured size is in docs/system/datasets.md § pubmed; 60 keeps a
-# margin over it.
+# plan's per-row allowance for the article parquet, a margin over the measured size
 ARTICLE_PARQUET_BYTES_PER_ROW = 60
-# `plan`'s allowance for the MEDLINE join output (`medline/*.parquet`, pmid + journal +
-# language for every citation), an upper bound at ~30 B/row zstd over 40 M citations.
+# plan's allowance for the MEDLINE join output, an upper bound at about 30 B/row
 MEDLINE_PARQUET_BYTES = 1_200_000_000
 
 
@@ -1078,8 +1021,7 @@ def cmd_attrs(args: argparse.Namespace) -> int:
     # C4 has-abstract flag.
     narrow_np[iids, 4, 0] = arts["has_abstract"].to_numpy().astype(np.int64)
 
-    # C0/C1 need per-row work: cap the MeSH bag by rarity, then read C1 off the
-    # first (rarest) kept descriptor.
+    # C0 / C1 per row: cap the MeSH bag by rarity, C1 from the rarest kept descriptor
     mesh_lists = arts["mesh"].to_list()
     cat_of_id = np.full(len(mesh_names), -1, dtype=np.int64)
     for d, i in mesh_vocab.items():

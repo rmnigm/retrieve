@@ -1,32 +1,16 @@
 #!/usr/bin/env -S uv run --script
-"""ETL for the Re-LAION 30 M filter-bench dataset (roadmap V-LAION30): captions as text
-items, their metadata as clause tags.
-
-Source: ``laion/relaion2B-en-research-safe`` on the Hub (gated, auto-approved; the token in
-the environment reads it), the first two parquet parts (2 × ~16.4 M rows: url, caption,
-similarity, pwatermark, punsafe, original_width / original_height, hash, key, ...). No
-embeddings ship with it; the captions are encoded here with nomic-embed-text-v1.5 at its
-Matryoshka d256. Measured counts and rates are in docs/system/datasets.md § laion30m.
+"""The Re-LAION 30 M ETL (docs/system/datasets.md § laion30m): captions as text items, their
+metadata as clause tags, from the first two parts of ``laion/relaion2B-en-research-safe``
+(gated), encoded with nomic-embed-text-v1.5 at d256.
 
 Subcommands::
 
-    download        The parts (``--parts``) into _raw/relaion/.
-    prep            parts → items.parquet (the catalog: one row per distinct caption, the N
-                    smallest seeded row hashes, source order) + queries.parquet (held-out
-                    captions drawn from the rest), each with its url domain and tag buckets.
-    encode_text     nomic-embed-text-v1.5, "search_document: ", Matryoshka d256 →
-                    items_NNN.npy (fp16, 1 M rows each). Resumable per shard.
-    encode_queries  Same encoder, "search_query: " → queries.npy.
-    ingest          ``eval-data ingest laion30m`` over the above: the staged dataset, its
-                    yaml and the layout check (targets: each query's unfiltered top-1).
-    all             download → prep → encode_text → encode_queries → ingest.
-
-Layout (under hub.data_root(): $RETRIEVE_DATA_ROOT, default evaluation/data)::
-
-    data/_raw/relaion/part-0000{0,1}-*.parquet
-    data/_raw/relaion/laion30m/             prep + encode outputs (the ingest's inputs)
-    data/laion30m/                          the staged dataset (written by the ingest)
-"""
+    download        the parts (``--parts``) into _raw/relaion/
+    prep            parts → items.parquet (the N smallest seeded row hashes) + queries.parquet
+    encode_text     items_NNN.npy (fp16, 1 M rows each), resumable per shard
+    encode_queries  queries.npy
+    ingest          ``eval-data ingest laion30m`` over the above
+    all             download → prep → encode_text → encode_queries → ingest"""
 
 from __future__ import annotations
 

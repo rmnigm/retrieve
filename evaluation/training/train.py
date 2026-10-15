@@ -1,14 +1,5 @@
-"""Encoder trainer — produces the checkpoints the sequential benchmarks encode with.
-
-bf16 autocast, uniform negatives drawn on the GPU (per position for gBCE, one shared vector
-plus in-batch positives for sampled softmax), fused AdamW with linear warmup, optional
-``torch.compile`` of the dense body, chunked full-catalog eval every ``eval_every`` epochs,
-best-metric checkpointing with resumable RNG state. TF32 is *enabled* here, unlike the
-benchmark harness.
-
-Usage (``train run …``), the config surface, and what a finished run writes out:
-docs/system/datasets.md § Training.
-"""
+"""The ``Encoder`` trainer (docs/system/datasets.md § Training). TF32 is enabled here, unlike
+the harness."""
 
 from __future__ import annotations
 

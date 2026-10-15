@@ -1,12 +1,5 @@
-"""Per-epoch retrieval-quality evaluation.
-
-Plain torch path: scores the model's last-position query against the full item
-catalog, masks history (and padding), takes top-K, and computes
-NDCG/Recall/Coverage at the requested cutoffs. No ``retrieve`` layers, and its
-own recall / ndcg: a checkpoint's reported quality must not move
-when the harness's metric code does. ``tests/training/test_encode.py`` pins the
-two to agree to 1e-9.
-"""
+"""Per-epoch retrieval quality in plain torch, with its own recall / ndcg: a checkpoint's
+reported quality must not move when the harness's metric code does."""
 
 from __future__ import annotations
 
@@ -90,8 +83,6 @@ def evaluate(
 
     dataset = EvalDataset(parquet_path, max_length=max_length)
     if max_users is not None and max_users < len(dataset):
-        # Deterministic prefix; the parquet rows are already in user-id order so
-        # this is reproducible across calls without needing a generator.
         dataset = torch.utils.data.Subset(dataset, range(max_users))
     loader = DataLoader(
         dataset,
@@ -125,8 +116,6 @@ def evaluate(
             query = model.predict_last(item_seqs)  # [B, D]
         query = query.float()
 
-        # Chunked scoring: keeps the [B, N+1] score matrix from materializing
-        # all at once for large catalogs (Yambda-5B has 9.39M items).
         b = query.shape[0]
         topk_vals = torch.full((b, k_max), float("-inf"), device=dev)
         topk_idx = torch.zeros((b, k_max), dtype=torch.long, device=dev)

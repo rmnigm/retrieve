@@ -1,23 +1,5 @@
-"""Retrieval quality metrics as device-side running sums (§2.4).
-
-The quality pass streams chunks of ``(ids [B, K_max], targets [B, T])`` through
-``accumulate``; every ``k`` in ``ks`` is scored from the one top-``K_max`` list
-(the algos return ``torch.topk``-sorted rows, so the top-``k`` prefix *is* the
-top-``k`` result). Sums live on the device as float64 and are read back once,
-in ``finalize`` — one sync per pass instead of one per chunk.
-
-Targets are ``[B, T]`` int64 padded with ``-1``; ``-1`` on either side never
-counts as a hit. Two target modes:
-
-* fixed (held-out items): the target set is the same at every ``k``; pass
-  ``num_targets`` (or let it be derived as the count of non-``-1`` entries);
-* ``ranked=True`` (oracle top-``K_max`` list): the target set at ``k`` is the
-  oracle's own top-``k`` prefix and ``num_targets`` is its non-``-1`` count, so
-  oracle recall stays golden-comparable.
-
-``per_row``'s arithmetic (float32) and op order are frozen: the golden cells were scored with
-it. ``training/evaluate.py`` keeps its own recall / ndcg.
-"""
+"""Retrieval quality metrics as device-side running sums (§2.4). ``per_row``'s float32
+arithmetic and op order are frozen: the golden cells were scored with it."""
 
 from __future__ import annotations
 
@@ -98,9 +80,8 @@ def finalize(acc: dict) -> dict[str, float | None]:
 
 
 def null_if_empty(side: dict) -> dict:
-    """No scored row (``n == 0``: no kept query with a reachable held-out target) has no mean,
-    so every metric is ``None``, never a 0.0 a report would average in as a miss. Also applied
-    to records written before this rule."""
+    """Every metric ``None`` when ``n == 0``: no scored row has no mean, never a 0.0 a report
+    would average in as a miss."""
     return ({m: None for m in side if m != "n"} | {"n": 0}) if side.get("n") == 0 else side
 
 

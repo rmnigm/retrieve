@@ -1,21 +1,6 @@
-"""``bench report``: every paper table and figure, from the records only
-(docs/system/evaluation.md § Report).
-
-``records.aggregate`` writes ``results.parquet`` first and every table and figure is built
-from it; ``records.latest`` is read a second time for the provenance block alone,
-which needs the nested ``env`` the table flattens to a few columns.
-
-**Nothing emitted here is citable unless ``--gate`` names a green roadmap gate** (CLAUDE.md
-rule 2). Without it — or with a `failed` cell, a `partial` record, a `dirty` library subtree
-or a record taken on a `dev/*` branch — every artifact carries a visible NOT CITABLE marker
-in its own banner and in its caption. ``--gate`` cannot override the evidence, only the
-default.
-
-Failed cells never enter a number and are listed in ``report.md``; `partial` records are
-marked ``*`` and `unstable` perf entries ``†``, both counted in the caption. Latency
-artifacts state which clock estimator they used: the per-variant under-load
-``perf[].sm_mhz``, never an idle or whole-run median.
-"""
+"""``bench report``: every paper table and figure from the records, every artifact marked NOT
+CITABLE unless ``--gate`` names a green gate and the evidence agrees (docs/system/evaluation.md
+§ Report)."""
 
 from __future__ import annotations
 
@@ -58,8 +43,6 @@ DATASET_LABEL = {
 }
 SPEEDUP_BASE = "linr_v1_filter_mask"
 
-# ----- loading ----------------------------------------------------------------
-
 
 def _load(results_dir: Path, out: Path) -> tuple[Path, list[dict[str, Any]]]:
     out.mkdir(parents=True, exist_ok=True)  # records.aggregate writes, it does not create
@@ -67,11 +50,9 @@ def _load(results_dir: Path, out: Path) -> tuple[Path, list[dict[str, Any]]]:
     return table, records.read_table(table)
 
 
-# ----- campaign manifest (docs/system/evaluation.md § Campaign manifest) -------------------
-
 MATCH_REQUIRED = ("dataset", "suite", "algo", "backend")
 MATCH_FIELDS = (*MATCH_REQUIRED, "filter_kind", "sweep")
-# Record fields that come from the quality pass, taken from the quality-accepted record.
+# the fields the quality-accepted record supplies under --manifest
 QUALITY_FIELDS = (
     "quality", "per_query", "pass_rate", "bloom_fp_rate", "n_queries_oracle",
     "n_queries_heldout", "n_targets_in_filter",
@@ -107,11 +88,9 @@ def _entry(m: dict[str, Any], rec: dict[str, Any]) -> dict[str, Any] | None:
 def select(
     recs: list[dict[str, Any]], m: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict]:
-    """Per cell (key block), quality from the record at the entry's quality ``code_version`` and
-    perf from the record at its perf ``code_version``; nothing from any other code_version. A
-    cell with no entry is excluded, one with no record at an accepted version is missing.
-    Returns the merged records, every source record accepted (what provenance judges), and
-    the excluded / missing cells."""
+    """Per cell, quality from the record at the entry's quality ``code_version`` and perf from the
+    record at its perf ``code_version``, nothing from any other. Returns the merged records, every
+    source record used, and the excluded / missing cells."""
     cells: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
     for r in recs:
         key = json.dumps(records.key_block(r), sort_keys=True)
@@ -147,17 +126,12 @@ def _samples(results_dir: Path) -> list[dict[str, Any]]:
     return [r for p in paths for r in records.read_records(p)]
 
 
-# ----- provenance and citability ----------------------------------------------
-
-
 # rule 2: numbers from a branch are not paper material
 MAIN_BRANCHES = ("staging", "development", "main")
 
 
 def provenance(recs: list[dict[str, Any]], gate: str | None) -> dict[str, Any]:
-    """The rule-2 verdict over a set of records. Shared with ``bench upload``, which puts
-    it in every published ``MANIFEST.json`` so a Hub copy cannot claim more than the
-    tables would."""
+    """The rule-2 verdict over a set of records, shared with ``bench upload``'s manifest."""
     env = [r.get("env") or {} for r in recs]
     status = Counter(r.get("status", "ok") for r in recs)
     dirty = [r for r, e in zip(recs, env, strict=True) if e.get("dirty")]
@@ -251,9 +225,6 @@ def _caption(prov: dict[str, Any], text: str) -> str:
     return f"\\textbf{{[NOT CITABLE: {_esc('; '.join(prov['marks']))}]}}~{text}"
 
 
-# ----- selection and reduction -------------------------------------------------
-
-
 def _sel(rows: list[dict[str, Any]], **eq: Any) -> list[dict[str, Any]]:
     keep = [r for r in rows if r.get("status") != "failed"]
     for field, want in eq.items():
@@ -310,10 +281,7 @@ def _cells(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _attach(rows: list[dict[str, Any]], recs: list[dict[str, Any]]) -> None:
-    """Join each flat row to its nested record (``_rec``) and perf entry (``_entry``), where
-    the statistics read the windows, the sidecar path and the interleave block (the parquet
-    carries the same values as ``perf_window_medians_ms``, ``per_query`` and
-    ``interleave_*``)."""
+    """Join each flat row to its nested record (``_rec``) and perf entry (``_entry``)."""
     by_key = {records.record_key(r): r for r in recs}
     for row in rows:
         key = {f: json.loads(row[f]) if f == "params" else row[f] for f in records.KEY_FIELDS}
@@ -359,10 +327,8 @@ def _sidecar(path: Path) -> dict[str, np.ndarray]:
 
 
 def _recall(c, rows: list[dict[str, Any]], k: int) -> dict | None:
-    """One arm's ``recall_oracle@k``: the mean over queries of the per-query recall (averaged
-    across the arm's distinct sidecars, i.e. its seeds when quality depends on the seed), with
-    the bootstrap CI over queries. Without a sidecar (schema <= 3): the median across seeds,
-    no CI."""
+    """One arm's ``recall_oracle@k``: the mean per-query recall over its sidecars with the
+    bootstrap CI over queries; without a sidecar the median across seeds, no CI."""
     rows = [r for r in rows if r.get(f"oracle_recall@{k}") is not None]
     if not rows:
         return None
@@ -418,8 +384,7 @@ def _ci_tex(v: dict | None, places: int) -> str:
 
 
 def _arm(algo: str, params: str | dict, tex: bool = True) -> str:
-    """One row label per parameter set: ``postfilter ($\\alpha$=1)``. Rows are never averaged
-    across parameters (the alpha rule, docs/system/evaluation.md § Report)."""
+    """One row label per parameter set, never averaged across parameters."""
     p = json.loads(params) if isinstance(params, str) else params
     bits = [
         f"{PARAM_LABEL.get(n, _esc(n) if tex else n)}={v}" for n, v in sorted((p or {}).items())
@@ -478,9 +443,6 @@ def _clock_note(rows: list[dict[str, Any]]) -> str:
     )
 
 
-# ----- LaTeX -------------------------------------------------------------------
-
-
 def _table(prov, results_dir, *, caption, label, colspec, header, body, notes) -> str:
     ncol = len(colspec.replace("|", ""))
     rows = body or [[f"\\multicolumn{{{ncol}}}{{c}}{{--- no matching cells ---}}"]]
@@ -524,9 +486,6 @@ def _legend(notes: list[str]) -> list[str]:
         "Cells with \\texttt{status: failed} are excluded and listed in \\texttt{report.md}.",
         *dict.fromkeys(notes),
     ]
-
-
-# ----- artifacts ---------------------------------------------------------------
 
 
 def tab_pareto(c) -> list[Path]:
@@ -652,8 +611,6 @@ def tab_backend_parity(c) -> list[Path]:
     )  # fmt: skip
     return [_write(c.out / "tables" / "tab-backend_parity.tex", tex)]
 
-
-# ----- matched recall -----------------------------------------------------------
 
 # The parameter a curve is swept along, per algo; every other param (n_lists, ...) splits curves.
 CURVE_AXIS = {"silvertorch": ("n_probe",), "linr_v3": ("candidate_pool", "candidate_pool_frac")}
@@ -884,9 +841,6 @@ def tab_matched_bands(c) -> list[Path]:
     ]
 
 
-# ----- figures -----------------------------------------------------------------
-
-
 def _figure(path: Path, fig, prov: dict[str, Any]) -> Path:
     fig.tight_layout()
     if not prov["citable"]:
@@ -1036,8 +990,6 @@ def fig_latency_violin(c) -> list[Path]:
     return [_figure(path, fig, c.prov)]
 
 
-# ----- paper exhibits (docs/system/evaluation.md § Paper exhibits) -----------------------
-
 REAL = ("goodreads", "arxiv", "pubmed")
 EXHIBIT_K = 100
 EXHIBIT_BS = (1, 16)
@@ -1156,10 +1108,8 @@ def tab_t2(c) -> list[Path]:
 
 
 def _kernels(rows: list[dict[str, Any]]) -> tuple[float | None, int | None, bool]:
-    """Kernel-only time (us) and launches of one eager call, median over seeds: the entry's
-    ``kernels_us`` / ``kernels_calls`` (every kernel). Records profiled before those fields
-    existed (H2H-FINAL at campaign-v2.1) fall back to the sum over the top-8 kernels, a lower
-    bound, flagged by the third value so the table marks it."""
+    """Kernel-only time (us) and launches of one eager call, median over seeds; a record without
+    ``kernels_us`` falls back to the top-8 sum, a lower bound the third value flags."""
     es = [r["_entry"] for r in rows if r["_entry"]]
     full = [e for e in es if e.get("kernels_us") is not None]
     if full:
@@ -1179,10 +1129,9 @@ def _kernels(rows: list[dict[str, Any]]) -> tuple[float | None, int | None, bool
 
 
 def _ids_identity(sub: list[dict[str, Any]], ref: list[dict[str, Any]]) -> str:
-    """T3's ids column against the Triton eager arm, per common seed: ``=`` when the canonical
-    ids hash is equal at every one; ``= (ties)`` when every seed that differs has bit-equal
-    scores (the parity spill's ``|Δs|_max`` is 0 over every query at ``k_max``, so the sorted
-    score lists agree at every k and only a tied id at the k-th cut can differ); else ``≠``."""
+    """T3's ids column against the Triton eager arm: ``=`` (equal canonical hashes at every common
+    seed), ``= (ties)`` (every differing seed has bit-equal scores, so only a tied id at the cut
+    differs), else ``≠``."""
     ref_ids = {r["seed"]: r["_entry"].get("ids_sha256_canon") for r in ref if r["_entry"]}
     pairs = [
         (r["_entry"].get("ids_sha256_canon") == ref_ids[r["seed"]], r)
@@ -1199,9 +1148,8 @@ def _ids_identity(sub: list[dict[str, Any]], ref: list[dict[str, Any]]) -> str:
 
 
 def _scorer(rows: list[dict[str, Any]]) -> float | None:
-    """The like-for-like scorer time (us) of one eager call, median over seeds: the entry's
-    ``kernel_scopes["scorer"]`` (H-SCOPE: ours with its fused bloom test, Meta's scoring with its
-    payload and bloom-search kernels). ``None`` for records profiled before the scopes existed."""
+    """The like-for-like scorer time (us) of one eager call, median over seeds
+    (``kernel_scopes["scorer"]``); ``None`` for records without scopes."""
     us = [
         e["kernel_scopes"]["scorer"]["us"]
         for r in rows
@@ -1792,12 +1740,9 @@ def tab_t1(c) -> list[Path]:
     return [_write(c.out / "tables" / "tab-t1_claims.tex", tex)]
 
 
-# ----- methodology and coverage -------------------------------------------------
-
-
 def methodology(c) -> list[Path]:
-    """The measurement-methodology itemize, its constants read out of the code that produced
-    the records, so text and code cannot drift apart."""
+    """The measurement-methodology itemize, its constants read out of the code that produced the
+    records."""
     lat = inspect.signature(measure.latency_group).parameters
     pool = inspect.signature(inputs.query_pool).parameters["n_pool"].default
     recs = c.recs
@@ -1999,8 +1944,8 @@ def _write(path: Path, text: str) -> Path:
 
 
 class Ctx:
-    """Everything every artifact needs: the flat rows, the nested records, the samples, the
-    provenance verdict and the one set of selectors."""
+    """Everything every artifact needs: rows, records, samples, the provenance verdict and the
+    selectors."""
 
     def __init__(
         self,

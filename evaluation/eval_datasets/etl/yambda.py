@@ -1,18 +1,5 @@
-"""Yambda Listen+ preprocessing.
-
-Library entrypoint:
-
-    from eval_datasets.yambda import preprocess
-
-CLI (replaces the old `scripts/prep_yambda.py`):
-
-    uv run eval-data yambda prep --variant 500m --output-dir data/yambda/500m-listens
-
-Adapted from the original `articles/yambda-benchmarks/sasrec/data.py::preprocess()`
-(commit 4594c93). We keep only the listens-Listen+ branch and the function
-contract — the rest of the original file (TrainDataset/EvalDataset/collate_fn)
-is replaced by `evaluation.training.dataset` and `evaluation.training.evaluate`.
-"""
+"""Yambda Listen+ preprocessing (docs/system/datasets.md § yambda), adapted from Yambda's own
+``sasrec/data.py::preprocess()``: the listens branch and the function contract only."""
 
 from __future__ import annotations
 
@@ -96,11 +83,8 @@ def preprocess(
     return Data(train=train, validation=val, test=test, item_id_to_idx=item_id_to_idx)
 
 
-# ----- CLI -------------------------------------------------------------------
-#
-# Downloads `<variant>/sequential/listens.parquet`, runs preprocess(), writes the
-# four trainer artifacts. Val history = train portion; test history = train ++ val,
-# last 200. See docs/system/datasets.md § yambda.
+# CLI: downloads <variant>/sequential/listens.parquet, runs preprocess(), writes the trainer
+# artifacts (docs/system/datasets.md § yambda)
 
 
 def concat_then_tail(history: pl.Expr, more: pl.Expr, n: int) -> pl.Expr:

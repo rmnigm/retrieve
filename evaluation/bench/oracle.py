@@ -1,8 +1,4 @@
-"""Exact filtered oracle (docs/system/evaluation.md § Oracle blob v4): brute-force
-``q @ E^T`` item chunk by item chunk under the *exact* mask (bloom's false positives never
-reach ground truth), top-``k_max`` with ``-inf`` ties written as ``-1``, cached as one blob
-whose file name carries a content fingerprint, so a stale blob is never read.
-"""
+"""The exact filtered oracle (docs/system/evaluation.md § Oracle blob v4)."""
 
 from __future__ import annotations
 
@@ -27,9 +23,8 @@ ITEM_CHUNK = 2_000_000
 
 
 def attrs_digest(item_attrs: torch.Tensor | None, clause_is_reverse: torch.Tensor | None) -> str:
-    """sha256 over the full bytes (shape, dtype, content) of ``item_attrs`` and
-    ``clause_is_reverse`` — the item side of the predicate. ≈ 1 s per GB; computed once per
-    ``(dataset, dim)`` by ``inputs.load_inputs`` and passed down to ``fingerprint``."""
+    """sha256 over the full bytes of ``item_attrs`` and ``clause_is_reverse``; about 1 s per GB,
+    so computed once per ``(dataset, dim)``."""
     h = hashlib.sha256()
     for t in (item_attrs, clause_is_reverse):
         if t is None:
@@ -144,13 +139,8 @@ def compute(
     item_chunk: int = ITEM_CHUNK,
     device: torch.device,
 ) -> dict[str, Any]:
-    """The v4 content fields (``topk``, ``pass_counts``, ``targets_in_filter``,
-    ``target_in_filter``, ``pass_rate``) for one sweep, item chunk by item chunk:
-    ``q @ chunk.T`` in exact fp32, the filter's ``evaluate_mask(qa, start, end)``, a local
-    top-k merged into the running ``[B, k]`` (ids offset by the chunk start, equal scores to
-    the lowest id). No ``[B, N]`` score or mask and no transposed copy of ``item_embs``.
-    ``filter_mod`` must be exact; with ``None`` (or no ``qa_sweep``) every item passes.
-    ``targets`` is ``[U, T]`` ``-1``-padded."""
+    """The v4 content fields of one sweep, item chunk by item chunk (§ Oracle blob v4);
+    ``filter_mod`` must be exact, ``None`` passes every item."""
     if torch.backends.cuda.matmul.allow_tf32 or torch.get_float32_matmul_precision() != "highest":
         raise RuntimeError("the oracle needs exact fp32 matmuls: TF32 is on (measure.setup)")
     n_users, n_items = queries.shape[0], int(item_embs.shape[0])
@@ -206,8 +196,7 @@ def blob_path(gt_dir: Path, sweep: str, fp: str) -> Path:
 
 
 def _wider_blob(gt_dir: Path, sweep: str, k_gt: int, own: Path, fp_at) -> dict[str, Any] | None:
-    """The smallest cached blob of this sweep whose fingerprint matches these inputs at its own
-    larger ``k_gt``, cut to ``k_gt`` in memory (``fp_at(k)``: this sweep's fingerprint at k)."""
+    """The smallest cached blob of this sweep at a larger ``k_gt``, cut to ``k_gt`` in memory."""
     best = None
     for p in sorted(gt_dir.glob(f"oracle_v4_{sweep}_{'?' * 16}.pt")):
         if p == own:
@@ -253,11 +242,8 @@ def load_or_build(
     warn_missing: bool = False,
     slice_wider: bool = False,
 ) -> dict[str, Any]:
-    """The v4 blob for one sweep: read from ``blob_path`` when present, else (``slice_wider``)
-    the top-``k_gt`` prefix of a cached blob of the same inputs at a larger ``k_gt``, else
-    build and save (atomically). The name carries the fingerprint, so a stale blob is simply never
-    found; an unreadable file at the path (a crash mid-save) is rebuilt, not fatal.
-    ``warn_missing``: the caller expected ``bench oracle`` to have built it (``bench run``)."""
+    """The v4 blob of one sweep: read, or (``slice_wider``) cut from a wider cached one, or
+    built and saved atomically; an unreadable file at the path is rebuilt."""
     fp = fingerprint(
         item_embs, queries, targets, qa_sweep, clauses, k_gt, attrs_digest=attrs_digest
     )
