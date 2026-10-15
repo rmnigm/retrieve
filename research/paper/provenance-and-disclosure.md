@@ -217,7 +217,7 @@ the item is not paper material (CLAUDE.md rule 2).
 | arXiv (papers, 3 M) | `nomic-embed-text-v1.5` embeddings, Matryoshka-truncated to d128; staged `item_attrs_narrow` `[N + 1, 4, 4]` (legacy layout: main category, license, update year, version count); 10,000 queries; real filters `c0_maincat`, `c3_nversions`, `all4`, and the synthetic `arxiv-synth` and `arxiv-corr-synth` | `pinkmeme/eval-arxiv-papers@354e6937` |
 | PubMed (10 M slice of ~36 M, d768) | NCBI's precomputed MedCPT article embeddings, queries through the MedCPT query encoder; `item_attrs_narrow` `[N, 5, 4]`; real filters `c0_mesh`, `c3_journal_reverse`, `all5` | NCBI FTP MedCPT release (public domain); the staged copy is pinned by sha256 (`item_attrs_narrow.pt` `8a3bce0f…`) and not yet published on the Hub |
 | LAION 1 / 3 / 10 / 30 M (d256) | Re-LAION-2B-en-research-safe captions (parts 0-1, one row per distinct caption) encoded with `nomic-embed-text-v1.5`, Matryoshka d256; 1 / 3 / 10 M are seeded subsets of the 30 M set (seed 20261013); attributes `[N, 6, 1]`; real filters `c0_domain`, `tags4`, and the synthetic sets | Hugging Face `laion/relaion2B-en-research-safe` (gated, automatic approval); `pinkmeme/eval-laion30m` is not yet published |
-| Yambda-500M / Yambda-5B | not in the study: unfiltered cells in the thesis only | `pinkmeme/eval-yambda-500m`, `pinkmeme/eval-yambda-5b` |
+| Yambda-500M | in the study, unfiltered, SilverTorch only ([decisions](../decisions.md#datasets), user 2026-10-13); Yambda-5B is not | `pinkmeme/eval-yambda-500m` (the Yambda-5B mirror was deleted, 2026-10-15) |
 
 **Disclosure on the mirror's layout.** The Hub mirror still publishes the
 **pre-`3b1b5b3` 1-indexed `[N + 1, …]`** artifact layout: goodreads

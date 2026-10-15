@@ -33,9 +33,9 @@ yet validated, not citable). Which older records this invalidates:
 | dataset config | ckpt-id | D | where it is |
 |---|---|---|---|
 | `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-goodreads-work-id` `checkpoints/` |
-| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-yambda-500m` `checkpoints/`; yambda is out of the study |
+| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-yambda-500m` `checkpoints/`; yambda-500m is in the study, unfiltered |
 | `kuairand.yaml` | `sasrec-ssm-logq-d64-trainval` | 64 | not kept anywhere (user); KuaiRand is out of the study ([refit command.sh](../../research/artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)) |
-| `yambda-5b.yaml` | `gsasrec-d{dim}` | 64, 128 | Hub `pinkmeme/eval-yambda-5b`; no E1c model trained |
+| `yambda-5b.yaml` | `gsasrec-d{dim}` | 64, 128 | not kept anywhere: `pinkmeme/eval-yambda-5b` was deleted by the user (2026-10-15); out of the study, no E1c model trained |
 
 Each E1c dir holds `best_model.pt`, `item_embs.pt`, `config.json`,
 `item_id_map.json`, `eval_quality.json`, `train_metrics.json` and a short
@@ -58,7 +58,6 @@ use `gsasrec-d128-drop0.5-id`.
 |---|---|
 | `pinkmeme/eval-goodreads-work-id` | `gsasrec-d{64,128,256}-drop0.5-id` |
 | `pinkmeme/eval-yambda-500m` | `gsasrec-d{64,128,256}-drop0.5` |
-| `pinkmeme/eval-yambda-5b` | `gsasrec-d{64,128}` |
 
 KuaiRand's gSASRec `gsasrec-d128-shared` was deleted from the Hub (user);
 nothing reproduces the one filter cell made with it.
@@ -239,6 +238,9 @@ The registry lives in
 | `goodreads-work-id` | `pinkmeme/eval-goodreads-work-id` |
 | `arxiv-papers` | `pinkmeme/eval-arxiv-papers` |
 | `kuairand` | `pinkmeme/eval-kuairand` |
+
+The `yambda-5b` and `kuairand` repos (and `yfcc10m`, also in `EVAL_REPOS`) were
+deleted by the user (2026-10-15): their keys remain in the registry but resolve to nothing.
 
 A given checkpoint then lands at
 `pinkmeme/eval-<dataset>/tree/main/checkpoints/<ckpt-id>/` rather than its
