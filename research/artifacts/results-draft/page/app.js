@@ -30,12 +30,20 @@ const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
 const br = document.getElementById("bridge");
 if (br) br.textContent = `on Goodreads the two move together: Pearson ${D.bridge.bloom100} at k 100 and ${D.bridge.bloom1000} at k 1000 over SilverTorch's bloom settings, ${D.bridge.all_lo}–${D.bridge.all_hi} per filter over every method`;
 
+function groups(sel, items, text) {
+  [[false, "Real filters"], [true, "Synthetic filters (random, controlled pass rate)"]].forEach(([syn, name]) => {
+    const g = document.createElement("optgroup"); g.label = name;
+    items.forEach(([v, k]) => { if (!!k.syn === syn) { const o = document.createElement("option"); o.value = v; o.textContent = text(k); g.appendChild(o); } });
+    if (g.children.length) sel.appendChild(g);
+  });
+}
+
 /* 3a. SilverTorch's own settings */
 (function () {
   const svg = document.getElementById("c-knob"), sel = document.getElementById("knob-ds"), ctl = document.getElementById("ctl-knob"), lg = document.getElementById("lg-knob");
   const K = D.knobs;
   let cur = Math.max(0, K.findIndex(k => k.key === "pubmed|c0_mesh")), bs = 16;
-  K.forEach((k, i) => { const o = document.createElement("option"); o.value = i; o.textContent = `${k.label} (pass ${pct(k.pass_rate)})`; sel.appendChild(o); });
+  groups(sel, K.map((k, i) => [i, k]), k => k.syn ? k.label : `${k.label} (pass ${pct(k.pass_rate)})`);
   sel.value = cur; sel.onchange = () => { cur = +sel.value; draw(); };
   [1, 16, 64].forEach(b => { const x = document.createElement("button"); x.id = "knob-bs-" + b; x.textContent = b === 1 ? "one query" : "batch of " + b; x.onclick = () => { bs = b; draw(); }; ctl.appendChild(x); });
   const ramp = ["var(--st-1)", "var(--st-2)", "var(--st-3)", "var(--ink-3)"];
@@ -272,14 +280,14 @@ function buttons(box, items, cur, on) {
 (function () {
   const sel = document.getElementById("tab-ds"), box = document.getElementById("tab-bs");
   const keys = [...new Map(D.tab.map(r => [r.key, r])).values()];
-  keys.forEach(k => { const o = document.createElement("option"); o.value = k.key; o.textContent = `${k.ds} · ${k.sweep} (pass ${pct(k.pass_rate)})`; sel.appendChild(o); });
+  groups(sel, keys.map(k => [k.key, k]), k => k.syn ? `${k.ds} · ${k.sweep}` : `${k.ds} · ${k.sweep} (pass ${pct(k.pass_rate)})`);
   let key = "pubmed|c0_mesh", bs = 16;
   sel.value = key; sel.onchange = () => { key = sel.value; draw(); };
   buttons(box, [[1, "one query"], [16, "batch of 16"], [64, "batch of 64"]], bs, v => { bs = v; draw(); });
   function draw() {
     const r = D.tab.find(x => x.key === key && x.bs === bs);
     const best = Math.min(...r.rows.map(x => x[2]).filter(x => x != null));
-    table("t-h2h", `Table 1. ${r.ds}, filter ${r.sweep} (pass ${pct(r.pass_rate)}), d = ${r.dim}, k = 100, batch ${bs}.`,
+    table("t-h2h", `Table 1. ${r.ds}, ${r.syn ? r.sweep === "no filter" ? "no filter" : "synthetic filter, " + r.sweep.replace("random ", "") + " of items pass at random" : "filter " + r.sweep + " (pass " + pct(r.pass_rate) + ")"}, d = ${r.dim}, k = 100, batch ${bs}.`,
       ["Algorithm", "Recall@100", "t<sub>med</sub>, ms", "Speed-up vs V1", "Setting", "Index, MiB"],
       r.rows.map(([name, rec, ms, sp, cfg, mib]) => {
         const b = ms === best;
@@ -297,13 +305,18 @@ function buttons(box, items, cur, on) {
     return `<td>${v >= 1 ? "<b>" + fx(v) + "</b>" : fx(v)}</td>`;
   };
   const share = (r, t) => r["frac" + t] == null ? `<td class="na">top ${f(r["top" + t])}</td>` : `<td class="l">${pct(r["frac" + t])}${r["frac" + t] > 0.25 ? " ◐" : ""}</td>`;
+  let syn = false;
+  buttons(document.getElementById("ctl-msum"), [[false, "real filters"], [true, "synthetic filters"]], syn, v => { syn = v; draw(); });
+  function draw() {
   let prev = null;
   table("t-msum", "Table 2. SilverTorch at recall 0.90 and 0.95: times faster than the best LiNR at the same recall (bold: SilverTorch faster), k = 100. ◐: half or more of the clusters probed; –: not reached within three quarters (top recall shown).",
     ["Dataset · filter", "Pass", "0.90: share", "bs 1", "bs 16", "bs 64", "0.95: share", "bs 1", "bs 16", "bs 64"],
-    D.msum.map(r => {
+    D.msum.filter(r => !!r.syn === syn).map(r => {
       const g = r.ds !== prev ? " grp" : ""; prev = r.ds;
-      return `<tr class="${g}"><td>${r.ds} · ${r.sweep}</td><td>${pct(r.pass_rate)}</td>${share(r, 0.9)}${cell(r, 0.9, 1)}${cell(r, 0.9, 16)}${cell(r, 0.9, 64)}${share(r, 0.95)}${cell(r, 0.95, 1)}${cell(r, 0.95, 16)}${cell(r, 0.95, 64)}</tr>`;
+      return `<tr class="${g}"><td>${r.ds} · ${r.syn ? (r.sweep === "no filter" ? "none" : "random") : r.sweep}</td><td>${pct(r.pass_rate)}</td>${share(r, 0.9)}${cell(r, 0.9, 1)}${cell(r, 0.9, 16)}${cell(r, 0.9, 64)}${share(r, 0.95)}${cell(r, 0.95, 1)}${cell(r, 0.95, 16)}${cell(r, 0.95, 64)}</tr>`;
     }));
+  }
+  draw();
 })();
 
 /* Table 3: batch size */

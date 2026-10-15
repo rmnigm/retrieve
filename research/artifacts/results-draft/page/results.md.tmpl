@@ -26,7 +26,7 @@ batch, with SilverTorch and LiNR timed in the same process.
 
 ## 1. Quality, speed and memory under filtering
 
-Table 1 shows each method on one real filter per dataset, at k = 100 and a batch of 16. SilverTorch appears at its
+Table 1 shows each method on one real filter at a time, at k = 100 and a batch of 16. SilverTorch appears at its
 default of 24 probes and at the fastest setting that reaches recall 0.90 and 0.95. LiNR V3 appears at the smallest pool
 (as a share of the passing items) that reaches the same targets. Speed-up is against exact LiNR V1. Three filters are
 shown here; the page has every filter and batch size.
@@ -49,8 +49,7 @@ filter but one. The exception is PubMed's MeSH filter, where only 0.02 % of item
 Table 2 holds SilverTorch to a recall target and compares it with the fastest LiNR that reaches the same target: exact V1
 or V2, or V3 at its smallest sufficient pool. Each cell shows how many times faster SilverTorch is (bold: SilverTorch
 faster). "Share" is the fraction of clusters SilverTorch probes. ◐: half or more of the clusters; "top": not reached
-within three quarters, with the best recall reached. Real filters, k = 100; the page has the full grid (k = 100, 1000,
-2048, synthetic filters).
+within three quarters, with the best recall reached. Real filters, k = 100; Table 2b gives the synthetic filters, and the page has the full grid (k = 100, 1000, 2048).
 
 **Table 2.**
 
@@ -63,6 +62,21 @@ clusters, and SilverTorch wins 13 of those. The other 42 do not reach it even at
 cases are filters whose passing items are thinly spread across clusters: LAION's domain filter, and its tag filter on
 the small LAION subsets. This is consistent with the classic shortage of candidates: a query's nearest clusters hold few items that pass, so recall has to be bought with more probes, while an exact scan pays the same price whatever the filter.
 **Third**, SilverTorch's lead narrows at a batch of 64 (on LAION 30M's tag filter: 7.4× at one query, 4.4× at 64). This is consistent with V1's full scan being one matrix product shared by the whole batch, while each SilverTorch query probes its own clusters and so amortises less.
+
+**Table 2b.** The same, on the synthetic filters (items pass at random).
+
+{T2s}
+
+The synthetic filters separate the pass rate from how the passing items are spread. They pass items at random, so a
+query's nearest clusters hold their fair share of passing items at any rate, and SilverTorch beats the best LiNR at
+recall 0.90 on every synthetic filter and batch size (1.1–34×). The share of clusters it needs falls as more items pass:
+on LAION-synth 30M from a quarter at 0.1 % to 3 % at 10 % and 1.6 % with no filter. At 10 % on the 10–30 M sets it is
+4.8–14× faster than the best LiNR, against 0.8–7.4× on LAION's real filters at the same sizes, which pass 1 % or less.
+Rarity alone does not explain the gap: from 3 M items up, the random 0.1 % filter needs at most a quarter of the clusters, consistent
+with the real filters' passing items being thin in a query's nearest clusters, not merely rare. At 0.95 the lead
+shrinks, most at a batch of 64 with no filter (0.8–1.6×), and PubMed-synth does not reach 0.95 at 1 % or more (top
+0.91–0.93), consistent with int8 scores limiting recall on PubMed, as on its broad real filters. Between 10 % and 100 %
+SilverTorch was timed only at these four rates; the 20 % and 50 % filters were run for LiNR alone (Figure 2).
 
 ## 3. Effect of batch size on speed
 

@@ -31,6 +31,15 @@ lab["arxiv-corr-synth"] = "arXiv-corr-synth 3M"
 D = {}
 
 
+def flt(ds, sw):
+    if ds not in SYN:
+        return sw
+    d = sw[1:]
+    if d == "1":
+        return "no filter"
+    return f"random {float(d[0] + '.' + d[1:] if len(d) > 1 else d) * 100:g} %"
+
+
 def num(v, nd=3):
     return None if pd.isna(v) else round(float(v), nd)
 
@@ -483,7 +492,8 @@ for (ds, sw), g in cv.groupby(["dataset", "sweep"]):
     knobs.append(
         dict(
             key=f"{ds}|{sw}",
-            label=f"{lab[ds]} · {sw}",
+            label=f"{lab[ds]} · {flt(ds, sw)}",
+            syn=ds in SYN,
             n=int(g.n_items.iloc[0]),
             pass_rate=num(g.pass_rate.iloc[0], 4),
             curves={
@@ -510,7 +520,7 @@ for (ds, sw), g in cv.groupby(["dataset", "sweep"]):
             },
         )
     )
-D["knobs"] = sorted(knobs, key=lambda r: (r["n"], r["key"]))
+D["knobs"] = sorted(knobs, key=lambda r: (r["syn"], r["n"], r["key"], r["pass_rate"]))
 
 # Thesis-style tables: one per question, algorithms as rows
 rp = pd.read_parquet(OUT + "results.parquet")
@@ -535,7 +545,7 @@ def mib(ds, arm, nl=None):
 
 
 tab = []
-k100 = h0[(h0.perf_k == 100) & h0.dataset.isin(REAL)]
+k100 = h0[(h0.perf_k == 100) & h0.dataset.isin(REAL + SYN)]
 for (ds, sw, bs), g in k100.groupby(["dataset", "sweep", "perf_bs"]):
     v1, v2 = g.V1.iloc[0], g.V2.iloc[0]
     tt = s0[
@@ -610,22 +620,26 @@ for (ds, sw, bs), g in k100.groupby(["dataset", "sweep", "perf_bs"]):
             ds=lab[ds],
             key=f"{ds}|{sw}",
             n=int(g.n_items.iloc[0]),
-            sweep=sw,
+            sweep=flt(ds, sw),
+            syn=ds in SYN,
             bs=int(bs),
             pass_rate=num(g.pass_rate.iloc[0], 4),
             dim=int(g.dim.iloc[0]),
             rows=rows,
         )
     )
-D["tab"] = sorted(tab, key=lambda r: (r["n"], r["key"], r["bs"]))
+D["tab"] = sorted(
+    tab, key=lambda r: (r["syn"], r["n"], r["ds"], r["pass_rate"], r["key"], r["bs"])
+)
 # matched-recall summary: one row per real filter, SilverTorch at 0.90 against the best LiNR at that recall
 msum = []
-for (ds, sw), g in s0[(s0.perf_k == 100) & s0.dataset.isin(REAL)].groupby(
+for (ds, sw), g in s0[(s0.perf_k == 100) & s0.dataset.isin(REAL + SYN)].groupby(
     ["dataset", "sweep"]
 ):
     row = dict(
         ds=lab[ds],
-        sweep=sw,
+        sweep=flt(ds, sw),
+        syn=ds in SYN,
         n=int(g.n_items.iloc[0]),
         pass_rate=num(g.pass_rate.iloc[0], 4),
     )
@@ -641,7 +655,9 @@ for (ds, sw), g in s0[(s0.perf_k == 100) & s0.dataset.isin(REAL)].groupby(
         }
         row[f"top{t}"] = num(x.max_recall.iloc[0])
     msum.append(row)
-D["msum"] = sorted(msum, key=lambda r: (r["n"], r["ds"], r["sweep"]))
+D["msum"] = sorted(
+    msum, key=lambda r: (r["syn"], r["n"], r["ds"], r["pass_rate"], r["sweep"])
+)
 D["band"] = dict(
     beyond=D["counts"]["beyond"],
     beyond_wins=D["counts"]["beyond_wins"],
@@ -694,7 +710,7 @@ D["scale"] = [
         ),
     )
     for r in D["msum"]
-    if r["ds"].startswith("LAION")
+    if r["ds"].startswith("LAION") and not r["syn"]
 ]
 D["c5tab"] = [
     dict(
