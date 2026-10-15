@@ -65,16 +65,16 @@ def is_sticky(exc: BaseException) -> bool:
 
 
 def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device) -> dict:
-    """One sweep's assets: query attrs and skip mask, the standalone filter, the oracle blob,
-    bloom pass counts and the row masks the quality pass scores (docs/system/evaluation.md
+    """One sweep's assets: query attrs and skip mask, the standalone filter (clause cells), the
+    oracle blob and the row masks the quality pass scores (docs/system/evaluation.md
     § Measurement protocol, § Self-match)."""
     fk, n = job.filter_kind, inp["n_queries"]
     qa_s, skip = inputs.sweep_qa(inp["qa"], job.clauses)
-    filters = inputs.build_filters(fk, inp, [job.backend], bloom=job.bloom)
+    filters = inputs.build_filters(fk, inp, [job.backend])
     filter_mod = filters.get(algos.filter_backend(job.backend))
     keep = ~skip if skip is not None else torch.ones(n, dtype=torch.bool)
     heldout = keep & (inp["n_targets"] > 0)
-    bloom_fp = self_ids = self_top1 = None
+    self_ids = self_top1 = None
     blob = sweep_oracle(job, inp, k_max, device, filters, qa_s, skip, warn_missing=True)
     oracle_topk = blob["topk"]
     if fk != "none":
@@ -87,10 +87,6 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
                         "{} rows", job.dataset, job.sweep, self_top1, int(reach.sum()))  # fmt: skip
             oracle_topk = drop_self(oracle_topk, self_ids)
     oracle_rows = keep & (oracle_topk[:, 0] != -1)
-    if fk == "bloom":
-        assert filter_mod is not None
-        counts = oracle.pass_counts(filter_mod, qa_s, skip, inp["n_items"], device=device)
-        bloom_fp = oracle.bloom_fp_rate(counts, blob["pass_counts"], inp["n_items"])
     n_tif = blob["targets_in_filter"][heldout].sum()
     return {
         "qa_s": qa_s,
@@ -105,7 +101,6 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
         "heldout_rows": heldout,
         "n_targets_in_filter": int(n_tif),
         "pass_rate": blob["pass_rate"],
-        "bloom_fp_rate": bloom_fp,
     }
 
 
@@ -153,7 +148,7 @@ def prebuild_oracles(jobs: Sequence[Job], device: torch.device | None = None) ->
         inp = inputs.load_inputs(next(iter(group.values())).data, device, with_filters=filtered)
         for j in group.values():
             fk = "clause" if j.filter_kind == "clause" else "none"  # bloom builds its exact one
-            filters = inputs.build_filters(fk, inp, [j.backend], bloom=j.bloom)
+            filters = inputs.build_filters(fk, inp, [j.backend])
             qa_s, skip = inputs.sweep_qa(inp["qa"], j.clauses)
             sweep_oracle(j, inp, max(j.ks), device, filters, qa_s, skip, warn_missing=False)
             counts["sweeps"] += 1
@@ -582,7 +577,6 @@ def _new_record(
         "n_targets_in_filter": assets["n_targets_in_filter"],
         "n_queries_oracle": int(assets["oracle_rows"].sum()),
         "pass_rate": assets["pass_rate"],
-        "bloom_fp_rate": assets["bloom_fp_rate"],
         "bloom": dict(job.bloom) if job.filter_kind == "bloom" else None,
         "k_max": max(job.ks),
         "ks": list(job.ks),

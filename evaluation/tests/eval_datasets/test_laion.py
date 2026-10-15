@@ -1,4 +1,4 @@
-"""CPU-only tests for the Re-LAION loader (roadmap V-LAION30): registered domains, the tag
+"""CPU-only tests for the Re-LAION loader: registered domains, the tag
 buckets, the exact top-1 target, and prep → (stand-in vectors) → targets → attrs →
 ``validate_layout`` on a tiny pair of parts in the upstream column schema."""
 
@@ -99,7 +99,7 @@ def test_prep_then_ingest_pass_validate_layout(raw, tmp_path):
 
 def test_prep_two_builds_are_byte_identical(raw, tmp_path, monkeypatch):
     # prep picks items / queries by position after the domain join, which now keeps the left
-    # order explicitly; today's polars kept it anyway, so this also passes on the old code
+    # order explicitly
     args = argparse.Namespace(parts="0-1", keep_items=50, n_heldout=8, seed=0)
     outs = []
     for name in ("a", "b"):

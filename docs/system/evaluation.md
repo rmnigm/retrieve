@@ -49,9 +49,10 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    cells, `torch` for torch cells). Per sweep: synthesised query attrs,
    skip mask, exact oracle top-`max(ks)` (the [blob v4](#oracle-blob-v4)
    cache) **plus** `target_in_filter[u]` (the held-out item passes the exact
-   mask) and `pass_rate` (exact; bloom cells also record the bloom rate as
-   `bloom_fp_rate`), the axis both papers organise their tables around
-   (LiNR high/low pass-rate; SilverTorch FP rate against bits).
+   mask) and `pass_rate` (exact), the axis both papers organise their tables
+   around. The harness measures no bloom false-positive rate: SilverTorch's
+   bloom is Meta's, its false positives are counted outside the timed code
+   ([decisions](../../research/decisions.md#goal-and-scheduling)).
 3. **Build.** `build_s` = wall time of algo construction + `register_index`
    with a sync on each side (`measure.timed_build`), recorded on every cell
    of the build (a `deep` job with six `n_probe` values repeats one
@@ -259,7 +260,7 @@ which exist for `buffers()`, `.k`, `torch.compile` and because their
 | [`postfilter.py`](../../evaluation/bench/postfilter.py) | `Postfilter`, the generic-torch baseline ([below](#the-postfilter-baseline)) |
 | [`config.py`](../../evaluation/bench/config.py) | `Dataset`, `Job`, `load_dataset`, `load_matrix` — the config matrix below; `interleave_units`, `shared_key` (the [interleave groups](#interleaved-groups)) |
 | [`inputs.py`](../../evaluation/bench/inputs.py) | `load_inputs` (dispatch to `training.encode.encode_split` or the `eval_datasets.layout` text readers; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
-| [`oracle.py`](../../evaluation/bench/oracle.py) | the exact filtered oracle as blob v4, `attrs_digest`, `pass_counts`, `pass_rate`, `bloom_fp_rate` |
+| [`oracle.py`](../../evaluation/bench/oracle.py) | the exact filtered oracle as blob v4, `attrs_digest`, `pass_rate` |
 | [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `QUALITY_CPU_THREADS = 1`, `EXACT_ALGOS`, `SEED_FREE_QUALITY`, `PER_K_QUALITY`, `PERF_STAT_KEYS`, `IDS_PROBE_BATCHES`, `CLOCK_DRIFT` |
 | [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `oracle` / `check` / `upload` / `fetch` / `merge` / `report` / `env` |
 | [`report.py`](../../evaluation/bench/report.py) | `bench report`: `results.parquet`, the paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table and the citability verdict. See [Report](#report-reportpy) |
@@ -703,8 +704,7 @@ latency_kw=None, device=None) -> Counter` runs the jobs in order:
    `sweep_qa` → `build_filters` → `exact_filter` (none on a `none` cell) +
    `oracle.load_or_build` (blob v4 at `k_max = max(ks)`, `k_max + 1` on a
    [self-excluded](#self-match) cell; a `none` cell's blob is unfiltered and keyed with
-   `run.NO_ATTRS`, so it does not depend on the dataset's attrs) and on bloom cells
-   `pass_counts` → `bloom_fp_rate`; the row masks: `keep` (not
+   `run.NO_ATTRS`, so it does not depend on the dataset's attrs); the row masks: `keep` (not
    skip-masked), `oracle_rows` (kept with ≥ 1 survivor), `heldout_rows` (kept, ≥ 1 target, and on filter cells
    `target_in_filter`);
 4. per job: `measure.setup(job.seed)`, one `timed_build` of
@@ -882,16 +882,13 @@ behaviour.
 
 `m_bits` / `k_hash` in an arm's `build:` grid (silvertorch / bloom only,
 else a `ConfigError`) become that job's `bloom`. It feeds the module's
-index, the standalone filter of step 3 and so the bloom pass counts and
-`bloom_fp_rate`, the record's `bloom`, and `index_mib` / `filter_mib`. The
-step-3 asset key carries the bloom, so each width builds its own filter.
-The exact oracle does not depend on the width and is shared. A cell that
-does not grid them keeps the suite default outside `params`, so its key is
-byte-for-byte the pre-grid one. The `bloomwidth` suites grid them. On
-`official`, `SilverTorch` ignores `m_bits`: the official index's width is
-`OfficialConfig.b_multiplier`, and `k_hash` is its search `k`. An official
-cell's `bloom_fp_rate` is the standalone Triton filter's at the job's
-`m_bits`, not the official index's.
+index, the record's `bloom` and `index_mib`. A bloom cell has no standalone
+filter (`filter_mib` 0): the bloom is SilverTorch's own, and the exact
+oracle does not depend on the width and is shared. A cell that does not grid
+them keeps the suite default outside `params`, so its key is byte-for-byte
+the pre-grid one. The `bloomwidth` suites grid them. On `official`,
+`SilverTorch` ignores `m_bits`: the official index's width is
+`OfficialConfig.b_multiplier`, and `k_hash` is its search `k`.
 
 ### Compiled arms
 
@@ -949,8 +946,7 @@ gitignored, read by resume, kept on the Hub once a leg finishes
 | `n_queries_oracle` | int | kept queries with ≥ 1 survivor (the oracle metrics' `n`; every kept query on `none` cells) |
 | `n_queries_heldout` | int | queries the held-out metrics cover (kept, ≥ 1 target, `target_in_filter` on filter cells) |
 | `n_targets_in_filter` | int | held-out targets those queries are scored against: every valid target on `none` cells, only the ones the exact mask admits on filter cells |
-| `pass_rate` | float | exact mask pass rate over kept queries (`1.0` on `none`) |
-| `bloom_fp_rate` | float / null | mean per-query `(bloom − exact) / (N − exact)`; bloom cells only |
+| `pass_rate` | float | exact mask pass rate over kept queries (`1.0` on `none`). Records written before the field was retired also carry `bloom_fp_rate`, our own hash's false-positive rate; `results.parquet` and `bench merge` drop it |
 | `bloom` | dict / null | `{m_bits, k_hash}` on bloom cells: the suite default, or the cell's own when `params` grids them ([bloom widths](#bloom-widths-as-build-params)) |
 | `k_max`, `ks`, `batch_sizes` | | the suite's, `k_max = max(ks)` |
 | `build_s` | float | construction + `register_index`, sync on each side (same value on every cell of one build) |
@@ -1079,7 +1075,7 @@ layout gained a key field.
 `report.py` reads. Columns, in order: the key block (`params` as canonical
 JSON); the record scalars `status, path, n_items, n_queries, n_kept,
 n_queries_heldout, n_queries_oracle, n_targets_in_filter, pass_rate,
-bloom_fp_rate, k_max, build_s, index_mib, filter_mib, unstable,
+k_max, build_s, index_mib, filter_mib, unstable,
 memory_reserved_mib, elapsed_s, schema_version, stage, error,
 partial_reasons` (a list), `seed_scope, per_query`; `env_code_version,
 env_commit, env_dirty, env_gpu, env_sm_mhz_load, env_clocks_drift,
@@ -1113,7 +1109,9 @@ its JSONL never flips it.
 `bench fetch` leaves them (one per Hub subtree; the directory name is the
 `subtree` label, so `bench merge fetched/fr/* --out tables/` merges a whole
 run) and writes four files under `DIR`, `merge.TABLES_VERSION` = 1. The
-records are read as they are, never rewritten.
+records are read as they are, never rewritten; two retired things are left
+out on read: the `bloom_fp_rate` field, and every LiNR bloom record (a
+sidecar's lines still pair, then the record is dropped).
 
 **The accepted record.** A cell is a resume key (key block +
 `code_version`). Among the records of one cell, wherever they ran, the
@@ -1174,8 +1172,7 @@ fp32 (the function raises unless TF32 is off and the matmul precision is
 range) fails, a local `topk`, merged into the running `[B, k]` with ids
 offset by the chunk start; equal scores go to the lower id (a stable sort by
 id, then by score). `pass_counts` and `targets_in_filter` accumulate per
-chunk the same way, and `oracle.pass_counts` (the bloom counts) sums
-`evaluate_mask` over the same chunks. No `[B, N]` score or mask exists and
+chunk the same way. No `[B, N]` score or mask exists and
 `item_embs` is never transposed into a copy (the chunk's `.t()` is a view
 cuBLAS reads transposed). The blob version and fingerprint did not change:
 a blob built in one shot holds the same content up to exact-score ties
@@ -1215,7 +1212,7 @@ identities named; report each encoder from its own tree.
 | `f1` | `figures/fig-f1-latency-vs-pass-rate.png` | F1: p50 vs pass rate on the `*-synth` datasets (log x), one panel per scale × bs; V1, V2, V3 per pool, postfilter per alpha, SilverTorch Triton at matched recall 0.95 |
 | `f2` | `figures/fig-f2-recall-vs-pass-rate.png` | F2: `recall_oracle@100` vs pass rate; synth SilverTorch per measured `n_probe` and V3 per pool, the real `filter` sweeps overlaid as per-query pass-rate buckets from the sidecars |
 | `f3` | `figures/fig-f3-pareto.png` | F3: the `deep` suite's recall–latency curves (matched-recall curves), one panel per (dataset, sweep) × bs (one row per sweep), filter kinds as separate curves, 0.90 / 0.95 marked |
-| `f4a` | `figures/fig-f4a-bloomwidth.png`, `tables/tab-f4a_bloomwidth.tex` | F4a (`bloomwidth*` suites): `bloom_fp_rate` and `index_mib` vs `m_bits` per dataset / backend / `k_hash`; the table adds `filter_mib`, recall and the bs-16 timed point |
+| `f4a` | `figures/fig-f4a-bloomwidth.png`, `tables/tab-f4a_bloomwidth.tex` | F4a (`bloomwidth*` suites): `index_mib` vs `m_bits` per dataset / backend / `k_hash`; the table adds `filter_mib`, recall and the bs-16 timed point (the false-positive counts come from the untimed step, not the records) |
 | `f4b` | `figures/fig-f4b-codesign.png`, `tables/tab-f4b_codesign.tex` | F4b (`codesign` suite): partial vs full bloom path latency vs `n_probe` and the paired full / partial ratio with its CI |
 | `fig_deep_sweep` | `figures/fig-deep-sweep-*.png` | one per swept parameter: recall and latency against its value, whiskers = min–max across seeds |
 | `fig_latency_violin` | `figures/fig-latency-violin.png` | per-call distributions from the samples sidecar (`<name>.samples.jsonl`, one torn trailing line tolerated) |
@@ -1313,7 +1310,7 @@ selects it whatever its value (`FIXED_BACKEND`).
 records the paper reads. `bench report <fetched tree> --manifest
 evaluation/campaign.yaml` groups the tree's records by cell (the key block)
 and, per cell, takes the quality fields (`quality`, `per_query`,
-`pass_rate`, `bloom_fp_rate`, the oracle / held-out counts) from the record
+`pass_rate`, the oracle / held-out counts) from the record
 at the entry's `quality.code_version` and everything else from the record
 at its `perf.code_version` — the reuse rule keeps an old record's quality
 while its timing is rerun; such a merged record carries `quality_source:

@@ -77,21 +77,18 @@ def sweep_qa(
 
 
 def build_filters(
-    filter_kind: str, inputs: dict[str, Any], backends: list[str], *, bloom: dict[str, int]
+    filter_kind: str, inputs: dict[str, Any], backends: list[str]
 ) -> dict[str, FilterModule]:
-    """One standalone ``FilterModule`` per *filter* backend the cell backends map to."""
+    """One standalone exact ``FilterModule`` per *filter* backend the cell backends map to, on
+    ``clause`` cells; empty elsewhere (a bloom cell's filter is SilverTorch's own)."""
     mods: dict[str, FilterModule] = {}
-    if filter_kind == "none":
+    if filter_kind != "clause":
         return mods
     for fb in dict.fromkeys(algos.filter_backend(b) for b in backends):
         mods[fb] = algos.build_filter(
-            filter_kind,
-            inputs["item_attrs"],
-            clause_is_reverse=inputs["clause_is_reverse"],
+            filter_kind, inputs["item_attrs"], clause_is_reverse=inputs["clause_is_reverse"],
             backend=fb,
-            m_bits=bloom["m_bits"],
-            k_hash=bloom["k_hash"],
-        )
+        )  # fmt: skip
     logger.info("filter modules ({}): {}", filter_kind, sorted(mods))
     return mods
 

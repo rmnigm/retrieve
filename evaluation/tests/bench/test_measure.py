@@ -4,8 +4,8 @@ What can be checked without a GPU: the window statistics against a numpy referen
 control flow of ``latency`` (window count, chosen window, keys, spread), ``index_bytes``
 over shared submodules, ``provenance``'s git fields, the ``clocks`` record shape, and that
 ``graph_callable`` refuses (with the record's ``reason``) before compiling anything. On a GPU,
-``profile_once`` returns a Triton bloom call's kernels (H-PROFILE). The CUDA-event timing path
-and the cudagraph skip / launch assertions are exercised on the A100 in roadmap C4.
+``profile_once`` returns a Triton clause call's kernels. The CUDA-event timing path
+and the cudagraph skip / launch assertions are exercised on the GPU.
 """
 
 from __future__ import annotations
@@ -177,7 +177,7 @@ def test_dirty_is_scoped_to_the_library_subtree(monkeypatch):
     if not tree:
         pytest.skip("git unavailable")
     # Docs / harness edits: repo dirty, library clean → the tree hash still names the code.
-    monkeypatch.setattr(bench, "_git", _fake_git("", " M docs/plans/00-roadmap.md"))
+    monkeypatch.setattr(bench, "_git", _fake_git("", " M docs/system/evaluation.md"))
     p = bench.provenance()
     assert (p["dirty"], p["repo_dirty"]) == (False, True) and p["code_version"] == tree
     # An uncommitted kernel edit: the tree hash would lie, so code_version is the content
@@ -201,7 +201,7 @@ def _git_in(repo, *args):
 
 
 def test_code_version_names_the_imported_library_not_the_launching_checkout(tmp_path, monkeypatch):
-    """H-PROVENANCE: an editable install whose package sits in another checkout (the pods'
+    """An editable install whose package sits in another checkout (the pods'
     shared venv) is stamped from that checkout, and moves when it moves."""
     other = tmp_path / "other"
     lib = other / "retrieve" / "src" / "retrieve"
@@ -267,7 +267,7 @@ def test_profile_once_is_empty_without_cuda():
 
 
 def test_kernel_summary_sums_every_kernel_but_the_sentinels():
-    """H-KSUM: ``kernels`` keeps the top ``top`` by self time; ``kernels_us`` / ``kernels_calls``
+    """``kernels`` keeps the top ``top`` by self time; ``kernels_us`` / ``kernels_calls``
     sum all of them, the tail past ``top`` included, and never the two sentinels."""
     ev = lambda key, us, n: SimpleNamespace(key=key, self_device_time_total=us, count=n)  # noqa: E731
     events = [ev(f"k{i}", float(i + 1), i % 3 + 1) for i in range(12)]
@@ -410,7 +410,7 @@ def test_setup_seeds_and_pins_precision():
 
 
 def test_inductor_cache_is_keyed_by_code_version_even_when_given():
-    """H-INDCACHE: two code_versions, two cache dirs, under the default root and under a
+    """Two code_versions, two cache dirs, under the default root and under a
     caller-set directory alike (the caller's dir gets the code_version appended)."""
     a = bench.inductor_cache_dir("0123abcd", None)
     b = bench.inductor_cache_dir("files:4567ef", None)

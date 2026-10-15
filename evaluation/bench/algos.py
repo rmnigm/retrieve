@@ -9,7 +9,6 @@ from torch import Tensor, nn
 
 from bench.postfilter import Postfilter
 from retrieve import (
-    BloomFilter,
     ExactAttributeFilter,
     LiNRV1,
     LiNRV2,
@@ -101,23 +100,15 @@ def build_filter(
     *,
     clause_is_reverse: Tensor | None = None,
     backend: str = "triton",
-    m_bits: int = BLOOM_DEFAULTS["m_bits"],
-    k_hash: int = BLOOM_DEFAULTS["k_hash"],
 ) -> FilterModule | None:
-    """One standalone ``FilterModule``; ``None`` for ``none``. Bloom is forward-only, so it never
-    sees ``clause_is_reverse``."""
-    if filter_kind == "none":
+    """The standalone exact filter of a ``clause`` cell; ``None`` for ``none`` and ``bloom`` (the
+    bloom filter is SilverTorch's own)."""
+    if filter_kind != "clause":
         return None
     if item_attrs is None:
-        raise ValueError(f"filter_kind={filter_kind} needs item_attrs")
-    if filter_kind == "clause":
-        f: FilterModule = ExactAttributeFilter(backend=backend)
-        f.register_index(item_attrs, clause_is_reverse=clause_is_reverse)
-    elif filter_kind == "bloom":
-        f = BloomFilter(m_bits=m_bits, k_hash=k_hash, backend=backend)
-        f.register_index(item_attrs)
-    else:
-        raise ValueError(f"unknown filter_kind {filter_kind!r}")
+        raise ValueError("filter_kind=clause needs item_attrs")
+    f = ExactAttributeFilter(backend=backend)
+    f.register_index(item_attrs, clause_is_reverse=clause_is_reverse)
     return f
 
 

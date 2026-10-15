@@ -81,7 +81,7 @@ def _rec(
         "sweep": sweep, "algo": algo, "backend": backend, "params": params or {},
         "seed": seed, "path": backend, "n_items": 797084, "n_queries": 10000, "n_kept": 9859,
         "n_queries_heldout": 9859, "n_queries_oracle": 9859, "pass_rate": 0.33,
-        "bloom_fp_rate": None, "k_max": 100, "ks": [100], "batch_sizes": [1, 8, 16],
+        "k_max": 100, "ks": [100], "batch_sizes": [1, 8, 16],
         "build_s": 1.0, "index_mib": 194.6, "filter_mib": 0.0,
         "quality": {
             "heldout": {"recall@100": 0.2, "n": 9859},
@@ -478,7 +478,6 @@ def _rec4(
     kernels_us=None,
     scopes=None,
     ids="a",
-    fp_rate=None,
     source=None,
     status="ok",
     score_diff=None,
@@ -532,7 +531,6 @@ def _rec4(
         "seed_scope": "pool" if algo in DETERMINISTIC else "pool+build",
         "quality_source": None,
         "interleave": interleave,
-        "bloom_fp_rate": fp_rate,
         "filter_mib": 0.0 if backend != "triton" else 1.5,
         "partial_reasons": ["skip_perf"] if status == "partial" else None,
     }
@@ -838,7 +836,6 @@ def _campaign_tree(root):
                         fk="bloom",
                         params={"n_probe": 24, "m_bits": m_bits, "k_hash": k_hash},
                         perf=False,
-                        fp_rate=0.0 if m_bits == 1024 else 0.02 / k_hash,
                     )
                 _rec4(
                     root,
@@ -850,7 +847,6 @@ def _campaign_tree(root):
                     fk="bloom",
                     params={"n_probe": 24, "m_bits": m_bits, "k_hash": 5},
                     bss=(16,),
-                    fp_rate=0.0,
                     ms=0.5,
                 )
 
@@ -864,7 +860,7 @@ def _campaign_tree(root):
         g = f"h2h-goodreads-{s}"
         # int32: seed 1 returns another tied id at the k-th cut (scores bit-equal); fp16: other
         # ids and other scores. Triton is profiled over every kernel, official top-8 only.
-        # H-SCOPE: triton and official fp16 carry kernel_scopes, int32 does not (an older record)
+        # triton and official fp16 carry kernel_scopes, int32 does not (an older record)
         sc = lambda us: {"scorer": {"us": us, "calls": 1}, "other": {"us": 1.0, "calls": 1}}  # noqa: E731
         for pos, (be, params, ms, ids, diff, kus, scopes) in enumerate(
             (
@@ -1047,10 +1043,10 @@ def test_f3_draws_one_panel_per_sweep_and_batch_size(campaign, monkeypatch):
         )
 
 
-def test_f4_tables_carry_fpr_memory_and_the_paired_codesign_ratio(campaign):
+def test_f4_tables_carry_memory_and_the_paired_codesign_ratio(campaign):
     _, out, _ = campaign
     f4a = (out / "tables" / "tab-f4a_bloomwidth.tex").read_text()
-    assert "$6.67{\\times}10^{-3}$" in f4a  # 0.02 / k_hash 3 at 64 bits
+    assert "FPR" not in f4a and "bloom_fp_rate" not in f4a  # the field is gone
     assert "& $1.50$ &" in f4a  # filter_mib of the triton module
     f4b = (out / "tables" / "tab-f4b_codesign.tex").read_text()
     ratios = re.findall(r"\$1\.50\\times\\,\[1\.50, 1\.50\]\$", f4b)

@@ -24,7 +24,8 @@ ENV_SKIP = ("code_version", "commit", "git_branch", "host", "started")
 
 def load(tree: Path) -> list[dict[str, Any]]:
     """Every record of ``tree`` with ``_subtree``, ``_file``, ``_line``, ``_cell`` and the
-    ``_samples`` list (one per-call vector per perf entry that ran, or ``None``)."""
+    ``_samples`` list (one per-call vector per perf entry that ran, or ``None``). The retired
+    ``bloom_fp_rate`` field is dropped on read, and so is every LiNR bloom record."""
     out = []
     for path in records.record_files(tree):
         recs = records.read_records(path)
@@ -34,10 +35,11 @@ def load(tree: Path) -> list[dict[str, Any]]:
             rec["_line"] = i
             rec["_cell"] = hashlib.sha1(records.record_key(rec).encode()).hexdigest()[:16]
             rec["_samples"] = [None] * len(rec.get("perf") or [])
-        out += recs
+            rec.pop("bloom_fp_rate", None)
         samples = records.samples_path(path)
         if samples.exists():
             _pair_samples(samples, records.read_records(samples), recs)
+        out += [r for r in recs if not (r["filter_kind"] == "bloom" and r["algo"] != "silvertorch")]
     return out
 
 

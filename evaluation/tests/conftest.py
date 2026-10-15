@@ -4,7 +4,7 @@ dataset on disk (``write_tiny_dataset``, the one writer ``test_inputs.py`` and
 driven end to end through ``config.load_matrix`` without a GPU or real data. The ``e2e``
 suite has two algos (the in-process loop); ``e2e1`` has one, for the campaign test's single
 child; ``postfilter`` runs the baseline next to the exact V1 it is measured against; ``arms``
-holds the campaign-v2 params (gridded bloom widths, ``compile``, ``candidate_pool_frac``);
+holds the gridded params (bloom widths, ``compile``, ``candidate_pool_frac``);
 ``cache`` runs seeds 0-2 of seed-free and seed-dependent arms (the quality cache); ``untimed``
 is a quality-only suite (``perf: false``); ``pair`` interleaves V1 and V2 (``--interleave``).
 Tests marked ``gpu`` skip without CUDA."""
@@ -26,7 +26,7 @@ D_E2E = 64  # LiNR V3's OPORP packs bits in words of 64
 
 
 def pytest_configure(config):
-    """H-INDCACHE: a fresh inductor cache per pytest run, so no compile gate replays a graph an
+    """A fresh inductor cache per pytest run, so no compile gate replays a graph an
     earlier tree cached for the same custom op (testing.md § Running)."""
     config.inductor_dir = tempfile.mkdtemp(prefix="pytest-inductor-")
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = config.inductor_dir

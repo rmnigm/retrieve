@@ -1,4 +1,4 @@
-"""H-INDCACHE: the evaluation conftest gives every pytest run its own inductor cache."""
+"""The evaluation conftest gives every pytest run its own inductor cache."""
 
 import os
 import tempfile

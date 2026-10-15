@@ -10,7 +10,7 @@ Two halves. The first locks the three semantic contracts downstream rows depend 
 The second is harness-v2's WP-1 gate (H §6): the device-accumulated running sums of
 ``metrics.accumulate`` / ``finalize`` equal the OLD harness's per-row means to 1e-9 on
 random data. The reference below is the pre-v2 ``metrics.py`` (commit c75b481) copied
-verbatim so the comparison survives C3's deletion of the old API.
+verbatim, so the comparison does not depend on the harness's API.
 
 Hand-built or seeded random tensors only; no GPU, no data files.
 """
@@ -173,7 +173,7 @@ def test_running_sums_equal_old_per_row_means_fixed_targets():
 
 def test_running_sums_equal_old_ranked_oracle_targets():
     # Oracle targets: the target set at k is the oracle's own top-k prefix and nt is its
-    # non-(-1) count — the old harness's ``ot_k`` / ``nt_k`` per k (sweep.py::_run_quality).
+    # non-(-1) count per k
     g = torch.Generator().manual_seed(1)
     ks = [4, 16, 40]
     chunks = _random_chunks(g, t=40, n_items=60)

@@ -89,7 +89,7 @@ def test_aggregate_one_row_per_perf_entry_last_record_per_key(tmp_path):
     assert json.loads(seed0[0]["params"]) == KEY["params"] and seed0[0]["status"] == "ok"
     assert seed0[0]["env_dirty"] is False and seed0[0]["perf_bs"] == 1  # typed, not strings
     assert seed0[0]["perf_window_medians_ms"] == [1, 2, 3] and "perf_window_sm_mhz" not in rows[0]
-    # H-SCOPE: one us / calls column pair per kernel scope, no nested column
+    # one us / calls column pair per kernel scope, no nested column
     assert seed0[0]["perf_kernels_scorer_us"] == 30.0 and seed0[0]["perf_kernels_other_calls"] == 2
     assert "perf_kernel_scopes" not in rows[0]
     (r1,) = [r for r in rows if r["seed"] == 1]
@@ -145,7 +145,7 @@ def test_a_pre_h7_empty_heldout_side_reads_as_null(tmp_path):
 
 def test_schema_4_columns_and_the_windows_agree_with_the_nested_record(tmp_path):
     """The schema-4 body fields reach results.parquet, and the windows the report's bootstrap
-    resamples are the same in the table as in the record ``report._attach`` joins (addendum 2).
+    resamples are the same in the table as in the record ``report._attach`` joins.
     A schema-3 record reads every new column as null."""
     p = tmp_path / "filter" / "goodreads-d128.jsonl"
     entry = {"k": 100, "bs": 16, "mode": "graph", "median_ms": 1.0, "ids_sha256": "ab" * 32,

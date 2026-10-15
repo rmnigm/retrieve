@@ -1,4 +1,4 @@
-"""CPU-only tests for the PubMed + MedCPT loader (roadmap E2).
+"""CPU-only tests for the PubMed + MedCPT loader.
 
 Everything here runs on tiny synthetic fixtures written into ``tmp_path`` — no
 network, no CUDA, no real shard. What is pinned down:

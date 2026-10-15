@@ -74,43 +74,10 @@ def _chunks(n_items: int, item_chunk: int):
     return ((s, min(s + item_chunk, n_items)) for s in range(0, n_items, item_chunk))
 
 
-@torch.inference_mode()
-def pass_counts(
-    filter_mod: FilterModule,
-    qa_sweep: torch.Tensor,
-    skip_mask: torch.Tensor | None,
-    n_items: int,
-    *,
-    batch_size: int = 64,
-    item_chunk: int = ITEM_CHUNK,
-    device: torch.device,
-) -> torch.Tensor:
-    """``[U]`` int64 items passing ``filter_mod`` per query (``-1`` on skipped rows), summed
-    over item chunks of ``evaluate_mask(qa, start, end)``. With a ``BloomFilter`` this is the
-    bloom pass count (``bloom_fp_rate``)."""
-    out = torch.full((qa_sweep.shape[0],), -1, dtype=torch.long)
-    for idx in _batches(qa_sweep.shape[0], skip_mask, batch_size, "pass_counts"):
-        qa = filter_mod.prepare_queries(qa_sweep[idx].to(device, non_blocking=True))
-        n = torch.zeros(idx.numel(), dtype=torch.long, device=device)
-        for start, end in _chunks(n_items, item_chunk):
-            n += filter_mod.evaluate_mask(qa, start, end).sum(dim=1)
-        out[idx] = n.cpu()
-    return out
-
-
 def pass_rate(counts: torch.Tensor, n_items: int) -> float:
     """Mean of ``counts / n_items`` over kept rows (``counts >= 0``); ``nan`` if none."""
     kept = counts[counts >= 0]
     return (kept.double() / n_items).mean().item() if kept.numel() else float("nan")
-
-
-def bloom_fp_rate(bloom_counts: torch.Tensor, exact_counts: torch.Tensor, n_items: int) -> float:
-    """Mean per-query false-positive rate ``(bloom − exact) / (N − exact)`` over kept rows
-    with at least one negative; ``nan`` if none (bloom ⊇ exact, so this is ≥ 0)."""
-    keep = (exact_counts >= 0) & (bloom_counts >= 0) & (exact_counts < n_items)
-    fp = (bloom_counts[keep] - exact_counts[keep]).double()
-    neg = (n_items - exact_counts[keep]).double()
-    return (fp / neg).mean().item() if keep.any() else float("nan")
 
 
 def _merge_topk(

@@ -128,28 +128,12 @@ def test_v4_fields_and_pass_rate_arithmetic():
     assert blob["targets_in_filter"].tolist() == [[True, True], [True, False], [True, False]]
 
 
-def test_pass_counts_and_bloom_fp_rate():
-    _, _, qa, filt, _ = _v4_inputs()
-    exact = oracle.pass_counts(filt, qa, None, 4, device=CPU)
-    assert exact.tolist() == [3, 1, 0]
-    assert oracle.pass_rate(exact, 4) == pytest.approx(4 / 12)
+def test_pass_rate():
+    assert oracle.pass_rate(torch.tensor([3, 1, 0]), 4) == pytest.approx(4 / 12)
+    assert oracle.pass_rate(torch.tensor([3, -1, 0]), 4) == pytest.approx(3 / 8)  # -1 skipped
     assert oracle.pass_rate(torch.tensor([-1, -1]), 4) != oracle.pass_rate(
         torch.tensor([-1, -1]), 4
     )  # nan
-    # A "bloom" that admits one extra item on queries 0 and 2, none on query 1.
-    bloom = _PerQueryFilter([[1, 1, 1, 1], [0, 0, 1, 0], [1, 0, 0, 0]])
-    bcounts = oracle.pass_counts(bloom, qa, None, 4, device=CPU)
-    assert bcounts.tolist() == [4, 1, 1]
-    # fp rate per query: (4-3)/(4-3)=1, (1-1)/(4-1)=0, (1-0)/(4-0)=0.25 → mean 0.41666
-    assert oracle.bloom_fp_rate(bcounts, exact, 4) == pytest.approx((1 + 0 + 0.25) / 3)
-    # Skipped rows (-1) drop out of the mean.
-    skip = torch.tensor([False, True, False])
-    assert oracle.pass_counts(bloom, qa, skip, 4, device=CPU).tolist() == [4, -1, 1]
-    assert oracle.bloom_fp_rate(
-        oracle.pass_counts(bloom, qa, skip, 4, device=CPU),
-        oracle.pass_counts(filt, qa, skip, 4, device=CPU),
-        4,
-    ) == pytest.approx((1 + 0.25) / 2)
 
 
 # ----- cache: fingerprint in the file name ----------------------------------------------
@@ -337,8 +321,6 @@ def test_item_chunked_oracle_equals_the_one_shot_oracle():
         m = masks[qa[:, 0]]
         tif = (targets != -1) & m.gather(1, targets.clamp(min=0))
         assert torch.equal(got["targets_in_filter"], tif)
-        counts = oracle.pass_counts(filt, qa, None, 24, device=CPU, item_chunk=chunk)
-        assert torch.equal(counts, got["pass_counts"])
 
 
 def test_the_oracle_refuses_tf32():

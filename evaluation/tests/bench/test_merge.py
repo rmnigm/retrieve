@@ -29,6 +29,7 @@ def _rec(status="ok", unstable=False, perf=True, **over):
     rec = {
         "schema_version": records.SCHEMA_VERSION, "status": status, **KEY, "path": "triton",
         "unstable": unstable, "quality": {"oracle": {"recall@100": 0.9}}, "env": env,
+        "bloom_fp_rate": 0.01,  # a retired field: dropped on read
         "perf": [_entry(100, 1, 1.0), _entry(100, 16, 2.0),
                  {"k": 100, "bs": 1, "mode": "graph", "reason": "cuda_unavailable"}]
         if perf else None,
@@ -66,6 +67,7 @@ def trees(tmp_path):
             _rec(seed=2, env=later),  # ... superseded by its retry in the same file
             _rec(seed=3, perf=None),  # W: quality-only
             _rec(seed=4, env={"host": "box-b"}),  # V: run on another machine ...
+            _rec(seed=5, filter_kind="bloom", algo="linr_v2"),  # a LiNR bloom cell: dropped
         ],
     )  # fmt: skip
     b = _write(
@@ -87,6 +89,7 @@ def test_accept_rule_tables_and_manifest(trees, tmp_path):
     assert r.exit_code == 0, r.output
     recs = records.read_table(out / "records.parquet")
     assert len(recs) == 9 and list(recs[0])[:3] == ["subtree", "cell", "accepted"]
+    assert "bloom_fp_rate" not in recs[0] and not any(r["filter_kind"] == "bloom" for r in recs)
     by = {(r["subtree"], r["seed"], r["status"], r["line"]): r for r in recs}
     acc = {k: v["accepted"] for k, v in by.items()}
     assert acc == {
@@ -122,6 +125,7 @@ def test_accept_rule_tables_and_manifest(trees, tmp_path):
     s = man["subtrees"]
     assert list(s) == ["leg-s0", "leg-s0-rerun"]
     assert s["leg-s0"]["records"] == {"failed": 1, "ok": 5} and s["leg-s0"]["unstable"] == 1
+    assert s["leg-s0"]["samples"] == 8  # the dropped LiNR bloom record's lines paired, then left
     assert (s["leg-s0"]["accepted"], s["leg-s0"]["superseded"]) == (3, 3)
     assert s["leg-s0"]["supersedes"] == ["leg-s0", "leg-s0-rerun"]
     assert s["leg-s0-rerun"]["supersedes"] == ["leg-s0"] and s["leg-s0-rerun"]["samples"] == 0

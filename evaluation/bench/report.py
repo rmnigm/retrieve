@@ -54,7 +54,7 @@ MATCH_REQUIRED = ("dataset", "suite", "algo", "backend")
 MATCH_FIELDS = (*MATCH_REQUIRED, "filter_kind", "sweep")
 # the fields the quality-accepted record supplies under --manifest
 QUALITY_FIELDS = (
-    "quality", "per_query", "pass_rate", "bloom_fp_rate", "n_queries_oracle",
+    "quality", "per_query", "pass_rate", "n_queries_oracle",
     "n_queries_heldout", "n_targets_in_filter",
 )  # fmt: skip
 
@@ -1461,8 +1461,8 @@ def fig_f3(c) -> list[Path]:
 
 
 def fig_f4a(c) -> list[Path]:
-    """F4a: bloom false-positive rate and memory against ``m_bits`` (``bloomwidth*`` suites),
-    one line per (dataset, backend, k_hash); the same numbers as a table."""
+    """F4a: memory against ``m_bits`` (``bloomwidth*`` suites), one line per (dataset, backend,
+    k_hash); the table adds recall and the timed point."""
     rows = [r for r in c.rows if r["suite"].startswith("bloomwidth") and "m_bits" in r["_params"]]
     path = c.out / "figures" / "fig-f4a-bloomwidth.png"
     if not rows:
@@ -1471,21 +1471,13 @@ def fig_f4a(c) -> list[Path]:
     for r in rows:
         key = (r["dataset"], r["sweep"], r["backend"], r["_params"].get("k_hash"))
         series[key][r["_params"]["m_bits"]].append(r)
-    fig, (ax_fp, ax_mem) = plt.subplots(1, 2, figsize=(10, 4))
+    fig, ax = plt.subplots(1, 1, figsize=(5, 4))
     body = []
     for (ds, sw, be, kh), by_m in sorted(series.items(), key=lambda kv: str(kv[0])):
         ms = sorted(by_m)
-        fp = [
-            statistics.median(
-                r["bloom_fp_rate"] for r in _cells(by_m[m]) if r.get("bloom_fp_rate") is not None
-            )
-            for m in ms
-        ]
         mem = [statistics.median(r["index_mib"] for r in _cells(by_m[m])) for m in ms]
-        label = f"{DATASET_LABEL.get(ds, ds)} {sw} [{be}] k_hash={kh}"
-        ax_fp.plot(ms, fp, marker="o", label=label)
-        ax_mem.plot(ms, mem, marker="o", label=label)
-        for m, f, mib in zip(ms, fp, mem, strict=True):
+        ax.plot(ms, mem, marker="o", label=f"{DATASET_LABEL.get(ds, ds)} {sw} [{be}] k_hash={kh}")
+        for m, mib in zip(ms, mem, strict=True):
             cells = _cells(by_m[m])
             q = _recall(c, cells, EXHIBIT_K)
             t = _lat(_timed(by_m[m], 16, EXHIBIT_K)[0])
@@ -1495,36 +1487,29 @@ def fig_f4a(c) -> list[Path]:
                     f"\\texttt{{{be}}}",
                     f"${kh}$",
                     f"${m}$",
-                    _sci(f),
                     _f(statistics.median(r["filter_mib"] for r in cells), 2),
                     _f(mib, 1),
                     _num(q),
                     _num(t, 3),
                 ]
             )
-    ax_fp.set_xscale("log", base=2)
-    ax_fp.set_yscale("symlog", linthresh=1e-6)
-    ax_fp.set_xlabel("m_bits")
-    ax_fp.set_ylabel("bloom false-positive rate (symlog below 1e-6)")
-    ax_mem.set_xscale("log", base=2)
-    ax_mem.set_xlabel("m_bits")
-    ax_mem.set_ylabel("index MiB (filter included)")
-    for ax in (ax_fp, ax_mem):
-        ax.grid(alpha=0.3, which="both")
-        ax.legend(fontsize=5)
+    ax.set_xscale("log", base=2)
+    ax.set_xlabel("m_bits")
+    ax.set_ylabel("index MiB (filter included)")
+    ax.grid(alpha=0.3, which="both")
+    ax.legend(fontsize=5)
     fig.suptitle("F4a: bloom width", fontsize=10)
     tex = _table(
         c.prov,
         c.results_dir,
-        caption="Bloom width: false-positive rate, memory and recall against $m_\\mathrm{bits}$.",
+        caption="Bloom width: memory and recall against $m_\\mathrm{bits}$.",
         label="tab:f4a_bloomwidth",
-        colspec="lllcccccc",
+        colspec="lllccccc",
         header=[
             "Sweep",
             "Backend",
             "$k_\\mathrm{hash}$",
             "$m_\\mathrm{bits}$",
-            "FPR",
             "filter MiB",
             "index MiB",
             f"Recall@{EXHIBIT_K}",
@@ -1533,10 +1518,8 @@ def fig_f4a(c) -> list[Path]:
         body=body,
         notes=_legend(
             [
-                "FPR: \\texttt{bloom\\_fp\\_rate}, the mean per-query $(\\mathrm{bloom} - "
-                "\\mathrm{exact}) / (N - \\mathrm{exact})$. \\texttt{filter\\_mib} is the filter "
-                "submodule alone (0 where the module carries its attributes inside "
-                "\\texttt{index\\_mib}). Latency only on the timed widths.",
+                "\\texttt{filter\\_mib} is the filter submodule alone (0 where the module carries "
+                "its attributes inside \\texttt{index\\_mib}). Latency only on the timed widths.",
                 EXHIBIT_NOTE,
                 STATS_NOTE,
             ]

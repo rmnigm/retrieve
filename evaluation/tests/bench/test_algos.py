@@ -65,7 +65,7 @@ def test_official_config_rejects_bloom_path_elsewhere(algo, filter_kind, backend
 
 
 def test_official_config_recheck():
-    """META-FORK C13 as a build param: the study runs the bloom with ``recheck`` false."""
+    """``recheck`` as a build param: the study runs the bloom with it false."""
     cfg = A.official_config("silvertorch", "bloom", "official-fork", {"recheck": False})
     assert cfg.recheck_for("official-fork") is False
     off = A.official_config("silvertorch", "bloom", "official", {"recheck": False})
@@ -89,7 +89,7 @@ def silvertorch_modules() -> dict[str, SilverTorch]:
     x, _, attrs, _ = _data()
     out = {}
     for fk in A.FILTER_KINDS:
-        f = A.build_filter(fk, attrs, backend="torch", **BLOOM)
+        f = A.build_filter(fk, attrs, backend="torch")
         out[fk] = A.build(
             "silvertorch", x, k=8, backend="torch", filter_kind=fk, filter_mod=f,
             item_attrs=attrs, params={**ST_PARAMS, **(BLOOM if fk == "bloom" else {})},
@@ -126,7 +126,7 @@ def test_built_module_k_setter_slices(algo, fk, silvertorch_modules):
         m = silvertorch_modules[fk]
         assert isinstance(m, SilverTorch) and m.filter_mode == A.FILTER_MODE[fk]
     else:
-        f = A.build_filter(fk, attrs, backend="torch", m_bits=64, k_hash=2)
+        f = A.build_filter(fk, attrs, backend="torch")
         params = {"linr_v3": {"candidate_pool": 64}}.get(algo, {})
         m = A.build(
             algo, x, k=8, backend="torch", filter_kind=fk, filter_mod=f, item_attrs=attrs,
@@ -192,7 +192,7 @@ def test_linr_v3_k_bits_at_d_is_the_default_build(fk, seed):
     x, q = torch.randn(N, 128, generator=g), torch.randn(6, 128, generator=g)
     out = []
     for extra in ({}, {"k_bits": 128}):
-        f = A.build_filter(fk, attrs, backend="torch", **BLOOM)
+        f = A.build_filter(fk, attrs, backend="torch")
         m = A.build(
             "linr_v3", x, k=8, backend="torch", filter_kind=fk, filter_mod=f, item_attrs=attrs,
             params={"candidate_pool": 64, **extra}, seed=seed,
@@ -244,7 +244,7 @@ def _postfilter_reference(x, q, mask, k: int, alpha: int):
 @torch.inference_mode()
 def test_postfilter_equals_the_torch_reference(fk):
     x, q, attrs, qa = _data()
-    f = A.build_filter(fk, attrs, backend="torch", **BLOOM)
+    f = A.build_filter(fk, attrs, backend="torch")
     mask = f.evaluate_mask(f.prepare_queries(qa))
     m = A.build("postfilter", x, k=8, backend="torch", filter_kind=fk, filter_mod=f)
     assert m.capturable and m.filter is f and index_bytes(m) > index_bytes(f)

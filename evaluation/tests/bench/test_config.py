@@ -363,7 +363,7 @@ def test_arm_errors_are_named(tmp_path, arms, match):
         load_matrix(MINI, suites, "s")
 
 
-# ----- the real grid (campaign-v2, user decisions 2026-10-08) ---------------------------
+# the real grid
 
 GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; change it deliberately
     ("filter", "goodreads"): (39, 51),
@@ -439,7 +439,7 @@ def test_grid_covers_every_suite_and_dataset():
 
 @pytest.mark.parametrize(("suite", "dataset"), list(GRID))
 def test_grid_counts_and_invariants(suite, dataset):
-    """G-grid: the job / cell counts and the final pass's rules (controller 2026-10-13) on every
+    """The job / cell counts and the final pass's rules on every
     expanded cell."""
     jobs = _real(suite, dataset)
     assert (len(jobs), sum(len(j.query) for j in jobs)) == GRID[suite, dataset]
@@ -688,7 +688,7 @@ def test_score_path_is_an_official_build_param():
         official_config("silvertorch", "bloom", "triton", {"score_path": "int32"})
 
 
-# IVF-TUNE (research/artifacts/campaign-v2/ivf-tune): SilverTorch n_lists / n95 per dataset;
+# SilverTorch n_lists / n95 per dataset (research/artifacts/campaign-v2/ivf-tune);
 # None = open
 IVF = {
     "goodreads": (4096, 64),
@@ -734,7 +734,7 @@ def test_v3bits_pubmed_is_clause_only_at_k_bits_256_and_768():
 
 
 def test_normalize_is_off_for_pubmed_only(tmp_path):
-    """MedCPT scores by dot product (user 2026-10-13): PubMed and its synth draws; every other
+    """MedCPT scores by dot product: PubMed and its synth draws; every other
     dataset is L2-normalised."""
     off = {f.stem for f in sorted(CFG.glob("*.yaml"))
            if f.stem != "suites" and not load_dataset(f, _ds_dim(f)).normalize}  # fmt: skip
