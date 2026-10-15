@@ -292,6 +292,7 @@ the machines against each other on LiNR V1, whose time does not depend on the cl
 | LAION-synth 10M | 3 | 75 | 0.5 % | 10.5 % | 0.004 | 0.8 % | 21 | 0.8 % | 0 |
 | LAION 1M | 3 | 6 | 2.7 % | 12.3 % | 0.009 | 2.8 % | 0 | – | 0 |
 | LAION 30M | 3 | 33 | 0.5 % | 8.3 % | 0.002 | 0.5 % | 12 | 0.5 % | 0 |
+| LAION-synth 30M | 2 | 78 | 0.2 % | 1.4 % | 0.002 | 0.4 % | 24 | 0.2 % | 0 |
 | LAION 3M | 3 | 12 | 0.8 % | 14.8 % | 0.003 | 0.8 % | 3 | 0.4 % | 0 |
 | PubMed 10M | 3 | 39 | 0.6 % | 53.6 % | 0.007 | 0.7 % | 9 | 0.8 % | 0 |
 | PubMed-synth 10M | 3 | 51 | 1.0 % | 11.4 % | 0.005 | 1.1 % | 15 | 0.5 % | 0 |
@@ -306,9 +307,9 @@ the machines against each other on LiNR V1, whose time does not depend on the cl
 | Goodreads 0.8M, LAION 30M, arXiv 3M | 1 | same | 39 | 1.000 | 0.996–1.002 |
 | LAION 30M | 2 | another | 9 | 1.000 | 0.999–1.001 |
 
-The comparison barely moves. At the same setting, SilverTorch's time varies by a median 0.5–5.1 % per dataset, and recall
-by at most 0.013. Held at its seed-0 setting, SilverTorch's time over the best LiNR's spreads by a median 0.3–5.6 %, and
-none of the 159 tuned cells change winner. At that setting 3 cells (LAION-synth 10M with no filter) dip below the target at a later seed, by at most 0.0001. LiNR V1 stays within 1.8 % of its seed-0 time on
+The comparison barely moves. At the same setting, SilverTorch's time varies by a median 0.2–5.1 % per dataset, and recall
+by at most 0.013. Held at its seed-0 setting, SilverTorch's time over the best LiNR's spreads by a median 0.2–5.6 %, and
+none of the 183 tuned cells change winner. At that setting 3 cells (LAION-synth 10M with no filter) dip below the target at a later seed, by at most 0.0001. LiNR V1 stays within 1.8 % of its seed-0 time on
 every machine. SilverTorch's shortest times are another matter: the settings under 0.25 ms, close to its fixed cost per
 call, run 5–9 % slower at seed 2 on Goodreads, arXiv, their synthetic sets and LAION 30M, whose seed 2 ran on a
 different machine from seeds 0–1. The cells moved between the other two machines show no such shift. This is consistent
@@ -316,9 +317,7 @@ with the machines differing in fixed cost per call, not in GPU throughput, and i
 datasets; it changes no winner. The largest spreads in SilverTorch's time come from PubMed's MeSH filter at deep probes
 (5.9–9.1 ms at a batch of 64), consistent with a new clustering changing how many passing items the probed clusters
 hold. Re-picking the setting at each seed instead changes one winner (LAION-synth 10M with no filter, bs 64, k 100, 0.95: 0.73–0.74 at the seed-0 pick, 0.73–1.26 re-picked). That is a pick sitting exactly on the
-target, not a change in speed. Seeds 0–2 cover every real dataset and the synthetic PubMed and LAION 10M sets. Synthetic
-Goodreads and arXiv have seeds 0 and 2, and synthetic LAION 30M has seed 0 so far, with seed 1 still running (it gets no
-seed 2). LAION 1M's deep settings ran at seed 0 only, by design.
+target, not a change in speed. Seeds 0–2 cover every real dataset and the synthetic PubMed and LAION 10M sets; synthetic Goodreads and arXiv have seeds 0 and 2, and synthetic LAION 30M seeds 0 and 1. LAION 1M's deep settings ran at seed 0 only, by design.
 
 ## 10. Conclusions
 
@@ -355,7 +354,7 @@ LinkedIn's claims are C1–C3, Meta's C4–C7 ([claims](claims.md)).
   collected into one total `results.parquet`. The exact-filter row in section 7 is the same tree with the exact clause
   filter built in (tag `final-freeze-clause`, `500284e`); its bloom path is byte-identical.
 - **Records.** These are the Hub subtrees `fr/<leg>-<pod>-s<seed>[-rerun]` on `pinkmeme/eval-results`, each with its
-  manifest in [hub-index](../artifacts/hub-index.md): 94 subtrees and 10,207 records; 138 of 1188 timed points stay unstable in every run. The tables and the page data are published as
+  manifest in [hub-index](../artifacts/hub-index.md): 95 subtrees and 10,411 records; 138 of 1266 timed points stay unstable in every run. The tables and the page data are published as
   `artifacts/results-draft/<date>-fr` (manifest in the same index).
 - **Scripts.** [`build_results.py`](../artifacts/results-draft/build_results.py) builds the tables,
   [`product_recall.py`](../artifacts/results-draft/product_recall.py) the recall bridge,

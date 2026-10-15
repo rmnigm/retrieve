@@ -179,9 +179,7 @@ with the machines differing in fixed cost per call, not in GPU throughput, and i
 datasets; it changes no winner. The largest spreads in SilverTorch's time come from PubMed's MeSH filter at deep probes
 (5.9–9.1 ms at a batch of 64), consistent with a new clustering changing how many passing items the probed clusters
 hold. Re-picking the setting at each seed instead changes one winner ({vflip}). That is a pick sitting exactly on the
-target, not a change in speed. Seeds 0–2 cover every real dataset and the synthetic PubMed and LAION 10M sets. Synthetic
-Goodreads and arXiv have seeds 0 and 2, and synthetic LAION 30M has seed 0 so far, with seed 1 still running (it gets no
-seed 2). LAION 1M's deep settings ran at seed 0 only, by design.
+target, not a change in speed. Seeds 0–2 cover every real dataset and the synthetic PubMed and LAION 10M sets; synthetic Goodreads and arXiv have seeds 0 and 2, and synthetic LAION 30M seeds 0 and 1. LAION 1M's deep settings ran at seed 0 only, by design.
 
 ## 10. Conclusions
 
