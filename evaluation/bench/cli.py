@@ -39,6 +39,7 @@ from bench import measure, records
 from bench import run as run_mod
 from bench.algos import BACKENDS, FILTER_KINDS
 from bench.config import interleave_units, load_dataset, load_matrix
+from bench.merge import merge
 from bench.report import report
 from bench.upload import fetch, upload
 from eval_datasets.layout import validate_layout
@@ -99,12 +100,13 @@ def _children(jobs: list, interleave: bool) -> list[tuple[str, int, tuple, tuple
 
 @click.group()
 def main() -> None:
-    """The retrieval benchmark: run, campaign, oracle, check, upload, fetch, report, env."""
+    """The retrieval benchmark: run, campaign, oracle, check, upload, fetch, merge, report, env."""
 
 
 main.add_command(upload)
 main.add_command(fetch)
 main.add_command(report)
+main.add_command(merge)
 
 
 @main.command()

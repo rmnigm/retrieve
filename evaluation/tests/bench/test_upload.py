@@ -302,7 +302,9 @@ def test_fetch_restores_a_subtree_resume_can_read(tree, tmp_path, monkeypatch):
     r = _fetch("--path-in-repo", "c4", "--results", str(dest))
     assert r.exit_code == 0, r.output
     rel = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file())
-    assert rel == [p.relative_to(tree).as_posix() for p in upload.files(tree)]
+    assert rel == ["MANIFEST.json", *(p.relative_to(tree).as_posix() for p in upload.files(tree))]
+    assert json.loads((dest / "MANIFEST.json").read_text())["path_in_repo"] == "c4"
+    assert "MANIFEST.json" not in {p.name for p in upload.files(dest)}  # never re-uploaded
     assert len(records.read_keys(dest / "filter" / "goodreads-d128.jsonl")) == 2
     assert _fetch("--path-in-repo", "c4", "--results", str(dest)).exit_code == 0  # idempotent
 

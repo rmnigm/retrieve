@@ -8,6 +8,7 @@ perf entry)`` as ``results.parquet`` for ``report.py``. A record older than sche
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 import math
 import os
@@ -46,7 +47,7 @@ _RECORD_COLUMNS = (
 # results.parquet is shipped as a paper artifact, so it has to carry why a row is incomplete,
 # not only that it is: `stage`/`error` on a failure, `partial_reasons` on a narrowed cell,
 # `schema_version` because records of several schemas can share one file.
-_ENV_COLUMNS = (
+ENV_COLUMNS = (
     "code_version", "commit", "dirty", "gpu", "sm_mhz_load", "clocks_drift", "git_branch",
     "frac_windows_below_max",
 )  # fmt: skip
@@ -95,6 +96,14 @@ def record_path(out_dir: Path, job) -> Path:
 
 def samples_path(path: Path) -> Path:
     return Path(path).with_suffix(".samples.jsonl")
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _clean(o: Any) -> Any:
@@ -147,11 +156,16 @@ def read_keys(path: Path) -> dict[str, str]:
     return {record_key(rec): rec.get("status", "ok") for rec in read_records(path)}
 
 
-def _row(rec: dict[str, Any], entry: dict[str, Any] | None) -> dict[str, Any]:
-    row: dict[str, Any] = key_block(rec)
-    row["params"] = json.dumps(rec["params"], sort_keys=True)
+def key_columns(rec: dict[str, Any]) -> dict[str, Any]:
+    """The key block as table columns: ``params`` as canonical JSON."""
+    return {**key_block(rec), "params": json.dumps(rec["params"], sort_keys=True)}
+
+
+def record_columns(rec: dict[str, Any]) -> dict[str, Any]:
+    """The flat columns of one record: key block, scalars, env fields, quality."""
+    row = key_columns(rec)
     row.update({c: rec.get(c) for c in _RECORD_COLUMNS})
-    row.update({f"env_{c}": rec["env"].get(c) for c in _ENV_COLUMNS})
+    row.update({f"env_{c}": rec["env"].get(c) for c in ENV_COLUMNS})
     row["quality_source_seed"] = (rec.get("quality_source") or {}).get("seed")
     row["interleave_group"] = (rec.get("interleave") or {}).get("group")
     row["interleave_position"] = (rec.get("interleave") or {}).get("position")
@@ -162,6 +176,12 @@ def _row(rec: dict[str, Any], entry: dict[str, Any] | None) -> dict[str, Any]:
     for m, v in q.items():
         if not isinstance(v, dict):
             row[f"quality_{m}"] = v
+    return row
+
+
+def perf_columns(entry: dict[str, Any] | None) -> dict[str, Any]:
+    """The flat ``perf_*`` columns of one perf entry (none for a record without perf)."""
+    row: dict[str, Any] = {}
     for m, v in (entry or {}).items():
         if m == "kernel_scopes":
             for scope, d in v.items():
@@ -170,6 +190,14 @@ def _row(rec: dict[str, Any], entry: dict[str, Any] | None) -> dict[str, Any]:
         elif m not in _PERF_SKIP:
             row[f"perf_{m}"] = v
     return row
+
+
+def write_table(rows: list[dict[str, Any]], out: Path) -> Path:
+    """Rows to parquet: the column set is their union, types are inferred per column, so a
+    column mixing types across rows fails here rather than in a table."""
+    cols = list(dict.fromkeys(c for r in rows for c in r))
+    pq.write_table(pa.table({c: [r.get(c) for r in rows] for c in cols}), out)
+    return out
 
 
 def record_files(results_dir: Path) -> list[Path]:
@@ -190,13 +218,13 @@ def latest(results_dir: Path) -> list[dict[str, Any]]:
 
 def aggregate(results_dir: Path, out: Path | None = None) -> Path:
     """``<results_dir>/results.parquet``: :func:`latest`, one row per perf entry (one row with
-    null perf columns when the record has none). ``params`` is a JSON string; column types
-    are inferred, so a column mixing types across records fails here rather than in a table."""
-    out = out or Path(results_dir) / "results.parquet"
-    rows = [_row(rec, e) for rec in latest(results_dir) for e in (rec.get("perf") or [None])]
-    cols = list(dict.fromkeys(c for r in rows for c in r))
-    pq.write_table(pa.table({c: [r.get(c) for r in rows] for c in cols}), out)
-    return out
+    null perf columns when the record has none)."""
+    rows = [
+        record_columns(rec) | perf_columns(e)
+        for rec in latest(results_dir)
+        for e in (rec.get("perf") or [None])
+    ]
+    return write_table(rows, out or Path(results_dir) / "results.parquet")
 
 
 def read_table(path: Path) -> list[dict[str, Any]]:

@@ -31,6 +31,7 @@ import click
 from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download, snapshot_download
 
 from bench import records
+from bench.records import sha256
 from bench.report import provenance
 
 EVAL_DIR = Path(__file__).resolve().parents[1]
@@ -58,14 +59,6 @@ def _source(results: Path) -> str:
         if (d / ".git").exists():
             return results.relative_to(d).as_posix()
     return str(results)
-
-
-def sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def manifest(results: Path, listing: list[Path], prefix: str, gate: str | None) -> dict:
@@ -298,7 +291,8 @@ def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:
     help="the results tree to fetch into",
 )
 def fetch(repo_id, prefix, results) -> None:
-    """Download one published subtree into a results tree, checked against its manifest."""
+    """Download one published subtree into a results tree, checked against its manifest, which
+    is kept beside the files (``bench merge`` reads it; a re-upload skips it)."""
     results = (results if results.is_absolute() else EVAL_DIR / results).resolve()
     prefix = prefix.strip("/")
     with tempfile.TemporaryDirectory(prefix="bench-fetch-") as tmp:
@@ -317,5 +311,6 @@ def fetch(repo_id, prefix, results) -> None:
             dst = results / f["path"]
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(local / f["path"], dst)
+        shutil.copyfile(local / "MANIFEST.json", results / "MANIFEST.json")
     click.echo(f"{man['n_files']} files, {man['n_records']} record(s) from {repo_id}/{prefix} "
                f"-> {results}; " + ("CITABLE" if man["citable"] else "NOT CITABLE"))  # fmt: skip

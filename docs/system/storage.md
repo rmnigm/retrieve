@@ -30,7 +30,9 @@ large ephemeral disk.
 under `evaluation/` (or `bench campaign --out <dir>`); resume reads it back
 ([evaluation](evaluation.md#resume)). A finished tree goes to the Hub with
 `bench upload` and may be deleted locally once `bench upload --verify` passed
-([results storage](evaluation.md#results-storage)).
+([results storage](evaluation.md#results-storage)); `bench fetch` brings a
+subtree back and `bench merge` turns a set of them into the merged tables
+([merged tables](evaluation.md#merged-tables-bench-merge)).
 
 ## Environment
 

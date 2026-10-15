@@ -242,7 +242,7 @@ the oracle fingerprint in the blob's file name; see
 
 ## Architecture
 
-Twelve modules under [`evaluation/bench/`](../../evaluation/bench/), plus
+Thirteen modules under [`evaluation/bench/`](../../evaluation/bench/), plus
 the two the harness takes from its sibling packages
 (`eval_datasets.layout` for the on-disk readers, `training.encode` for the
 SASRec encode). No base class, no context bags, no stats dataclasses, no
@@ -255,7 +255,7 @@ which exist for `buffers()`, `.k`, `torch.compile` and because their
 | module | owns |
 |---|---|
 | [`measure.py`](../../evaluation/bench/measure.py) | `setup`, `warm_gpu_once`, `provenance` (GPU, driver, CUDA, torch, triton, `official_commit` — the installed `silvertorch`'s PEP 610 `direct_url.json` `vcs_info.commit_id`, `None` when it is not installed from git — `official_build` = the extension that would load (`so_path`, `so_sha256`, `so_bytes`, and `nvcc_append_flags` from a `_build_flags.json` beside the `.so`, which [`scripts/build_official_o3.sh`](../../scripts/build_official_o3.sh) writes; `null` = Meta's `setup.py` defaults, host code at gcc `-O0`, OF-11; `null` overall without silvertorch), `official_fork_build` = the same for `silvertorch_fork` (its `setup.py` builds `-O3`), commit, `dirty` = `subtree_dirty()` over `LIB` (the imported `retrieve` package's directory, in whichever checkout holds it), `repo_dirty`, branch, `code_version` = `LIB`'s tree hash, or `files:<sha256>` of the sources on disk when it is dirty, `lib_dir` = `LIB`, host, python, started; [Resume](#resume)), `clocks()` (one `nvidia-smi` sample), `timed_build`, `index_bytes` (Σ buffers, submodules included, deduplicated), `stats`, `latency_group(fns, bs=, mode=)` (§2.5 windows of each arm, round-robin across arms, IQR + outlier counts, `load: closed_loop`, `peak_fwd_mib`, the under-load `sm_mhz`) and `latency(fn, …)`, its one-arm case, `graph_callable` (raises `NotCapturable` with the record's `reason`; no dynamo reset, so interleaved arms stay captured side by side), `profile_once` |
-| [`records.py`](../../evaluation/bench/records.py) | what a record *is*: `SCHEMA_VERSION`, `KEY_FIELDS`, `resume_key`, `record_path`, `samples_path`, `append_record` (one `write` + `fsync`), `read_records` / `read_keys` (one torn trailing line tolerated), `record_files`, `latest` (last record per key), `aggregate(results_dir) → results.parquet` (one row per perf entry — what `report.py` reads), `read_table` |
+| [`records.py`](../../evaluation/bench/records.py) | what a record *is*: `SCHEMA_VERSION`, `KEY_FIELDS`, `resume_key`, `record_path`, `samples_path`, `append_record` (one `write` + `fsync`), `read_records` / `read_keys` (one torn trailing line tolerated), `record_files`, `latest` (last record per key), `record_columns` / `perf_columns` (the flat columns of a record and of a perf entry), `write_table`, `aggregate(results_dir) → results.parquet` (one row per perf entry — what `report.py` reads), `read_table`, `sha256` |
 | [`metrics.py`](../../evaluation/bench/metrics.py) | `accumulator(ks, device)` / `accumulate(acc, ids, targets, num_targets=None, ranked=False)` (returns the chunk's per-row recall, the [sidecar](#per-query-sidecar)'s values) / `finalize(acc)` (`null` metrics when `n == 0`, `null_if_empty`) — recall, ndcg, precision, mrr at every `k` from one top-`k_max` list as float64 running sums on device; `ranked=True` scores against the oracle's own top-`k` prefix; `per_row`, `jaccard_at_k`, `drop_self` ([Self-match](#self-match)). `training/evaluate.py` keeps its own frozen copy, pinned to agree (`training/test_encode.py`) |
 | [`algos.py`](../../evaluation/bench/algos.py) | the algorithm table: `ALGOS` name → class (`LiNRV1`–`LiNRV3`, `SilverTorch`; `Postfilter`, the harness's own), `FILTER_KINDS`, `BACKENDS`, `FILTER_MODE` (`clause` → `exact`), `DISPATCH` (the library's table plus the `Postfilter` row), `PATHS` **derived from it**, `filter_backend` (`official` / `official-fork` → `triton`), `build(algo, item_embs, k=, backend=, …)` (construct + `register_index`, ≈ 25 lines), `build_filter`, `is_valid_combo`, `official_config` (`bloom_path` / `score_path` / `recheck` → `OfficialConfig`) |
 | [`postfilter.py`](../../evaluation/bench/postfilter.py) | `Postfilter`, the generic-torch baseline ([below](#the-postfilter-baseline)) |
@@ -263,9 +263,10 @@ which exist for `buffers()`, `.k`, `torch.compile` and because their
 | [`inputs.py`](../../evaluation/bench/inputs.py) | `load_inputs` (dispatch to `training.encode.encode_split` or the `eval_datasets.layout` text readers; `users_limit` once, as a prefix), `sweep_qa`, `build_filters` (keyed by filter backend), `exact_filter`, `query_pool` |
 | [`oracle.py`](../../evaluation/bench/oracle.py) | the exact filtered oracle as blob v4, `attrs_digest`, `pass_counts`, `pass_rate`, `bloom_fp_rate` |
 | [`run.py`](../../evaluation/bench/run.py) | `run(jobs, out_dir=...)` — the cell loop; `MODES`, `QUALITY_CHUNK = 16`, `QUALITY_CPU_THREADS = 1`, `EXACT_ALGOS`, `SEED_FREE_QUALITY`, `PER_K_QUALITY`, `PERF_STAT_KEYS`, `IDS_PROBE_BATCHES`, `CLOCK_DRIFT` |
-| [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `check` / `upload` / `fetch` / `report` / `env` |
+| [`cli.py`](../../evaluation/bench/cli.py) | `bench run` / `campaign` / `oracle` / `check` / `upload` / `fetch` / `merge` / `report` / `env` |
 | [`report.py`](../../evaluation/bench/report.py) | `bench report`: `results.parquet`, the paper tables as LaTeX, the figures, the methodology paragraph and `report.md`; the `ARTIFACTS` dispatch table and the citability verdict. See [Report](#report-reportpy) |
 | [`upload.py`](../../evaluation/bench/upload.py) | `bench upload`: publish a results tree (records, samples, a freshly aggregated `results.parquet`) to the HF results repo with a `MANIFEST.json` (provenance + a sha256 per file) and a generated README; `bench fetch`: one subtree back, checked against its manifest. See [Results storage](#results-storage) |
+| [`merge.py`](../../evaluation/bench/merge.py) | `bench merge`: the records of several fetched trees as `records.parquet`, `timings.parquet`, `samples.parquet` and `manifest.yaml`, one accepted record per cell and host. See [Merged tables](#merged-tables-bench-merge) |
 
 ### Algorithms and the `PATHS` table
 
@@ -597,6 +598,7 @@ bench check    --dataset D [--dim N]* [--config-dir config]   # eval_datasets.la
 bench upload   [--repo-id user/repo] [--results DIR] [--path-in-repo PREFIX] [--gate STEP]
                [--private|--public] [--verify] [--dry-run]
 bench fetch    --path-in-repo PREFIX [--repo-id user/repo] [--results DIR]
+bench merge    TREE [TREE ...] --out DIR                      # fetched trees -> records / timings / samples tables + manifest
 bench report   [results] [--out DIR] [--gate STEP] [--manifest FILE] [--only NAME]*
                [--dim 128] [--k 100] [--bs 1] [--mode eager|graph] [--backend triton]
 bench env                                                     # provenance | clocks, as JSON
@@ -663,6 +665,8 @@ that it should have been prebuilt.
 the dataset's directory at every dim (files, prefix sidecars, the row
 alignments the readers enforce) and exits 1 on any problem — run it before
 a campaign on a freshly staged dataset.
+`bench merge` turns any set of fetched trees into three typed tables and a
+manifest ([Merged tables](#merged-tables-bench-merge)).
 `bench env` prints `measure.provenance() | measure.clocks()` as one JSON
 object — the provenance fields of the record's `env` block plus one
 `nvidia-smi` sample under `clocks()`'s names (`sm_mhz`, `mem_mhz`,
@@ -1105,6 +1109,45 @@ files anywhere else (`--untracked-files=no`, informational: a docs or
 harness edit). The results tree is gitignored, so a campaign appending to
 its JSONL never flips it.
 
+### Merged tables (`bench merge`)
+
+`bench merge TREE [TREE ...] --out DIR` reads any set of results trees as
+`bench fetch` leaves them (one per Hub subtree; the directory name is the
+`subtree` label, so `bench merge fetched/fr/* --out tables/` merges a whole
+run) and writes four files under `DIR`, `merge.TABLES_VERSION` = 1. The
+records are read as they are, never rewritten.
+
+**The accepted record.** A cell is a resume key (key block +
+`code_version`). Among the records of one cell **on one host**
+(`env.host`), the accepted one is the `ok` record over a `partial` over a
+`failed` one, a stable (`unstable` false) over an unstable one, then the
+latest `env.started`, then the later line; every other record of that cell
+and host is superseded by it (`superseded_by` names the accepted record's
+subtree). This is the rerun policy as data: a `-rerun` subtree's stable
+record replaces its leg's unstable one, a cell unstable in every run keeps
+its record and the flag, an OOM `failed` line gives way to the retry that
+followed it. Hosts never supersede each other: a cell with accepted records
+on two hosts keeps them all (the machine effect is the analysis's to weigh,
+not the merge's), and the manifest lists them under
+`cross_host_duplicates`.
+
+| file | one row per | columns |
+|---|---|---|
+| `records.parquet` | record line of every input tree | `subtree`, `cell` (sha1 of the resume key, 16 hex), `accepted`, `status`, `unstable`, the key block (`params` as canonical JSON), `env_host`, `env_started`, `env_code_version`, `env_commit`, `tag` (the git tags at `env_commit` in the checkout the merge runs in, comma-joined; null without), `file`, `line`, `superseded_by`; then every column `results.parquet` gives a record (`records.record_columns`: the scalars, `env_*`, `quality_source_seed`, `interleave_*`, `heldout_*`, `oracle_*`, `quality_*`) and the rest of `env` flattened (`env_driver` … `env_config_sha`, `env_official_build_so_sha256`, `env_official_fork_build_so_sha256`) |
+| `timings.parquet` | perf entry of every record | the same first thirteen columns, then the `perf_*` columns of `results.parquet` (`records.perf_columns`: `perf_k`, `perf_bs`, `perf_mode`, the stats, `perf_window_medians_ms`, `perf_sm_mhz`, `perf_ids_sha256(_canon)`, `perf_rounds`, `perf_kernels_<scope>_us` / `_calls`, `perf_reason` on a variant that did not run) |
+| `samples.parquet` | samples-sidecar line | the same first thirteen columns, `k`, `bs`, `mode`, `n`, `ms` (list of double: the chosen window's per-call vector). A sidecar line is paired with its record by file order (the j-th line of a variant is the j-th record of that key with that variant timed; the sidecar and the record file are appended in the same cell order, samples first); a sidecar whose lines do not pair raises, a tree without one gives no rows |
+| `manifest.yaml` | — | `tables_version`, `built`, `rows`; `subtrees`: per input tree `path_in_repo`, `manifest_sha256`, `uploaded` (from its `MANIFEST.json` when `bench fetch` kept one, else null), `hosts`, `gpus`, `commits`, `tags`, `branches`, `code_versions`, `started` [first, last], `records` {status: n}, `unstable`, `accepted`, `superseded`, `supersedes` (the subtrees whose records it replaced), `samples`; `cells`: per `(dataset, suite, algo, backend)` the `subtrees` its accepted records come from, `cells`, `accepted_ok`, `accepted_failed`, `seeds`, `code_versions`, `filter_kinds`, `sweeps`; `cross_host_duplicates`: `cell`, `key`, `hosts`, `subtrees` |
+
+The tables carry the same values as the per-leg `results.parquet` (both are
+built from `records.record_columns` and `records.perf_columns`); they add the
+provenance the flat table drops and the accept verdict across trees. A row
+of `timings` with `accepted` false is a superseded measurement, kept so the
+tables are lossless. The per-query sidecars stay files, referenced by
+`per_query`. `tests/bench/test_merge.py` pins the rule (an unstable original
+and its stable rerun, a stable original and its unstable rerun, an OOM line
+and its retry, two hosts both accepted and listed), the samples pairing and
+its two refusals, and the manifest's counts.
+
 ### Oracle blob v4
 
 `oracle.load_or_build(gt_dir, sweep, k_gt, item_embs=, queries=, targets=,
@@ -1339,6 +1382,7 @@ life, and git holds only the pointer.
 | the same records, samples and per-query sidecars, plus `results.parquet`, once a leg finishes | **HF Hub**, `pinkmeme/eval-results/<leg>/`, private (`bench upload`) | the archive. The JSONL goes up next to the Parquet because it is the lossless form: failed records with their tracebacks, superseded records, the nested `quality` and `env`, `window_sm_mhz`, `kernels` — everything the flat table drops — and it is what resume and the manifest's provenance read |
 | `report/` (`*.tex`, figures, `report.md`) behind a gate | **git**, under `research/artifacts/<plan>/` — without its `results.parquet` (gitignored), which `bench report` regenerates from the Hub copy | small, reviewed, and what a gate's text points at |
 | raw dumps behind a documented finding (kernel timings, probe outputs, ETL logs) | **HF Hub**, `pinkmeme/eval-results/artifacts/<plan>/<same path>` | the finding lives in prose in [validation](../../research/validation.md) and the system pages; the dump is only for re-derivation |
+| the [merged tables](#merged-tables-bench-merge) of a run's legs (`bench merge`) | **HF Hub**, `pinkmeme/eval-results/artifacts/<plan>/<tables>` | derived from the legs, rebuilt by one command; what a results script reads instead of the legs |
 | `results/_parity/*/*.npz` (600–680 MB per run), `results/_logs/` | **nowhere** — deleted | rewritten by every run, and the parity *verdict* (`jaccard_vs_first@k`, `score_max_abs_diff`) is already inside the record. `bench upload` skips every `_`-prefixed path part |
 
 A leg is finished when its records are on the Hub and verified: `bench upload
@@ -1406,14 +1450,17 @@ downloads the subtree into a temp directory, checks every file against the
 subtree's `MANIFEST.json`, and copies the files into the results tree. It
 refuses — before copying anything — when the tree already holds a *different*
 copy of one of them (a live campaign's JSONL is never overwritten); identical
-files are fine, so fetching twice is a no-op. A fetched tree is an ordinary
+files are fine, so fetching twice is a no-op. The subtree's `MANIFEST.json`
+is copied in beside the files (`bench merge` reads its provenance; `upload.files`
+never lists it, so a re-upload does not carry it). A fetched tree is an ordinary
 results tree: `bench report` reads it and `bench run --resume` appends to it.
 
 `tests/bench/test_upload.py` pins both with no network: the scratch
 exclusion, the checksums, the four ways evidence beats `--gate`, the generated
 README, the round-trip check catching a changed byte, the commit's operation
 list with the regenerated `results.parquet` and `private=True`, a fetched tree
-that resume can read, and a fetch refusing to overwrite a different local copy.
+that resume can read with its `MANIFEST.json` kept, and a fetch refusing to
+overwrite a different local copy.
 
 ## Inputs (`inputs.py`)
 
@@ -1496,7 +1543,8 @@ trailing-whitespace hooks (the last two never on `articles/`, `research/artifact
 | `bench/test_oracle.py` | padding, v4 fields and arithmetic, fingerprint in the file name (its row sample ending on the last row past 2^24 rows), an unreadable blob rebuilt, bloom FP rate, `code_version`; the item-chunked oracle and pass counts equal to a one-shot stable-sort reference at three chunk sizes, ties to the lower id; TF32 refused (G-oracle); `slice_wider` cutting a wider blob of the same inputs only, writing nothing |
 | `bench/test_run.py` | end to end on the tiny fixture, both modes (`graph` = the CPU null entry): record schema, resume, `code_version` invalidation, `partial`, a failed cell + continue, a sticky CUDA error, the quality gate, the parity spill (and a same-backend spill rewritten), reachable-target masking, the plan cache off through `OfficialConfig`, `modes` stamped per job (an eager-only uncapturable record `ok`, a capturable one `partial`), `postfilter`'s `recall_oracle` per `k` (equal to a pass at that `k`, never above the exact V1's); G-cache (seed-free arms copy, V3 / SilverTorch never, misses on other `ks` / `code_version`); a quality-only suite `ok`; G-ids (exact hash, and the canonical hash equal across a tied pair's two orders); G-dump (sidecar mean = record, upload lists it, aggregate skips it); G-interleave (same keys, one group per sweep and seed, `rounds`, whole-group resume); `frac_windows_below_max` against the device max, whichever cell ran first; `clocks_drift` against the first under-load sample (never the idle one) and `unstable` from drift or a perf entry's spread, each alone; a perf-phase OOM failing its whole interleaved group, not sticky, and resume re-running only that group; the spill's int32 ids exact past 2^24 and a `shape_mismatch`; `score_path` arms sharing the triton parity spill; [self-match](#self-match): an exact arm at oracle recall 1.0 with its own item excluded on both sides (key and record flags, the `none` cell untouched), and a finder of only the own item scoring 1.0 before the rule and 0 after |
 | `bench/test_cli.py` | `bench run` via `CliRunner`, `--checkpoint` landing as the record's `inputs` (encoder faked), a real one-child `bench campaign` ending in `results.parquet`, a faked timed-out child, a restart mid-group keeping its parity spill (in-process children), zero cells → exit 1, a failed cell → `bench run` exit 1 and `bench campaign` exiting with its worst child's code, `bench report` over the campaign's own records, `bench env`'s JSON keys, the child log's start / end clock blocks and histogram, `bench oracle` prebuilding every sweep so `bench run` builds none |
-| `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, `n_records` counting only `<suite>/*.jsonl` (0 from a suite directory or a JSON-only tree), evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations (with the regenerated `results.parquet`) and `private=True`; `bench fetch` restoring a tree resume reads and refusing to overwrite a different local copy |
+| `bench/test_merge.py` | `bench merge` on two tiny trees: the accept rule per cell and host (an unstable original and its stable rerun, a stable original and its unstable rerun, an OOM `failed` line and its retry, two hosts both accepted and listed as `cross_host_duplicates`), the three tables' rows and provenance columns, the samples pairing and its two refusals, a tree without a sidecar, the manifest's counts, two trees sharing a name refused |
+| `bench/test_upload.py` | `bench upload` with no network: `_logs/` and `_parity/` never listed, the manifest's sha256 per file, `n_records` counting only `<suite>/*.jsonl` (0 from a suite directory or a JSON-only tree), evidence beating `--gate` four ways, the generated README over several subtrees, `verify` catching a changed byte, the commit's operations (with the regenerated `results.parquet`) and `private=True`; `bench fetch` restoring a tree resume reads (its `MANIFEST.json` kept, never re-listed) and refusing to overwrite a different local copy |
 | `bench/test_report.py` | every column the tables read still comes out of `records.aggregate`; every artifact emitted; the LaTeX structurally balanced with its labels and no unescaped `_`; one row per postfilter alpha; an unlabelled algo (`linr_v4`) in no table; a `failed` record excluded and a `partial` / `unstable` one marked; citability off by default and evidence beating `--gate`; two `inputs` under one `(dataset, dim)` refused; an empty tree; a schema-1 record; paired speedups from interleaved arms and recall CIs from sidecars; T3 ids `=` / `= (ties)` / `≠` and kernel-only from `kernels_us` (top-8 fallback marked); F3 one panel per sweep × bs |
 | `bench/test_stats.py` | G-stats: a constant's CI is a point; A = 2B pairs to 2.0 with a CI excluding 1; identical arms are no difference; interpolation exact on a linear curve, never extrapolated |
 | `bench/test_c4_gate.py` | the golden-comparison gate script, [`c4_gate.py`](../../research/artifacts/evaluation-harness-v2/c4_gate.py), against synthesised schema-1 records |
