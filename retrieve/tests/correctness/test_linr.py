@@ -13,7 +13,7 @@ import torch
 
 from retrieve.functional import compact_mask
 from retrieve.interfaces import ops_for
-from retrieve.modules import BloomFilter, ExactAttributeFilter
+from retrieve.modules import ExactAttributeFilter
 from retrieve.modules.bit_knn import OneBitKNN, SimHashKNN
 from retrieve.modules.knn import FullScanKNN, PostfilterKNN, PrefilterKNN
 from retrieve.modules.linr import LiNRV1, LiNRV2, LiNRV3
@@ -611,7 +611,7 @@ def test_simhash_quality_lift_over_oporp_at_higher_kbits():
 @pytest.mark.parametrize("backend", ["official", "cuda", "foo"])
 def test_unknown_backend_is_rejected(make, backend):
     """``LinrBackend`` is ``torch | triton``: a typo, or a SilverTorch-only value, raises at
-    construction instead of silently running the torch path (review #5 / roadmap B4)."""
+    construction instead of silently running the torch path."""
     with pytest.raises(ValueError, match="unknown backend"):
         make(backend)
 
@@ -622,7 +622,7 @@ def test_unknown_backend_is_rejected(make, backend):
 
 
 class TestComposites:
-    """``LiNRV1``–``LiNRV3`` (plan L D5) are the harness wrappers moved, not rewritten: on the
+    """``LiNRV1``–``LiNRV3`` are the harness wrappers moved, not rewritten: on the
     same inputs each equals the primitives composed by hand — scores ``torch.equal``, ids
     equal up to ties. A Triton filter's compaction order is unspecified between two launches,
     so V3's filter is the ``torch`` one on every row: fed a Triton candidate list, the 1-bit
@@ -639,10 +639,7 @@ class TestComposites:
     def _filter(kind, backend, attrs):
         if kind == "none":
             return None
-        if kind == "clause":
-            f = ExactAttributeFilter(backend=backend)
-        else:
-            f = BloomFilter(m_bits=512, k_hash=4, backend=backend)
+        f = ExactAttributeFilter(backend=backend)
         f.register_index(attrs)
         return f
 
@@ -652,7 +649,7 @@ class TestComposites:
         assert_ids_equal_up_to_ties(out[0], ref[0], ref[1])
 
     @pytest.mark.parametrize("backend", BACKENDS)
-    @pytest.mark.parametrize("kind", ["none", "clause", "bloom"])
+    @pytest.mark.parametrize("kind", ["none", "clause"])
     def test_v1_equals_postfilter_knn(self, data, attrs, backend, kind):
         item_attrs, qa = attrs
         f = self._filter(kind, backend, item_attrs)
@@ -672,10 +669,9 @@ class TestComposites:
         assert torch.equal(out[0], want[0]) and torch.equal(out[1], want[1])
 
     @pytest.mark.parametrize("backend", BACKENDS)
-    @pytest.mark.parametrize("kind", ["clause", "bloom"])
-    def test_v2_equals_prefilter_knn(self, data, attrs, backend, kind):
+    def test_v2_equals_prefilter_knn(self, data, attrs, backend):
         item_attrs, qa = attrs
-        f = self._filter(kind, backend, item_attrs)
+        f = self._filter("clause", backend, item_attrs)
         v2 = LiNRV2(k=K, filter=f, backend=backend)
         v2.register_index(data["embs"])
         ref = PrefilterKNN(k=K, backend=backend)
@@ -687,7 +683,7 @@ class TestComposites:
         )
 
     @pytest.mark.parametrize("backend", BACKENDS)
-    @pytest.mark.parametrize("kind", ["none", "clause", "bloom"])
+    @pytest.mark.parametrize("kind", ["none", "clause"])
     def test_v3_equals_one_bit_then_prefilter_cascade(self, data, attrs, backend, kind):
         item_attrs, qa = attrs
         f = self._filter(kind, "torch", item_attrs)
@@ -761,7 +757,7 @@ def test_prefilter_knn_short_candidate_list_pads_to_k(p):
 @pytest.mark.parametrize("p", [0, 3, 40])
 def test_bit_knn_indirect_width_is_min_k_p_on_both_backends(p):
     """The candidate path returns ``min(k, P)`` columns, no pad, on both backends; ``P = 0`` is
-    an empty ``[B, 0]`` (it used to crash the Triton epilogue's gather)."""
+    an empty ``[B, 0]``."""
 
     g = torch.Generator(device="cuda").manual_seed(0)
     qb = torch.randint(-(2**62), 2**62, (2, 2), generator=g, device="cuda")

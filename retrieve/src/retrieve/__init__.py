@@ -1,6 +1,5 @@
 from retrieve.interfaces import FilterModule, LinrBackend, RetrievalModule, SilverTorchBackend
 from retrieve.modules import (
-    BloomFilter,
     ExactAttributeFilter,
     FullScanKNN,
     LiNRBuilder,
@@ -18,7 +17,6 @@ from retrieve.modules import (
 )
 
 __all__ = [
-    "BloomFilter",
     "ExactAttributeFilter",
     "FilterModule",
     "FullScanKNN",

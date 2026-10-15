@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from retrieve.functional import combine_masks, compact_mask
-from retrieve.modules import BloomFilter, ExactAttributeFilter
+from retrieve.functional import compact_mask
+from retrieve.modules import ExactAttributeFilter
 from retrieve.modules.bit_knn import OneBitKNN
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs
 
@@ -174,8 +174,8 @@ def test_clause_index_evaluate_subset_p_zero():
     assert out.dtype == torch.bool
 
 
-def test_one_bit_knn_with_combined_filter_mask():
-    """Cross-compat smoke: BloomFilter & ExactAttributeFilter AND'd together feed OneBitKNN."""
+def test_one_bit_knn_with_filter_mask():
+    """Composition smoke: the exact filter's compacted mask feeds OneBitKNN's candidates path."""
     n, d, b, k = 4096, 128, 8, 32
     embs = make_index(n, d)
     query = make_query(b, d)
@@ -184,16 +184,9 @@ def test_one_bit_knn_with_combined_filter_mask():
 
     ci = ExactAttributeFilter().to("cuda")
     ci.register_index(attrs)
-    bf = BloomFilter(m_bits=1024, k_hash=5).to("cuda")
-    bf.register_index(attrs)
-
     clause_mask = ci.evaluate_mask(ci.prepare_queries(q_attrs))
-    bloom_mask = bf.evaluate_mask(bf.prepare_queries(q_attrs))
-    mask = combine_masks(clause_mask, bloom_mask)
-    # Combined mask must be the clause mask exactly (bloom is a superset).
-    assert torch.equal(mask, clause_mask)
 
-    cand, counts = compact_mask(mask)
+    cand, counts = compact_mask(clause_mask)
     knn = OneBitKNN(k=k, backend="triton").to("cuda")
     knn.register_index(embs)
     ids, _ = knn(query, candidate_ids=cand, counts=counts)
@@ -227,28 +220,26 @@ RANGES = [
 ]
 
 
-def _range_filters(backend):
+def _range_filter(backend):
     attrs = make_attrs(RANGE_N, c=3, a_max=3, n_vocab=6, pad_rate=0.3, seed=21)
     exact = ExactAttributeFilter(backend=backend)
     exact.register_index(attrs, clause_is_reverse=torch.tensor([False, True, False], device="cuda"))
-    bloom = BloomFilter(m_bits=128, k_hash=3, backend=backend)
-    bloom.register_index(attrs)
-    return exact, bloom
+    return exact
 
 
 @pytest.mark.parametrize("backend", ["triton", "torch"])
 def test_evaluate_mask_range_equals_full_mask_slice(backend):
     """``evaluate_mask(q, start, end)`` is the full mask's ``[:, start:end]`` bit for bit, for
-    empty, single-item and unaligned ranges, ranges ending at N and the whole catalog; exact
-    (with a reverse clause) and bloom, on both backends."""
+    empty, single-item and unaligned ranges, ranges ending at N and the whole catalog, with a
+    reverse clause, on both backends."""
     q = make_query_attrs(b=5, c=3, n_vocab=6, inactive_rate=0.2, seed=22)
-    for f in _range_filters(backend):
-        full = f.evaluate_mask(f.prepare_queries(q))
-        assert full.any() and not full.all()
-        for start, end in RANGES:
-            got = f.evaluate_mask(f.prepare_queries(q), start, end)
-            assert got.shape == (5, (RANGE_N if end is None else end) - start)
-            assert torch.equal(got, full[:, start:end]), (type(f).__name__, start, end)
+    f = _range_filter(backend)
+    full = f.evaluate_mask(f.prepare_queries(q))
+    assert full.any() and not full.all()
+    for start, end in RANGES:
+        got = f.evaluate_mask(f.prepare_queries(q), start, end)
+        assert got.shape == (5, (RANGE_N if end is None else end) - start)
+        assert torch.equal(got, full[:, start:end]), (start, end)
 
 
 @pytest.mark.parametrize("backend", ["triton", "torch"])
@@ -257,17 +248,14 @@ def test_evaluate_mask_range_allocates_no_full_mask(backend):
     n, b, lo, hi = 1 << 22, 16, 123_457, 124_457
     attrs = make_attrs(n, c=1, a_max=1, n_vocab=4, pad_rate=0.0, seed=23)
     q = make_query_attrs(b=b, c=1, n_vocab=4, inactive_rate=0.0, seed=24)
-    exact = ExactAttributeFilter(backend=backend)
-    exact.register_index(attrs)
-    bloom = BloomFilter(m_bits=64, k_hash=2, backend=backend)
-    bloom.register_index(attrs)
+    f = ExactAttributeFilter(backend=backend)
+    f.register_index(attrs)
     del attrs
-    for f in (exact, bloom):
-        torch.cuda.synchronize()
-        base = torch.cuda.memory_allocated()
-        torch.cuda.reset_peak_memory_stats()
-        out = f.evaluate_mask(f.prepare_queries(q), lo, hi)
-        torch.cuda.synchronize()
-        transient = torch.cuda.max_memory_allocated() - base
-        assert out.shape == (b, hi - lo)
-        assert transient < b * n // 16, (type(f).__name__, transient)
+    torch.cuda.synchronize()
+    base = torch.cuda.memory_allocated()
+    torch.cuda.reset_peak_memory_stats()
+    out = f.evaluate_mask(f.prepare_queries(q), lo, hi)
+    torch.cuda.synchronize()
+    transient = torch.cuda.max_memory_allocated() - base
+    assert out.shape == (b, hi - lo)
+    assert transient < b * n // 16, transient

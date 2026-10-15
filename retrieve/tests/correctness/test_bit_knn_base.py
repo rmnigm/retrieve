@@ -105,7 +105,7 @@ class TestKBitsSentinel:
 
     def test_re_register_re_resolves_sentinel(self):
         """Re-registering a different-D corpus re-resolves the 0 sentinel instead of freezing
-        the first D (which used to make quantize_oporp_1bit raise, or worse, silently bin)."""
+        the first D."""
         m = make_one_bit(k_bits=0)
         m.register_index(make_cpu_embs(d=128))
         assert m.k_bits == 128

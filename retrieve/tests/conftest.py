@@ -18,7 +18,7 @@ import torch
 
 
 def pytest_configure(config):
-    """H-INDCACHE: a fresh inductor cache per pytest run, so no compile gate replays a graph an
+    """A fresh inductor cache per pytest run, so no compile gate replays a graph an
     earlier tree cached for the same custom op (testing.md § Running)."""
     config.inductor_dir = tempfile.mkdtemp(prefix="pytest-inductor-")
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = config.inductor_dir

@@ -1,7 +1,7 @@
 ---
 title: kernels
 created: 2026-09-26
-updated: 2026-10-11
+updated: 2026-10-15
 type: concept
 tags: [kernels, library]
 sources: [retrieve/src/retrieve/ops/]
@@ -9,62 +9,33 @@ sources: [retrieve/src/retrieve/ops/]
 
 # `retrieve` kernels
 
-Every kernel of ours is Triton. The one non-Triton path,
-`SilverTorch(backend="official")`, is Meta's own extension behind an
-adapter ([its section](#official--metas-torchopsst-kernels-as-the-reference-backend)).
-There is no CUDA C++ or CuTe DSL backend ([Deleted backends](#deleted-backends)).
+Every kernel of ours is Triton: the LiNR kernels and the filter primitives, flat in
+[`ops/triton/`](../../retrieve/src/retrieve/ops/triton/), one file per kernel, registered as
+`torch.ops.retrieve.*` when the package is imported (its `__init__.py`); every op has a pure-torch
+twin with the same name and signature in
+[`ops/reference/`](../../retrieve/src/retrieve/ops/reference/) (the `"torch"` backend and the
+parity oracle). `SilverTorch` runs no kernel of ours: its phases 2+3 are Meta's ops, as published
+(`backend="official"`) or adapted (`backend="official-fork"`, the default), behind the adapter in
+[`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py)
+([SilverTorch on Meta's ops](#silvertorch-on-metas-ops)). Our earlier Triton reimplementation of
+SilverTorch is deleted ([Deleted backends](#deleted-backends)).
 
-**What ships** ([decisions](../../research/decisions.md#goal-and-scheduling)): LiNR's
-and the filters' Triton kernels, and SilverTorch on Meta's official code,
-adapted (`backend="official-fork"`, the `official-fork/` workspace member;
-its section is [below](#official-fork--our-fork-of-metas-ops)). The [SilverTorch kernels](#silvertorch-kernels) below
-(`codesigned_probe_score*`, `bloom_full_mask` and their reference twins)
-are our Triton reimplementation: in this tree, not in the paper or the
-release, deleted at roadmap TRITON-ST-DELETE. The
-[official](#official--metas-torchopsst-kernels-as-the-reference-backend)
-adapter stays: it runs Meta's code as published, the parity reference.
+By domain:
 
-The Triton kernels live flat in
-[`ops/triton/`](../../retrieve/src/retrieve/ops/triton/), one file per
-kernel, registered as `torch.ops.retrieve.*` when the package is imported
-(its `__init__.py`); every op has a pure-torch twin with the same name and
-signature in [`ops/reference/`](../../retrieve/src/retrieve/ops/reference/)
-(the `"torch"` backend and the parity oracle). By domain:
-
-- LiNR — kernels used by `PrefilterKNN` / `OneBitKNN` / `SimHashKNN`
-  (`fused_masked_knn_topk`,
-  `oporp_1bit_match_topk`). `PostfilterKNN`'s dense fp16-input matmul +
-  top-K is pure torch — there's no real fusion to win over cuBLAS LtGemm +
-  CUB.
-- filters — standalone filter primitives consumed by the `FilterModule`
-  family: `clause_compact` (powers `ExactAttributeFilter.evaluate_indices`),
-  `clause_mask` (powers `ExactAttributeFilter.evaluate_mask`),
-  `bloom_match` (powers `BloomFilter.evaluate_mask`) and
-  `bloom_compact` (powers
-  `BloomFilter.evaluate_indices`). The mask/compact split mirrors the
-  filter API split documented in [filtering.md](filtering.md).
-- SilverTorch — the two co-designed IVF probe+score kernels
-  (`codesigned_probe_score` for the IVF + INT8 + Bloom co-design,
-  `codesigned_probe_score_exact` for the IVF + INT8 + exact AND-of-OR
-  variant — `SilverTorch.filter_mode` picks one). The adapter over Meta's
-  `torch.ops.st.*` ops, selected by `SilverTorch(backend="official")`, is
-  its own namespace, [`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py).
+- LiNR — `fused_masked_knn_topk` (`PrefilterKNN`), `oporp_1bit_match_topk` (`OneBitKNN` /
+  `SimHashKNN`), `gemv_scores` (`PostfilterKNN` at `B = 1`; its dense matmul + top-K is otherwise
+  pure torch, there being no fusion to win over cuBLAS LtGemm + CUB).
+- filters — `clause_mask` / `clause_mask_scores` / `clause_mask_packed` and `clause_compact`
+  (`ExactAttributeFilter`, and the packed mask `SilverTorch(backend="official",
+  filter_mode="exact")` hands Meta's scorer). The mask/compact split mirrors the filter API split
+  documented in [filtering.md](filtering.md).
 
 Cross-kernel `@triton.jit` building blocks live in
-[`common.py`](../../retrieve/src/retrieve/ops/triton/common.py) —
-see [Shared kernel helpers](#shared-kernel-helpers-opstritoncommonpy) —
-and the plain-Python launch scaffold they share in
-[`_host.py`](../../retrieve/src/retrieve/ops/triton/_host.py): `probe_prep` +
-`probe_topk` (the probe scorers' shared launch arguments and their top-k +
-id-epilogue launch), `width_tiles` / `tile_for_width` (their tile per width and
-program count),
-`compact_finish` (the compaction ops' scan + scatter), the boundary checks
-and `wide`, and `grid_batch_tiles` (the 3-D grid split of the filter and
-probe kernels).
-
-The LinR kernels are the focus of this doc; the filter primitives
-(`clause_compact`, `clause_mask`, `bloom_match`, `bloom_compact`) are
-covered next, and the SilverTorch-only kernels at the end for context.
+[`common.py`](../../retrieve/src/retrieve/ops/triton/common.py)
+([Shared kernel helpers](#shared-kernel-helpers-opstritoncommonpy)) and the plain-Python launch
+scaffold they share in [`_host.py`](../../retrieve/src/retrieve/ops/triton/_host.py):
+`compact_finish` (the compaction op's scan + scatter), the boundary checks and `wide`, and
+`grid_batch_tiles` (the 3-D grid split of the filter kernels).
 
 All kernels follow the same conventions.
 
@@ -93,19 +64,15 @@ All kernels follow the same conventions.
   buffer and the host calls `torch.topk` on it. CUB's top-K (under torch)
   is faster than anything we can implement in pure Triton without a
   warp-level radix-select primitive.
-- Tile config (`block_n`, `num_warps`, `num_stages`; `block_p` for the
-  silvertorch kernels)
-  is offline-tuned per kernel and shipped as a
-  single `DEFAULT_CONFIG` constant on the kernel module (the two probe
-  scorers: a `CONFIGS` table, one tile per `D_PAD` bound). No runtime
+- Tile config (`block_n`, `num_warps`, `num_stages`) is offline-tuned per kernel and shipped
+  as a single `DEFAULT_CONFIG` constant on the kernel module. No runtime
   `@triton.autotune`. Callers who want a non-default tile pass
   `config=<Kernel>Config(...)` to the private
   `_<name>_impl(..., config=)` companion — the public op has a fixed
   schema and always uses the shipped tile. The `tune-kernels` CLI
   (shipped with the library at `retrieve.ops.tune:main`) sweeps the
   candidate grid on a given arch and prints the line to paste into the
-  kernel file. The same convention applies uniformly across linr,
-  filter, and silvertorch kernels — see
+  kernel file. The same convention applies to the LiNR and the filter kernels — see
   [Autotune separation](#autotune-separation) below for the rationale.
 - Host-wrapper shape. Every kernel file follows one pattern: a shared
   `_<name>_prep(...)` does validation + contiguity + output-buffer
@@ -114,19 +81,16 @@ All kernels follow the same conventions.
   topk/gather/sentinel epilogue where one exists, and every entry point
   — the eager `_impl` and the `@triton_op` public op(s) — is prep →
   one launch line → finish. Validation therefore runs on the
-  production ops, not just `_impl`. (`bloom_match` is the one
-  exception: a single-op ~80-line file with no `_impl`, no Config, no
-  prep — see its section.)
-- Graph-break behavior. Thirteen ops are registered across the nine Triton
-  kernel files (the official backend registers no op of ours; it calls
-  `torch.ops.st.*`), in two flavours.
+  production ops, not just `_impl`. (`gemv_scores` is the exception: one op at a fixed tile, no
+  `_impl`, no Config, no prep.)
+- Graph-break behavior. Eight ops are registered across the five Triton kernel files (the
+  official backends register no op of ours; they call `torch.ops.st.*` / `stfork.*`), in two
+  flavours.
 
-  **Eleven on `@torch.library.triton_op`**, each with a textually-inline
-  `wrap_triton(_kernel)[grid](**launch.kwargs)` launch: `clause_mask`,
-  `clause_mask_scores`, `fused_masked_knn_topk`, `bloom_match`,
-  `bloom_match_scores`, `bloom_full_mask`, `codesigned_probe_score`,
-  `codesigned_probe_score_bloom`, `codesigned_probe_score_exact`,
-  `oporp_1bit_match_topk_full`, `oporp_1bit_match_topk_indirect`. The
+  **Seven on `@torch.library.triton_op`**, each with a textually-inline
+  `wrap_triton(_kernel)[grid](**launch.kwargs)` launch: `clause_mask`, `clause_mask_scores`,
+  `clause_mask_packed`, `fused_masked_knn_topk`, `gemv_scores`, `oporp_1bit_match_topk_full`,
+  `oporp_1bit_match_topk_indirect`. The
   decorator stops dynamo from graph-breaking at the wrapper boundary, so
   each layer's full forward captures into one cudagraph_trees graph, and
   lets inductor see the underlying `@triton.jit` kernel (preserves the
@@ -135,27 +99,24 @@ All kernels follow the same conventions.
   must stay textually inside each decorated body — dedup targets the
   code around it, never the launch line itself.
 
-  **Two on `@torch.library.custom_op`** (`mutates_args=()`,
-  `device_types="cuda"`, plus a `register_fake`), opaque to inductor and
-  calling the shared `_impl`: the two **stream-compaction** kernels,
-  `clause_compact` and `bloom_compact`. Under `triton_op`, inductor
+  **One on `@torch.library.custom_op`** (`mutates_args=()`, `device_types="cuda"`, plus a
+  `register_fake`), opaque to inductor and calling the shared `_impl`: the **stream-compaction**
+  kernel `clause_compact`. Under `triton_op`, inductor
   analyses the kernel's TTIR for mutated pointers, and its provenance
   walk follows a store address back through every argument of the
   `tt.call` that produced it. `compact_store`'s address is
   `row_base + intra` — data-dependent on the pass mask, which is the
-  result of the `clause_pass` / `bloom_subset_pass` call whose arguments
+  result of the `clause_pass` call whose arguments
   include the index buffers — so `item_attrs_ptr` / `query_attrs_ptr` /
   `is_reverse_ptr` (graph inputs) are reported as mutated and
   cudagraph trees skip the *whole* forward with "skipping cudagraphs due
   to mutated inputs", silently falling back to compiled-eager (the
   golden baseline's `graph` cells for `linr_v2` / `linr_v3` were taken
   that way and are compiled-eager numbers). `clause_mask` stores at a data-independent
-  address and is unaffected, which is why it stays a `triton_op`. As
-  custom ops the launches are opaque, the ops are functional as declared,
-  and the forward captures — gated by
+  address and is unaffected, which is why it stays a `triton_op`. As a
+  custom op the launch is opaque, the op is functional as declared, and the forward captures — gated by
   [`tests/compile/test_linr_compile.py`](../../retrieve/tests/compile/test_linr_compile.py),
-  which asserts `cudagraph_skips == 0` for compiled `linr_v1`/`v2`/`v3`
-  × clause/bloom. The cost is one custom-op dispatch instead of an
+  which asserts `cudagraph_skips == 0` for compiled `linr_v1`/`v2`/`v3`. The cost is one custom-op dispatch instead of an
   inlined launch, and the exported graph holds the op node rather than a
   Triton HOP (export and its bit-exact round-trip still work; the kernel
   is simply reached through the op).
@@ -176,13 +137,9 @@ The pattern, applied uniformly to every kernel in this tree:
 1. A `@dataclass(frozen=True) class <Name>Config` next to the
    `@triton.jit` body holds `block_n`, `num_warps`, `num_stages`.
 2. A `DEFAULT_CONFIG` module constant holds the single curated
-   default for the current arch (sm_80 / A100 in this repo). The two
-   probe scorers ship a `CONFIGS` table instead, a tuple of tiles per
-   `D_PAD` bound, resolved by `_host.tile_for_width`
-   ([below](#silvertorch-kernels), "Tile config").
+   default for the current arch (sm_80 / A100 in this repo).
 3. The host wrapper takes `config: <Name>Config | None = None`;
-   `cfg = config if config is not None else DEFAULT_CONFIG` resolves it
-   (the probe scorers: `tile_for_width(CONFIGS, D, B, width)`).
+   `cfg = config if config is not None else DEFAULT_CONFIG` resolves it.
 4. A private `_<name>_impl(..., *, config: ...Config | None = None)`
    lives next to the public op(s) in every file. Both share the same
    `_<name>_prep` / `_<name>_finish` helpers, so their bodies differ
@@ -190,8 +147,8 @@ The pattern, applied uniformly to every kernel in this tree:
    `wrap_triton(_kernel)[grid](**kwargs)` in the `@triton_op` body —
    the launch must appear textually in the decorated function's source,
    which is what `torch.export`'s kernel registry walks to preserve the
-   kernel reference; the two `custom_op`-registered compaction kernels
-   have no launch line of their own and just call `_impl`) and, where policies intentionally diverge, in
+   kernel reference; the `custom_op`-registered compaction kernel
+   has no launch line of its own and just calls `_impl`) and, where policies intentionally diverge, in
    explicit prep/finish flags (e.g. `fused_masked_knn_topk`'s
    `bucket=` / `pad_to_k=`). The op schema doesn't carry the config
    dataclass; tests and the tuner reach `_impl` directly to pass an
@@ -199,45 +156,37 @@ The pattern, applied uniformly to every kernel in this tree:
 5. Tuning is offline: [`ops/tune.py`](../../retrieve/src/retrieve/ops/tune.py) (`uv run
    tune-kernels <kernel-subcommand>`) is a declarative registry — one
    `KernelTuneSpec` per kernel in the `KERNELS` tuple, from which the
-   seven click subcommands are generated
-   (`fused-masked-knn-topk`, `oporp-1bit-match-topk`,
-   `codesigned-probe-score`, `codesigned-probe-score-exact`,
-   `clause-mask`, `clause-compact`, `bloom-compact`;
+   four click subcommands are generated
+   (`fused-masked-knn-topk`, `oporp-1bit-match-topk`, `clause-mask`, `clause-compact`;
    [`test_tune_smoke.py`](../../retrieve/tests/correctness/test_tune_smoke.py)
    pins the list), all driven by one
    generic `_sweep` + `_print` pair. Each spec sweeps its `(block,
    num_warps)` grid against built-in shape regimes mirroring real-eval
    workloads (goodreads N≈800k, arxiv N≈3M, synth-15M; batch sizes from
-   the eval configs). The regime-swept kernels
-   (`codesigned-probe-score-exact` and the three filter kernels) accept
-   repeatable `--regime N,B,C,A_MAX` (or `N,B,W`) flags; the
+   the eval configs). The two clause kernels accept
+   repeatable `--regime N,B,C,A_MAX` flags; the
    dimension-swept kernels expose `--d`/`--b`/`--w` flags and derive
    regimes by crossing them with the module's bucket/P axes. The shipped
-   `DEFAULT_CONFIG` (for the probe scorers, the `CONFIGS` entry at the
-   regimes' `D`; regimes spanning two entries are refused, so tune one
-   width at a time) is always swept too, and it stays unless a
+   `DEFAULT_CONFIG` is always swept too, and it stays unless a
    candidate's geometric-mean time over the regimes is more than
    `NOISE_BAND` (3 %) below it, **and** the candidate is at most
    `WORST_CAP` (5 %) slower in every single regime (`tune._choose`, pinned by
    `test_tune_smoke.py`). A B = 1 regime whose own winner beats the pick
    by ≥ `B1_GAP` (10 %) is flagged, which is the evidence a separate batch-1
-   config would need. The CLI emits a pasteable `DEFAULT_CONFIG = ...` line
-   (for the probe scorers, the config of the `CONFIGS` entry covering the
-   regimes' `D_PAD`).
+   config would need. The CLI emits a pasteable `DEFAULT_CONFIG = ...` line.
    `--json-out` dumps the per-regime sweep (`per_regime`), the rule's
    ratios (`rule`), and `env`: the SM clock sampled after each regime, the
    commit, and the torch / triton versions and device. Re-run once per new
    arch; commit the line.
-   (`bloom_match` has no subcommand — see its section.) A CUDA-gated
+   (`gemv_scores` has no subcommand: a fixed tile.) A CUDA-gated
    smoke test
    ([`test_tune_smoke.py`](../../retrieve/tests/correctness/test_tune_smoke.py))
    runs one tiny regime per spec so schema drift between tune.py and
    the kernel `_impl`s breaks CI instead of a tuning session.
 
-The compact kernels have no accumulating state (per-tile
-counts and offsets are plain stores, so a repeated launch rewrites the
-same values); the tuner calls their host wrappers, which allocate fresh
-buffers per call either way.
+The compaction kernel has no accumulating state (per-tile counts and offsets are plain stores,
+so a repeated launch rewrites the same values); the tuner calls its host wrapper, which allocates
+fresh buffers per call either way.
 
 ## Addressing
 
@@ -246,13 +195,12 @@ Triton's `program_id` is int32, and so is every integer argument below 2³¹, so
 classes of product reach that inside the paper's scale ladder:
 
 - **output / candidate axis**, `B·N ≥ 2³¹`: every `[B, N]`-shaped buffer a kernel indexes
-  by batch row: the `clause_mask` / `bloom_match` masks, the compaction scratch and
+  by batch row: the `clause_mask` mask, the compaction scratch and
   `[B, N]` result, the `[B, P]` candidate lists and score buffers of
-  `fused_masked_knn_topk`, `oporp_1bit_match_topk` and the probe scorers (B = 144 at
-  N = 15M).
+  `fused_masked_knn_topk` and `oporp_1bit_match_topk` (B = 144 at N = 15M).
 - **item axis**, `N·row_stride ≥ 2³¹`: item tables read by contiguous tile with a row
-  stride above 1: bloom signatures and OPORP bits at `N ≥ 2³¹/W` (134M at `W = 16`,
-  1.07B at `W = 2`), clause attrs at `N ≥ 2³¹/(C·A_max)` (268M at `C·A_max = 8`).
+  stride above 1: OPORP bits at `N ≥ 2³¹/W` (1.07B at `W = 2`), clause attrs at
+  `N ≥ 2³¹/(C·A_max)` (268M at `C·A_max = 8`).
 
 **Rule.** Every kernel takes `WIDE: tl.constexpr`, set by
 [`_host.wide`](../../retrieve/src/retrieve/ops/triton/_host.py) when any tensor the kernel
@@ -267,8 +215,8 @@ int64 already.
 
 **Why a constexpr, not int64 everywhere.** Always-int64 was built first and measured
 ([artifacts](../../research/artifacts/kernel-opt/predictions.md)): `fused_masked_knn_topk` +7 %, since
-its 1.5M 32-lane programs pay for a full 64-bit multiply per row base. `bloom_compact` was
-+13 %: 40 → 46 registers, one block per SM fewer. `clause_compact` at B = 1 was +3 %, from the
+its 1.5M 32-lane programs pay for a full 64-bit multiply per row base; the compaction kernels up
+to +13 % from the registers the int64 bases cost; `clause_compact` at B = 1 +3 %, from the
 shifted-pointer formulation itself. With the constexpr, launches below 2³¹ time within noise
 of the int32 kernels, and only launches past 2³¹ pay.
 
@@ -280,8 +228,8 @@ at 65,535.
 [`tests/correctness/test_large_offsets.py`](../../retrieve/tests/correctness/test_large_offsets.py)
 runs one case per class with a planted answer: `B = 144, N = 16M` through
 `clause_mask`, `clause_compact`, `fused_masked_knn_topk` and
-`oporp_1bit_match_topk_indirect`, and one `[140M, 16]` int64 table read as bloom
-signatures, clause attrs and OPORP bits. It is skipped below 48 / 24 GiB of free
+`oporp_1bit_match_topk_indirect`, and one `[140M, 16]` int64 table read as clause attrs and
+OPORP bits. It is skipped below 48 / 24 GiB of free
 device memory. Every widening is mutation-checked: without its int64 cast the case
 raises an illegal address or returns wrong ids.
 
@@ -297,11 +245,6 @@ the padded one and masks lanes `≥ D` (`≥ W`) out of both the query and the i
 
 Why a zero lane changes nothing, per kernel:
 
-- **`codesigned_probe_score*`** (int8 dot, int32 accumulator): a masked lane contributes
-  `0 · 0 = 0` to an integer sum, so the dot is exact at any width. Quantization is not in
-  the way either: the query is quantized at its true width by `quantize_int8` and the
-  items by `quantize_int8_global` at build, before any padding exists (both are symmetric,
-  `0.0 → 0`, but nothing zero-valued is ever quantized).
 - **`fused_masked_knn_topk`** (fp32 `tl.sum` of products): each masked lane adds an exact
   `+0.0`. The reduction tree over `D_PAD` lanes differs from any tree over `D`, as the tree
   already differs from cuBLAS's `bmm`; the parity gate is the file's existing tolerance
@@ -309,21 +252,12 @@ Why a zero lane changes nothing, per kernel:
 - **`oporp_1bit_match_topk`**: masked words load `0` on both sides, `0 ^ 0` has no set bits,
   so the Hamming distance and `D_TOTAL - 2·hamming` (`D_TOTAL = 64·W`, the true width) are
   unchanged.
-- **`bloom_match`, `bloom_compact`**: a masked query word is `0`, and `0 & ~sig = 0` for any
-  signature, so the subset test is unchanged. `BloomFilter` and SilverTorch keep `m_bits`
-  a power of two (the hash), so only a direct caller of the op reaches `W_PAD > W`.
 
-**At a power-of-two width the code is the same.** With `D == D_PAD` the new mask is an
-all-true constant; Triton folds it for `fused_masked_knn_topk`, OPORP and both bloom
-kernels, but in the probe scorers it still perturbed register allocation (three of six
-variants' SASS differed). There the masks are constexpr conditional expressions
-(`mask=None if D == D_PAD else …`) so the power-of-two build is the pre-padding kernel.
-Gate: every kernel of this section, compiled at the power-of-two widths D1 runs, is
-SASS-identical to the tree before padding (30 of 30,
-[script](../../research/artifacts/l4-pow2-pad/ptx_identity.py)).
 
-Padding makes every width correct, not every width fast. Past `D_PAD = 256` the probe
-scorers do not pad: they loop over D ([SilverTorch kernels](#silvertorch-kernels), "The D loop").
+**At a power-of-two width the code is the same.** With `D == D_PAD` the mask is an all-true
+constant, which Triton folds, so the power-of-two build is the pre-padding kernel: every kernel of
+this section, compiled at the power-of-two widths the campaign runs, is SASS-identical to the tree
+before padding ([script](../../research/artifacts/l4-pow2-pad/ptx_identity.py)).
 
 ## Shared kernel helpers (`ops/triton/common.py`)
 
@@ -336,40 +270,12 @@ its own tile shape, launch grid, or masking policy:
 - `row_base(ptr, row, stride, WIDE)` / `tile_rows(ptr, row0, lane, stride, WIDE)` — the
   row-base arithmetic of [Addressing](#addressing); every kernel's `[B, ·]` row and item
   tile goes through one of the two.
-- `probe_tile(probe_ids_ptr, offsets_ptr, bid, t, n_probe, NPP, BLOCK_P)` —
-  a probe scorer program's slice of the compact CSR layout, the row's
-  table built in-kernel ([SilverTorch kernels](#silvertorch-kernels)).
-- `probe_tile_table(table_ptr, bid, t, n_probe, FAN, BLOCK_P)` /
-  `probe_tiles_table(…, tt, …)` — the same slice (one tile / a vector of
-  tiles) read from the per-row table `probe_prep_kernel` writes ("Probe table").
-- `probe_prep_kernel` — a *launched* kernel, one program per row, the probe
-  scorers' first launch: the row's int8 query (bit for bit
-  [`quantize_int8`](#quantize_int8-retrieveindexing)), and with the table on the
-  row's tile ends, slot ends and cluster starts; it also zeroes the bloom
-  two-pass's list count ("Probe prep").
-- `probe_dots(q_row_ptr, q_scales_ptr, bid, item_codes_ptr, pos, stride_cn, keep, D, D_PAD,
-  BLOCK_D, BLOCK_P) → (int32 [BLOCK_P], q_scale)` — both probe scorers' int8 dot: one
-  `tl.dot` at `D_PAD ≤ 256` (loads in the v2.1 order, which fixes that path's SASS), a
-  `BLOCK_D` loop into an int32 accumulator past it
-  ([SilverTorch kernels](#silvertorch-kernels), "The D loop").
-- `probe_ids_kernel` — a *launched* kernel: the probe scorers' id
-  epilogue after `torch.topk` (slot → `sort_perm[pos]`, `-1` at `-inf`).
-  One program per row and `BLOCK_K` slots (grid `(B, cdiv(k, BLOCK_K))`),
-  walking the probes in `BLOCK_N` chunks (`_host.IDS_BLOCK_K` 16 /
-  `IDS_BLOCK_N` 512 caps), so neither k nor `n_probe` sizes the program and
-  any (k, `n_probe`) compiles in seconds
-  ([SilverTorch kernels](#silvertorch-kernels), "Ids after the top-k").
 - `popcount_int64(x) → int32` — the hardware `POPC` (`libdevice.popc` on
   int64, `__nv_popcll`); used by `oporp_1bit_match_topk`. Its torch twin
   [`functional.py::popcount_int64`](../../retrieve/src/retrieve/functional.py)
   is SWAR; popcount is exact integer math, so the two agree bit for bit
   (see [Numerics](#numerics)).
-- `bloom_subset_pass(qb, sigs) → [BLOCK] int1` — the bloom subset test
-  in the `qb & ~sig == 0` OR-reduce form (boolean-identical to, and
-  cheaper than, the equality + min-reduce form; all three bloom
-  consumers — `bloom_match`, `bloom_compact`,
-  `codesigned_probe_score` — use it). Callers AND
-  the result with their own validity mask.
+
 - `clause_pass(item_attrs_ptr, is_reverse_ptr, query_attrs_ptr, ids,
   load_mask, bid, strides..., C, A_MAX) → [BLOCK] int1` — the exact
   AND-of-OR clause predicate (inner OR over `A_MAX` slots, outer AND
@@ -387,24 +293,23 @@ its own tile shape, launch grid, or masking policy:
   of 0.27 ms). Masked loads (1.04×, but 255 registers with spills at
   A_MAX 4) and 4 warps (1.14×) were measured and are not used
   ([CLAUSE-SKIP](../../research/artifacts/campaign-v2.6/clause-skip/README.md)). Used by `clause_mask` / `clause_compact`
-  (`ids=n_offsets`, `load_mask=n_valid`) and
-  `codesigned_probe_score_exact` (`ids=safe_ids`, `load_mask=valid`).
+  (`ids=n_offsets`, `load_mask=n_valid`).
   `is_reverse_ptr` must point at int8 storage (host preps do
   `.to(torch.int8)`; Triton can't load native torch.bool).
 - `compact_store(pass_mask, ids, base, out_ptr, bid, ...)` — the
   stream-compaction store (`cumsum` intra-tile rank + masked store at
   the caller-supplied `base`, cast to the pointee type).
 - `compact_stash(pass_mask, ids, tile_counts_ptr, scratch_ptr, bid,
-  tile_id, ..., BLOCK_N)` — phase 1 of the two compaction ops: the
+  tile_id, ..., BLOCK_N)` — phase 1 of the compaction op: the
   tile's survivor count, and `compact_store` of its ids into the tile's
   own slot range `scratch[bid, tile_id * BLOCK_N :]` (int32).
 - `compact_scatter_kernel` — the one *launched* kernel in this file:
-  phase 3 of both compaction ops, one program per `(row, tile)` on the
+  phase 3 of the compaction op, one program per `(row, tile)` on the
   predicate launch's grid, moving the tile's stashed run to the scanned
   row offset. Launched by
   [`_host.compact_finish`](../../retrieve/src/retrieve/ops/triton/_host.py),
   which also does the `cumsum`.
-- `or_combine(a, b)` — combine_fn for `tl.reduce` OR-reductions.
+
 
 Perf caveat: helpers with many pointer params (`clause_pass`) can
 perturb register allocation. The documented fallback if a kernel
@@ -440,9 +345,9 @@ to the inlined predicate with a
   sign-quantized vectors. Higher is better. Same `-inf` sentinel.
 - The **id** returned alongside a `-inf` score is always `-1`, on every
   backend — `interfaces.py` names `-1 / -inf` as the paired "no item"
-  sentinels. The torch and official backends get there through
-  `masked_topk`; the two SilverTorch Triton epilogues apply it themselves
-  (see below). So a caller can read either tensor to find the dead slots,
+  sentinels. Every torch-side path gets there through `masked_topk`; the adapted SilverTorch
+  code's fused epilogue writes the same sentinels. So a caller can read either tensor to find
+  the dead slots,
   and ids from two backends compare directly on rows with fewer than K
   survivors.
 
@@ -697,8 +602,7 @@ B))` and a program strides over tiles `g, g + G, …`; a tile at or past
 V3's filtered stage 1 gets full-width `[B, N]` candidates from the compact
 family. Scores are integers computed by the same lane body, so the stride
 is exact. `programs` defaults to 1728 here (4-warp programs); it was not
-swept. The body is modeled on `bloom_match` (int64-word reduction
-over `W`), which launches batch-first.
+swept.
 
 **HAS_INDICES path**: replaces the contiguous `n_off` load with an
 indirect `pos_indices[b, n_off]` lookup; otherwise identical. Used for
@@ -805,13 +709,12 @@ kernel time; the `cumsum` + masked-store epilogue keeps it at the one-pass
 speed (1.10× at B=1, 1.03× at B=16, full pipeline). The scratch traffic is
 the survivors only (4 B in, 8 B out per id), and so is the output's: with
 no tail store the scatter writes nothing for a rejected item (−11.7 % on
-`clause_compact`, −5.3 % on `bloom_compact` at B=16, 3M items, 1.8 %
-pass rate, against a `-1` tail store; [artifact](../../research/artifacts/l1-l2/README.md#timing)). Its allocation is
+`clause_compact` at B=16, 3M items, 1.8 % pass rate, against a `-1` tail store; [artifact](../../research/artifacts/l1-l2/README.md#timing)). Its allocation is
 `4 · B · T · BLOCK_N` bytes, half the `[B, N]` int64 result. `counts` is a
 fresh tensor, not a view into the scan: inductor asserts custom-op outputs
 are 16-byte aligned, and at `B = 1` the scan's last column is a contiguous
 view at element offset `T - 1` (pinned by
-`test_compiled_batch_of_one_bloom_v2`).
+`test_compiled_batch_of_one_v2`).
 
 **Clause loop** is the shared
 [`common.clause_pass`](../../retrieve/src/retrieve/ops/triton/common.py)
@@ -836,7 +739,7 @@ launches, measured in the
 [artifacts](../../research/artifacts/deterministic-compaction/).
 
 **Op registration** is `@torch.library.custom_op`, not `@triton_op` — this
-kernel and `bloom_compact` are the two exceptions in the tree. The
+kernel is the one exception in the tree. The
 data-dependent `base + intra` store address above is exactly what makes
 inductor's TTIR mutation analysis report the index buffers as mutated, which
 makes cudagraph trees skip the compiled forward; the "Graph-break behavior"
@@ -904,172 +807,8 @@ shipped as `DEFAULT_CONFIG` (the bool form) and `SCORES_CONFIG` (the
 `clause_mask_scores` form, 128 lanes on 4 warps: the bool tile ran the
 fp32 form far slower, [validation](../../research/validation.md#library-gates)) on
 the kernel module; tests/tuner override via `_clause_mask_impl(...,
-config=, scores=)`. `bloom_match_scores`' tile is swept through
-`bloom_match._bloom_match_scores_impl`. Re-tune on a new arch via
+config=, scores=)`. Re-tune on a new arch via
 `uv run tune-kernels clause-mask`.
-
-## `bloom_match` — Bloom subset test
-
-**`bloom_match_scores(scores, qb, sigs)`** is the same kernel with `HAS_SCORES` (store `score`
-or `-inf` into a new fp32 buffer), `LiNRV1`'s bloom path through `BloomFilter.mask_scores`; the
-same reasoning as `clause_mask_scores` above.
-
-[`ops/triton/bloom_match.py`](../../retrieve/src/retrieve/ops/triton/bloom_match.py).
-A standalone filter primitive: it powers
-[`BloomFilter.evaluate_mask`](../../retrieve/src/retrieve/modules/filters.py)
-on CUDA. SilverTorch's in-cluster bloom is fused separately into
-`codesigned_probe_score`; the two paths are independent.
-
-Implements the conjunctive subset test `(qb & sigs) == qb` reduced over
-`W` int64 words. The item-side sigs come from
-[`build_signatures`](../../retrieve/src/retrieve/indexing/bloom_hash.py)
-(`indexing/bloom_hash.py`, the single home of the bloom hash
-math) at `register_index` time; the per-call query bits go through the
-loop-free `build_query_signatures` path (same module). The kernel is
-purely a bitwise reduction.
-
-**Query-build path.** `build_signatures` is a python `range()`-driven
-chunk loop over the index — fine at register time (bandwidth-bound,
-~128 ms for N=3M) but a poor fit for the per-forward query build, where
-n=B is always small and the loop's trip count makes dynamo specialize on
-shape. `build_query_signatures` mirrors the body without the loop
-(both wrap the shared `_signature_batch` core, so the chunked and
-loop-free paths agree exactly — asserted by
-[`test_bloom_hash.py`](../../retrieve/tests/correctness/test_bloom_hash.py));
-keeping it purely tensor-flow lets the harness's
-`torch.compile(mode="reduce-overhead", dynamic=False, fullgraph=True)` of
-each algo (`evaluation/bench/measure.py`, one capture per batch size)
-capture it with no graph break. The eager body fires
-~15 separate CUDA kernels per call (~0.4 ms wall-clock, **flat in
-B**) — pure launch overhead, since the actual work is microseconds;
-under the algo-level cudagraph_trees capture the same work collapses
-into one replay. Standalone use of `BloomFilter` (not via an Algo
-wrapper) runs the function eagerly — wrap externally with
-`torch.compile` if you want the cudagraph win there too.
-
-**Hash invariant.** `_signature_batch` (the shared core in
-`bloom_hash.py`) keys each hash on `(clause_idx, value)` (paper §4.1:
-"for each feature" — a *feature* is a `(key, value)` pair). It does
-this by XOR-ing a per-clause salt — `_mix64(clause_id, …)` — into the
-post-`_mix64` hash, before the position mask. This is what prevents
-value `V` in clause C0 from colliding with the same `V` in clause C3
-when clauses share a value vocabulary; without it, single-clause
-queries on overlapping vocabularies leak ~25–30% of non-matching items
-as false positives. The salt is a `[C]` int64 buffer (`clause_salt`,
-built by `generate_clause_salt` and registered at `register_index`
-by `BloomFilter` and `SilverTorch`), so the per-forward query build
-issues no host→device copy — see
-[filtering.md](filtering.md#bloom-hash-keys-clause_idx-value). The kernel itself is untouched: it consumes
-`[N, W]` / `[B, W]` int64 buffers as opaque bits. The salt costs one
-extra elementwise XOR per chunk (well under measurement noise vs the
-existing scatter + word-pack reduction); kernel HBM traffic and launch
-shape are unchanged. The hash math is pinned: persisted `bloom_sigs`
-buffers must stay bit-valid across refactors, so any change to
-`bloom_hash.py` invalidates every stored index (an index persisted
-without the `(clause_idx, value)` keying is stale and must be rebuilt).
-
-```
-inputs:    qb     [B, W]     int64    packed query bloom signature
-           sigs   [N, W]     int64    packed item bloom signatures
-output:    mask   [B, N]     bool     (qb & sigs[n]) == qb, AND over W
-```
-
-**Launch grid** `(B, tiles_y, tiles_x)` from `_host.grid_batch_tiles`, the
-same 3-D split as the clause and compaction kernels: batch on `grid_x`,
-the `cdiv(N, 128)` tiles across `grid_y × grid_z`. A 2-D grid with tiles
-on `grid_y` capped `N` at 65,535 · 128 = 8,388,480, below the tuner's own
-15M regime. It is the structural ancestor of `oporp_1bit_match_topk` (the
-popcount step is the only material difference in the body), which launches
-`(cdiv(N, BLOCK_N), B)`, tile axis first. Each program loads `qb[b, :]`
-once, then a `[BLOCK_N, W]` tile of `sigs`, and emits `[BLOCK_N]` bool to
-the output buffer.
-
-`N` stays a `tl.constexpr` (one compile per registered index). Measured
-against a runtime `N`: 1269 µs vs 1418 µs at `B = 16, N = 3M`
-([artifacts](../../research/artifacts/kernel-opt/predictions.md)). The exact `N` is the
-only difference, and the 1-byte mask store is where the time goes.
-
-**Inner op**: the shared
-[`common.bloom_subset_pass`](../../retrieve/src/retrieve/ops/triton/common.py)
-helper — `qb & ~sig` per word, OR-reduced over `W`, `== 0` at the end
-(`(qb & sig) == qb ⇔ qb & ~sig == 0`). This is the cheaper algebraic
-form (it saves the int32 cast + min reduction of the equality +
-min-reduce form) and is boolean-identical; all three bloom
-consumers use it.
-
-**Wins** 10–20× over the pure-torch broadcast `(qb.unsqueeze(1) & sigs)
-== qb.unsqueeze(1)).all(-1)` because the broadcast materializes
-`[B, N, W]` int64 (24 GiB at `B=64, N=2M, W=16` worst case) before the
-reduction; the kernel keeps the tile in registers.
-
-**No autotune, no Config, no `_impl`** — this is the one kernel outside
-the `DEFAULT_CONFIG` convention (fixed `BLOCK_N = 128` with a tile-tail
-mask for `N < 128`, ~80-line file, single op). Rationale: the per-call
-width is dictated by `N`, so a Config would be tuned against exactly
-one regime; there is correspondingly no `tune-kernels` subcommand. The
-fused `bloom_compact` (next section) shares this kernel's inner
-subset-test helper and its 3-D grid, and adds `clause_compact`'s
-two-phase compaction.
-
-**Batched rows** (`_bloom_match_scores_batched_kernel`,
-`bloom_match_scores` at B > 1). As for `clause_mask`: one program per item
-tile loads the tile's `[BLOCK_N, W]` signature words once and tests them
-against each of `BLOCK_B` = 16 rows (`bloom_subset_pass` per row). The
-per-row kernel reloads them per row. Outputs are `torch.equal`, and LiNR
-V1 bloom bs 16 / 64 on arXiv runs 0.82 / 0.78 of before. B = 1 keeps the
-per-row kernel.
-
-## `bloom_compact` — fused subset test + stream compaction
-
-[`ops/triton/bloom_compact.py`](../../retrieve/src/retrieve/ops/triton/bloom_compact.py).
-
-Powers `BloomFilter.evaluate_indices` on CUDA. Combines `bloom_match`'s
-subset-test inner loop with `clause_compact`'s count → scan → write
-compaction, so the dense `[B, N]` bool plus host-side argsort that the
-ABC fallback (`compact_mask(bloom_match(.))`) would otherwise produce
-never materializes.
-
-```
-inputs:    qb     [B, W]   int64    packed query bloom signature
-           sigs   [N, W]   int64    packed item bloom signatures
-return:    positive_indices [B, N] int64  (full width, written on [:counts] only)
-           counts           [B]    int64
-```
-
-Same full-width `[B, N]` return contract as `clause_compact` — bound
-reads by `counts[b]`; nothing past it is written. Registered as a
-`@torch.library.custom_op` for the same reason `clause_compact` is (the
-compaction store address is data-dependent), so both compaction kernels
-capture under cudagraph trees.
-
-**Launch grid** `(B, tiles_y, tiles_x)`, same 3D shape as the clause
-compact/mask kernels (`tile_id = tile_x * tiles_y + tile_y`). Each
-program loads `qb[b, :]` once, the `[BLOCK_N, W]` `sigs` tile, computes
-the subset test via the shared `common.bloom_subset_pass` (same helper
-as `bloom_match`), then hands the tile's count and surviving ids to
-`common.compact_stash`; `_host.compact_finish` scans and scatters, exactly
-as for `clause_compact`. Wide `W` (=16 at the default `m_bits=1024`) makes
-this kernel register-pressure-bound; at large `block_n` with few warps
-it spills catastrophically (5–15× slowdown observed at `block_n≥512,
-num_warps≤4`). The shipped default keeps `block_n` moderate and warps
-high to stay off that cliff.
-
-**Output ordering** within a row is **ascending item order** — the same
-contract as `clause_compact`, `torch.equal` to
-`ops.reference.bloom_compact` and reproducible across launches and
-processes. V2's `fused_masked_knn_topk` and V3's HAS_INDICES path consume
-the list in that order, which is what keeps their tie-breaks repeatable.
-
-**Tile config.** `BloomCompactConfig(block_n, num_warps, num_stages)` —
-shipped as `DEFAULT_CONFIG`; tests/tuner override via
-`_bloom_compact_impl(..., config=)` (not tuned for the two-phase shape;
-roadmap TF-3). Re-tune via `uv run tune-kernels
-bloom-compact`. `qb` is built host-side via
-`bloom_hash.build_query_signatures`; folding it into the kernel adds
-register pressure with no obvious win and is explicitly out of scope.
-The same `(clause_idx, value)` keying invariant documented under
-`bloom_match` applies — kernel is opaque to bits, so no kernel-side
-change.
 
 ## Layer dispatch
 
@@ -1106,13 +845,13 @@ tile-fused kernel would.
 ### [`compact_mask`](../../retrieve/src/retrieve/functional.py) (`retrieve.functional`)
 
 Bool `[B, N]` → `(positive_indices[B, N], counts[B])` — **full width**,
-same contract as the triton `clause_compact`/`bloom_compact` kernels so
-torch and triton paths stay interchangeable. Implementation:
+the same contract as the triton `clause_compact` kernel, so torch and triton paths stay
+interchangeable. Implementation:
 `mask.sum(1)` for counts, then
 `mask.float().argsort(descending=True, stable=True)` for the indices —
 no `.item()` sync, no narrow slice. The tails differ across
 implementations (arbitrary argsort-tail ids here, unwritten memory in
-the kernels), so consumers must bound reads by `counts` either way.
+the kernel), so consumers must bound reads by `counts` either way.
 
 ### [`popcount_int64`](../../retrieve/src/retrieve/functional.py) (`retrieve.functional`)
 
@@ -1123,10 +862,9 @@ OPORP/SimHash parity tests stay bit-exact.
 
 ### [`quantize_int8`](../../retrieve/src/retrieve/indexing/quantize.py) (`retrieve.indexing`)
 
-Per-row symmetric int8 of the queries, called at query time by the torch
-probe scorers, the candidate re-rank and the official adapter. The Triton
-probe scorers compute the same codes and scales in their prep launch
-(`probe_prep_kernel`, "Probe prep" under [SilverTorch kernels](#silvertorch-kernels)). Codes are `round(x / abs_max * 127)`, so an
+Per-row symmetric int8 of the queries, called at query time by the candidate re-rank and the
+official adapter; the adapted code's prep kernel computes the same codes and scales
+([official-fork](#official-fork--our-fork-of-metas-ops)). Codes are `round(x / abs_max * 127)`, so an
 element whose quotient sits on a half-integer flips a code when the
 division is off by one ulp. Eager uses PyTorch's correctly rounded fp32
 division; under `torch.compile`, inductor emits Triton's `/`, which lowers to
@@ -1235,470 +973,59 @@ and Triton scores agree exactly, and
 pins it with `assert_topk_equal` (`torch.equal` scores, ids up to ties).
 A divergence means a popcount or packing bug.
 
-**The probe scorers' int8 dot is an IMMA, Meta's a dp4a.** `tl.dot` of
-the `[1, D]` query against the `[D, BLOCK_P]` codes pads `M = 1` to the
-MMA tile and lowers to tensor-core `IMMA` instructions: every
-`codesigned_probe_score*` cubin on this box has `IMMA` and no `IDP.4A`, at
-every width and tile. Meta's `fused_kmean_ann` int8 kernels (`process_cluster`)
-are the opposite, `IDP.4A.S8.S8` and no `IMMA` (`cuobjdump -sass` of the
-pinned build). Both are exact int32 accumulations, so the numbers agree
-bit for bit; only the instruction mix differs.
+**The SilverTorch dequant is one expression in three places.** The bit-exact contract between
+Meta's code as published and the adapted code rests on the left-associated `dot.float() *
+q_scale * global_scale` being written the same way at every site that computes it: the adapter's
+epilogue `_dequant` ([`ops/official/adapter.py`](../../retrieve/src/retrieve/ops/official/adapter.py)),
+the adapted code's fused epilogue (`fork_search_cuda.cu`, the same fp32 multiplies in the same
+order) and `SilverTorch._forward_candidates`
+([`modules/silvertorch.py`](../../retrieve/src/retrieve/modules/silvertorch.py)). Reassociating
+any one of them (`dot * (q_scale * global_scale)`) changes the last bit and breaks `torch.equal`
+in `test_official.py`; it is enforced by those tests, not by the code. Meta's `fused_kmean_ann`
+int8 kernels accumulate with `IDP.4A.S8.S8` into an exact int32 (`cuobjdump -sass` of the pinned
+build), so the dot itself is exact.
 
-**The SilverTorch dequant is one expression in five places.** The
-bit-exact contract across `triton` / `torch` / `official` rests on the
-left-associated `dot.float() * q_scale * global_scale` being written the
-same way at every site that computes it: the two Triton kernels
-([`codesigned_probe_score.py`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py),
-[`codesigned_probe_score_exact.py`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py)),
-the reference op ([`ops/reference/codesigned_probe_score.py`](../../retrieve/src/retrieve/ops/reference/codesigned_probe_score.py),
-shared by its bloom and exact siblings), `SilverTorch._forward_candidates`
-([`modules/silvertorch.py`](../../retrieve/src/retrieve/modules/silvertorch.py))
-and the official epilogue `dequantize_scores`
-([`ops/official/adapter.py`](../../retrieve/src/retrieve/ops/official/adapter.py)).
-Reassociating any one of them (`dot * (q_scale * global_scale)`) changes
-the last bit and breaks `torch.equal` in `test_official.py` T1 — it is
-enforced by those tests, not by the code. In the Triton kernels both
-scalars go through `tl.cast(·, tl.float32)`. Under `torch.compile`,
-Inductor passes `global_scale` into the kernel source as a Python float
-rather than a typed argument; `.to()` on it raises inside Inductor's TTIR
-analysis, which then produced NaN scores instead of an error. The cast keeps the
-product in fp32 on both paths. Eager, it is a no-op.
+## Top-k
 
-## SilverTorch kernels
+`torch.topk` over a `[B, P]` score buffer costs ∝ `B · P`: four 8-bit radix passes and a gather,
+though on a filtered row most slots are `-inf`. From `functional.TOPK_MIN_SLOTS` = 2²³ (8.4 M)
+slots, where a row has at least `TOPK_MIN_RATIO` = 8 blocks of `TOPK_BLOCK` = 256 slots per top-k
+slot, [`functional.two_level_topk`](../../retrieve/src/retrieve/functional.py) runs the top-k in
+two levels:
 
-Not in the release (our Triton reimplementation; see the top of this
-page). Two co-designed IVF probe + INT8 scoring kernels live in
-[`ops/triton/`](../../retrieve/src/retrieve/ops/triton/),
-selected by `SilverTorch.filter_mode`: `codesigned_probe_score` for
-`filter_mode ∈ {"none", "bloom"}`, `codesigned_probe_score_exact` for
-`filter_mode="exact"`. Both power
-[`SilverTorch.forward`](../../retrieve/src/retrieve/modules/silvertorch.py)
-under `backend="triton"`, while
-`backend="torch"` calls the same op names in
-[`ops/reference/`](../../retrieve/src/retrieve/ops/reference/codesigned_probe_score.py)
-(the eager reference) and `backend="official"` runs
-Meta's own kernels through an adapter
-([below](#official--metas-torchopsst-kernels-as-the-reference-backend)).
-
-Phase 1 (centroid `q @ centroids^T + topk` to pick the top-`n_probe`
-clusters) runs **host-side** in `SilverTorch.forward`; both kernels are
-"phase-2+3 fused" — for each `(query, probed-item)` cell each kernel
-runs its predicate inline and (when it passes) scores via INT8
-dequantize + dot. Items failing the predicate get score `-inf`.
-
-**The layout: cluster-sorted CSR, compact probe rows.** Every backend
-registers the same index (`indexing.ivf.csr_layout`): `item_codes` in
-cluster-sorted order, `cluster_offsets [n_lists + 1]`, `cluster_sizes`,
-`sort_perm` (sorted position → original id) and `inv_perm`, with the
-filter buffers (`item_clause_attrs`, the bloom index) in the same sorted
-order. A query row's probed clusters are laid out back to back, so
-the scorer's output is `[B, width]` with
-`width = indexing.ivf.probe_width(cluster_sizes, n_probe)`, the sum of the
-`n_probe` largest clusters. That is a static bound on any row's item count
-(the probed clusters are distinct), cached as the Python int
-`SilverTorch._probe_width`, rederived by `set_query_params` and by the
-load hook. Slots past a row's items score `-inf`. This replaced a padded
-layout of width `n_probe · max_cluster_size`, which read one `-1` pad
-per slot: 611,520 slots against 64,757 on goodreads at `n_probe` 24, whose
-largest cluster holds 25,480 items (TF-9).
-`SilverTorch.register_index` / `set_query_params` raise unless
-`width ≥ k`, so `topk(k)` needs no pad path.
-
-**How a program finds its items** (`common.probe_tile`). Without the
-probe table (below), each program loads its row's `n_probe` cluster ids as one vector
-(`NPP`, the next power of two), gathers their offsets, and builds the
-row's tile and slot prefix sums with `tl.cumsum`. Its tile is then
-located by a masked vector reduction. Tiles are **cluster-aligned**: a
-tile lies inside one cluster (at most one partial tile per probe), so its
-lanes read `lo + off + arange(BLOCK_P)`, one contiguous run of code rows.
-The grid carries `n_probe` extra tiles. Tiles past the row's cluster
-tiles only store the `-inf` tail over `[total, width)`, which is 70 % of
-the width on goodreads. A lane past its cluster's end holds the next
-cluster's slot, so the score store is masked by in-cluster validity, not
-by the predicate.
-
-**Probe table** (`common.probe_prep_kernel`, `probe_tile_table`). The
-in-kernel build is O(`n_probe`) work in every one of the
-`B · (cdiv(width, BLOCK_P) + n_probe)` programs: three `NPP`-wide gathers
-and two `tl.cumsum`s per tile, about 262k programs at C7's PubMed cell
-(`n_probe` 1024, bs 16, width 3.93 M). From `_host.TABLE_MIN_PAIRS` = 512
-`(row, probe)` pairs, the prep launch also writes each row's `[3,
-n_probe]` int64 table (tile ends, slot ends, cluster starts). Each tile
-then finds its cluster by a two-level `FAN`-ary count over the tile ends
-(`FAN = 2^⌊bit_length(NPP)/2⌋`, so `FAN² ≥ NPP`): two dependent
-`FAN`-lane loads, then the cluster's four scalars. A binary search was 11
-dependent scalar loads and measured slower. Positions and slots are the
-same integers, so outputs are `torch.equal`. Below 512 pairs, the lookup's
-latency costs more than the build saves (bs 1, `n_probe` 256: 1.07–1.09×
-at d128 and d768). Those launches compile the in-kernel build
-(`TABLE=False`) unchanged.
-
-**Probe prep** (`common.probe_prep_kernel`, one program per row, the first
-launch of both probe scorers). It writes the row's int8 query and scale,
-the per-row table when it is on, and the two-pass count. The query
-quantization was about ten torch launches (`quantize_int8`), and the
-table was its own launch at first (ST-WIDE). At about 15 µs of host time
-per Triton launch plus about 6 µs of prep, that launch made host-bound
-eager forwards slower: goodreads 0.8 M bs 16, `n_probe` 32–128, ran
-1.085–1.105× against v2.8 (+35–40 µs on a 0.41 ms forward), while graph
-replay was faster. Folding both into one launch leaves the scorer with
-fewer launches than before the table. The quantization is
-`quantize_int8` bit for bit, `torch.equal` on codes and scales
-(`test_prep_quantizes_as_quantize_int8`):
-
-- the fp32 abs-max, clamped at 1e-8;
-- the scale as abs-max times fp32 `1/127` (eager torch divides by a Python
-  scalar as a multiply by its fp32 reciprocal; a correctly rounded
-  division differed in the last ulp);
-- the fp64 quotient rounded to fp32, times 127, then `rint` (half to
-  even, as `torch.round`), clamped, cast.
-
-**Bloom two-pass** (`codesigned_probe_score`, with the probe table:
-always on a tile-skip config, `D_PAD > 256`; at
-`D_PAD ≤ 256` only on a `sparse` batch, below). In the one-pass
-kernel a skipped tile still costs its program: about 11 ns of device time
-a tile at C7's cell, where under 4 % of tiles have a passing item. The
-program is a latency chain (table lookup, the query's bit slots, the bloom
-words, the vote, the `-inf` store) at the occupancy of a 112-register dot
-kernel, and the bit-slot loop paid one latency per slot, inactive `-1`
-slots included (the 20 inactive of 25 slots on a one-clause query cost
-1.2 ms of 2.0 in a filter-only measurement). Two launches replace it:
-
-1. `_bloom_filter_kernel`, `TWO_PASS_LANES / BLOCK_P` tiles of one row per
-   program (16 at `BLOCK_P` 256). It stores `-inf` over every slot
-   (in-cluster and tail), then votes per tile on the ≤ `BLOCK_P / 64 + 1`
-   bloom words the tile spans. It ANDs the query's rows at those words
-   (`bloom_words`: slots in groups of four whose loads issue together, a
-   group of four `-1` skipped), masks each word to the tile's own
-   positions, and appends a tile with any surviving bit to a list
-   (`atomic_add` on a count zeroed by the table launch). The vote is
-   stored to a `[B · tiles]` int8 buffer and reloaded after a CTA barrier
-   before it masks the append. Inductor's mutation analysis
-   (`identify_mutated_tensors`) walks a store's address back through every
-   operand, so an append masked straight by the bloom loads marked the
-   query's bit positions, a graph input, as mutated, and `reduce-overhead`
-   skipped cudagraphs (`test_silvertorch_compile`, wide bloom).
-2. `_bloom_dot_kernel`, persistent (`DOT_PROGRAMS_PER_SM` × SMs programs
-   looping over the list). For each listed tile it runs the per-lane bloom
-   test and the dot of the one-pass kernel (`probe_dots`, the same
-   `BLOCK_D`), and stores the dots of the passing lanes.
-
-A tile's vote is the OR of its lanes' tests over the same bits, and the
-dot is the same int32 sum and fp32 epilogue, so the scores are
-`torch.equal` to the one-pass kernel's; the list order varies run to run
-but each slot is written once. Smaller two-pass tiles (64, 128) made the
-filter pass costlier than the dot pass saved.
-
-**When the two-pass pays at `D_PAD ≤ 256`.** Once most tiles hold a
-passing item, the filter pass's `-inf` fill and vote add to a full dot
-pass. Measured against the one-pass kernel with the table on arxiv-synth
-(graph replay, `n_probe` 128-1024, bs 16-64), it pays up to a pass rate of
-0.003 (d128 0.57-0.89, d192 / d256 0.60-0.89). It breaks even at 0.01
-(d128 0.89-0.95, d256 1.00-1.10), and it loses above that (up to 1.23 at
-d128 and 1.36 at d192 at p 1). At d768 the dot dominates, and the
-two-pass stays on: PubMed `c2_year` 0.95-1.02, `c0_mesh` / `c0c2`
-0.56-0.84. So at `D_PAD ≤ 256` the op takes it only when its `sparse`
-argument is set. `SilverTorch.prepare_queries` sets `PreparedFilter.sparse`
-outside the timed call when every row's rarest queried bit is set on under
-`SPARSE_PASS_BOUND` = 1/256 of the items, under one passing item per
-256-item tile. That bound is the gated skip's, an upper bound on the row's
-pass rate: tight on one-clause queries, loose on several clauses (arXiv
-`all4`: median bound 0.11 against a true rate of 0.005), so the switch can
-miss a win but not take a loss. Under compile the flag is a guarded Python
-bool: at most two graphs per shape.
-
-**Launch grid** `(B, tiles_y, tiles_x)` via `_host.grid_batch_tiles`, the
-batch on `grid_x`. The rows' early probes then run concurrently, and
-batch-mates that probe the same clusters read them from L2 (a 16-query
-arXiv batch probes 321 distinct of 384 `(row, cluster)` pairs). Measured
-against a tile-first grid: arXiv none 112 → 91 µs, bloom 126 → 107 µs
-([artifacts](../../research/artifacts/kernel-opt/predictions.md)).
-
-**Top-k** (`_host.probe_topk`, `functional.two_level_topk`, shared with LiNR V1's `masked_topk`). `torch.topk` over the
-`[B, width]` buffer costs ∝ `B · width`: four 8-bit radix passes and a
-gather. At C7's PubMed cell (`n_probe` 1024, bs 16) that was 1.7 of 2.7 ms,
-though 99.97 % of the slots are `-inf`. Meta's arm runs the same radix
-select on its raw output: 2–12 % faster at int32 (integer keys), and about
-half the passes on its default fp16 keys, which a bit-exact path cannot
-use.
-
-From `_host.TOPK_MIN_SLOTS` = 2²³ (8.4 M) slots of `[B, width]`, `probe_prep`
-pads the width to whole `TOPK_BLOCK` = 256-slot blocks. Only the grid and
-the tail mask change, so the scorer's `-inf` tail covers the pad and the
-scorer code is unchanged. Where a row has at least `TOPK_MIN_RATIO` = 8
-blocks per top-k slot, the top-k is two-level:
-
-1. each block's max (one `amax` over a `[B, blocks, 256]` view, a single
-   read of the buffer);
+1. each whole block's max (one `amax` over a `[B, blocks, 256]` view, a single read of the
+   buffer);
 2. `torch.topk` over the maxima, picking each row's k blocks (unsorted);
-3. a gather of those blocks' contiguous slots;
-4. the final `torch.topk` over `k · 256` candidates. The winning slots go
-   to the id epilogue as before, and pad slots are `-inf`, so `-1`.
+3. a gather of those blocks' contiguous slots, plus the fewer than 256 slots past the last whole
+   block (the ragged tail, always candidates);
+4. the final `torch.topk` over the candidates.
 
-The helper lives in `retrieve.functional`. LiNR V1 reaches it through
-`masked_topk`, over its unpadded `[B, N]` scores, so it takes a ragged
-tail: the fewer than 256 slots past the last whole block are always
-candidates, and the block maxima cover whole blocks only. SilverTorch's
-padded buffer has no tail, so its ops are unchanged. On LiNR V1 the gain
-is 0.55–0.63 on arXiv / goodreads `all4` and single-clause cells at bs
-16 / 64, 0.67 at k 1000, and 0.81–0.98 on PubMed
-([validation](../../research/validation.md), V1-TOPK).
+**Why it is exact.** If an item x is in the row's top-k, its block's max is at least x. If that
+block were not among the k largest maxima, k other blocks would each hold an item at least as
+large as x. So the candidates hold the top-k multiset: scores are `torch.equal` to the whole-width
+top-k, and ids differ only within the group tied at the k-th score. Rows with fewer than k finite
+items fill with `-inf` / `-1` as before.
 
-**Why it is exact.** If an item x is in the row's top-k, its block's max is
-at least x. If that block were not among the k largest maxima, k other
-blocks would each hold an item at least as large as x. So the candidates
-hold the top-k multiset: scores are `torch.equal` to the whole-width
-top-k, and ids differ only within the group tied at the k-th score. Rows
-with fewer than k finite items fill with `-inf` / `-1` as before
-(`test_two_level_topk_ties_and_finite_count_boundary`: four distinct code
-rows, exactly k − 1 / k / k + 1 passing items).
+`masked_topk` routes every torch-side top-k through it, so LiNR V1 takes it over its unpadded
+`[B, N]` scores: 0.55–0.63 of the plain top-k on arXiv / goodreads `all4` and single-clause cells
+at bs 16 / 64, 0.67 at k 1000, 0.81–0.98 on PubMed ([validation](../../research/validation.md),
+V1-TOPK). Below the thresholds it is plain `torch.topk`. The adapted SilverTorch code has the same
+two-level cut and its own radix select inside `search`
+([official-fork](#official-fork--our-fork-of-metas-ops)).
 
-**Rejected: tile maxima from the scorer.** A first cut had every scorer
-program store its tile's max (a `TILE_MAX` constexpr) and gather
-cluster-aligned tiles. The top-k fell as much (arXiv d256 `n_probe` 1024
-bs 64: 2573 → 229 µs), but the extra reduction and store slowed the d256
-one-pass scorer by 37 % (10.3 → 14.1 ms) and changed a narrow cubin's
-SASS. Fixed-size blocks over the finished buffer keep the scorers
-untouched.
+## SilverTorch on Meta's ops
 
-**Ids after the top-k** (`common.probe_ids_kernel`, one launch after
-`torch.topk`). The scorer writes scores only. A one-program-per-row
-kernel maps each winning slot back to its sorted position with the same
-per-row table, and writes `sort_perm[pos]`, or `-1` at every `-inf`
-slot. That is the `masked_topk` sentinel contract the other backends meet
-(`interfaces.py`). The map is built in `[BLOCK_K, BLOCK_N]` tiles: one
-program per row and `min(next_pow2(k), 16)` slots (grid `(B, cdiv(k,
-BLOCK_K))`), and inside it a loop over the probes in chunks of
-`min(next_pow2(n_probe), 512)` that carries the running cluster end, so each
-slot gets the same `lo − start + slot` position as a dense table would. The
-k chunks run in parallel; a first cut that looped over them inside one
-program per row was 1.55× slower than the dense tile at k 100 × `n_probe`
-1024 (a serial chain on 1-16 programs). A dense `[next_pow2(k),
-next_pow2(n_probe)]` tile compiled for minutes at k 1000 (ptxas 99-653 s per
-`n_probe`), spilled up to a 122 KB stack a thread at k 1000 × `n_probe`
-1024 (which made the driver hold a ~25 GB local-memory pool), and did not
-compile past 2^20 elements (k 1000 × `n_probe` > 1024)
-([ST-IDS](../../research/artifacts/campaign-v2/st-ids/README.md)). Writing ids from the scorer measured 13–20 µs slower
-on arXiv, and eight torch ops per epilogue measured ~230 µs of eager
-launch overhead (57 launches against the padded design's 38). The
-current form is 32–44 launches. Both launches stay textually inside
-each `@triton_op` body (`_host.probe_prep` / `probe_topk` build their
-arguments).
-
-**The D loop** (`common.probe_dots`). At `D_PAD ≤ 256` a scorer loads
-the whole `[BLOCK_P, D_PAD]` int8 code tile and feeds it to one `tl.dot`.
-This is the v2.1 code, SASS-identical at D = 128 and 192
-([ST-DLOOP](../../research/artifacts/campaign-v2/st-dloop/README.md)). Wider, it
-loops over D in `BLOCK_D` chunks into one int32 accumulator
-(`tl.dot(..., acc=acc)`, `tl.range`, pipelined by `num_stages`). The
-register tile is then `[BLOCK_P, BLOCK_D]` whatever D is. D = 768 is
-three or six chunks with no lanes masked, instead of a 1024-wide pad (a
-quarter of the dot on zero lanes), and a 256-item tile fits. The single
-dot over `D_PAD = 1024` needed a `64 × 4` tile (wider spilled: about 512
-registers a thread asked against the 255 limit). Meta's scorer loops
-over D the same way: 256-byte chunks of 16 `int4` loads and 64 `dp4a`
-per thread, one document per thread. Accumulation is exact int32, so the
-chunking changes no score.
-
-**Tile skip** (`SKIP`, filtered scorers at `D_PAD > 256`). After the
-filter test, a tile whose `keep` has no passing lane (`tl.max(keep) ==
-0`) stores `-inf` over its valid slots and skips the code loads, the dot
-and the epilogue. The skip is a constexpr taken from the width's
-`CONFIGS` entry and the filter's presence (`HAS_QB` in
-`codesigned_probe_score`; always in the exact scorer). So no host sync,
-and graph capture is unchanged. It is off at `D_PAD ≤ 256`, where the
-vote's cross-warp reduction costs as much as the 128-wide dot it saves:
-there it cost 1-6 % at high pass rates and failed the keep rule (#16,
-[artifact](../../research/artifacts/campaign-v2/tile-skip/README.md)). At D = 768
-the dot is the tile's cost, and a 256-lane tile at pass rate 0.0002
-(PubMed `c0_mesh`) is all-fail with probability 0.95. Meta skips per
-document (a filtered thread returns before any load), a finer unit;
-ours is the tile.
-
-**Gated tile skip** (`GATED`, the bloom scorer at `D_PAD ≤ 256`). The same
-vote, run only in programs whose row is provably selective. An item passes
-only if every queried bit is set, so the row's pass rate is at most its
-rarest bit's frequency: `bloom_bit_freq [m_bits]` (fp32, from
-`bloom_transposed` at `register_index`;
-[`indexing/selectivity.py`](../../retrieve/src/retrieve/indexing/selectivity.py)).
-Each program loads the query's bit frequencies first (one vector load, so
-the latency overlaps the tile's own loads) and votes only when `bound ·
-BLOCK_P < 1`, i.e. under one expected passing lane per tile. The host sets
-`GATED` only for grids of at least `MIN_PROGRAMS` programs: below one wave a
-skipped tile does not shorten the run, and the vote is pure cost. Measured
-against v2.3 (d128 / d192, kernel-only, [ST-SKIP128](../../research/artifacts/campaign-v2/st-skip128/README.md)):
-0.58-0.67× at p 0.001 bs 16, 0.75-0.81× at p 0.003, and 0.994-1.007× above
-the threshold and at bs 1. A skipped tile holds only `-inf` slots, so the
-gate is bit-exact whatever the bound says. **Not on the exact scorer:** the
-same gate there (per active clause, the frequency of the query's value)
-raised the d128 tile from 96 to 108 registers (5 → 4 resident CTAs), costing
-1.4-7.8 % at p ≥ 0.01; the exact scorer is unchanged.
-
-**Tile config: per width, then per program count.** Each kernel module
-ships `CONFIGS`: per `D_PAD` bound, a tuple of tiles, largest first.
-[`_host.width_tiles`](../../retrieve/src/retrieve/ops/triton/_host.py)
-picks the bound (the smallest at or above `next_power_of_2(D)`, the widest
-past the last one). `_host.tile_for_width` then takes the first tile that
-gives at least `MIN_PROGRAMS = 1024` programs (`B · cdiv(width,
-block_p)`), else the smallest. B and the probe width are static Python
-ints, so the choice is fixed under capture. Below about 1,000 programs
-(fewer than ten programs per SM on the A100's 108), a wide tile cannot
-hide its latency. On a 2 M-item d768 layout (width 64 K) the 256-item
-tile at bs 1 launched 276 programs and ran 1.68× v2.1's 64-item single
-dot; 64 × 4 / `BLOCK_D` 256 at 1,029 programs ran 0.86×
-([artifact](../../research/artifacts/campaign-v2/st-dloop/README.md)). The ≤ 256
-entries are the D = 128 tuning (`tune-kernels`). The wide tiles were swept on
-the real PubMed d768 cell (none, bloom and exact `c0_mesh`, bs 16; 54
-tiles each, every one `torch.equal` to the shipped tile) and chosen by
-the geometric mean over none and bloom, since one entry serves both. The
-fallbacks were chosen on the synthetic bs sweep. The 1024 entry also
-serves D_PAD 512 and is not tuned at D = 384 / 512:
-
-| `D_PAD` bound | `codesigned_probe_score` (none, bloom) | `codesigned_probe_score_exact` |
-|---|---|---|
-| ≤ 256 | `256 × 4`, one dot, no skip | `256 × 4`, one dot, no skip |
-| > 256 | `256 × 4` / `BLOCK_D` 128, then `128 × 4` / 256, then `64 × 4` / 256; 2 stages, skip | `128 × 4`, 2 stages, `BLOCK_D` 128, skip |
-
-Scores do not depend on the tile, the chunking or the skip (the int32 dot
-is exact, the tiling only moves slots, and a skipped tile holds only
-`-inf` slots), which every parity file checks.
-
-### `codesigned_probe_score` — IVF + INT8 + Bloom
-
-[`ops/triton/codesigned_probe_score.py`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score.py).
-
-**Bloom build.** `build_transposed_sigs` rotates the row-wise signatures
-one bloom word at a time, and within a word in chunks of `TRANSPOSE_CHUNK`
-= 2¹⁸ items (whole 64-item words; the last chunk zero-padded as before).
-Each chunk's bit planes are a `[64, chunk]` int64 temporary plus the shifted
-copy, 128 MiB each, so the build needs the row-wise and transposed tables
-plus about 256 MiB at any `N`. Unchunked, the planes were `[64, N_pad]`
-per word (14.3 GiB at 30 M), and the triton bloom build did not fit at
-LAION 30 M (d-run, v2.6). The chunked index is `torch.equal` to the
-one-pass one.
-
-The `int8 → fp32` code cast never touches HBM. Bloom mode reads the
-**transposed index** of the paper's "rotate the matrix" phase 2 (TF-1): `bloom_transposed [m_bits, ceil(N/64)]`
-(`bloom_hash.build_transposed_sigs` over the cluster-sorted row-wise
-signatures), in which bit `pos % 64` of word `pos // 64` of row `m` is bit
-`m` of item `pos`'s signature. The query comes in as its set-bit positions,
-`[B, C·k_hash]` from `bloom_hash.build_query_bit_positions`, with `-1` for an
-inactive clause's slots. The same `_bit_positions` hash core as
-`build_query_signatures` is used, so the positions are the query
-signature's bits exactly (pinned in `test_bloom_hash.py`). The kernel ANDs
-one word per set bit: `(qb & sig) == qb ⇔` every set bit `m` of `qb` is set
-in `sig`. At the shipped settings that is ≤ 10 reads of an 8-byte word
-shared by 64 items, instead of a 128-byte row per item. The result is
-boolean-identical to the row-wise test (the parity file's private
-oracle). The bloom inputs inherit the `(clause_idx, value)` keying
-invariant documented under `bloom_match`.
-
-**Tile config.** `CodesignedProbeScoreConfig(block_p, num_warps,
-num_stages, block_d, skip)`, one per `D_PAD` bound in the module's `CONFIGS` (table in
-[SilverTorch kernels](#silvertorch-kernels)); pass `config=` to override.
-Re-tune one width at a time on a new arch via `uv run tune-kernels
-codesigned-probe-score --d <D>`. Past `D_PAD` 256 both probe-scorer
-subcommands sweep `(block_p, num_warps, num_stages, block_d)` with the
-skip on (`tune._CPS_WIDE_GRID`). Its equal-cluster random-code layout
-has no realistic pass rate, so the shipped wide entries came from the
-real-cell sweep instead. `HAS_QB`
-is a body-level constexpr (the bloom-on and bloom-off paths JIT-specialise
-on it). The score buffer is `torch.empty([B, width])`: every slot is
-written (a dot, or `-inf`), so there is no pre-fill.
-
-**Independent bloom word loads.** Each queried bit's word load is masked
-by the tile's `valid` lanes, not by the running `keep`. The loads then do
-not wait on each other, which shortens each program's latency chain (probe
-table → bloom words → code gather → store). The extra bytes are 8-byte words
-shared by 64 lanes, and the resulting `keep` is the same. Against v2.4:
-0.90-0.99× at d128, 0.93-1.01× at d192, 0.93-1.00× at d768 across p and bs
-([ST-LANE](../../research/artifacts/campaign-v2/st-lane/README.md)).
-
-**A per-lane exit was measured and is not used.** At d128 the scorer's
-floor below p ≈ 0.1 (about 22 µs of a 38 µs bloom tile at p 0.01, bs 16)
-is that per-program latency chain, not the tile's work. Compacting the
-passing lanes before the gather (a scan into a per-program scratch, then
-32-lane chunks) removed the tile work but added a chain of its own: 0.91×
-at p 0.01, 1.03× at p 0.136. Larger or smaller tiles do not move the floor
-either. Meta's scorer scales with p because it runs one thread per
-document, with its bloom search and payload kernels outside; like-for-like
-the two are level or ours is faster at every p measured.
-
-**Filtered items cost no HBM bytes; whole tiles are skipped only at wide
-D.** Both filtered scorers (this one with `HAS_QB`, and the exact one
-below) evaluate the filter first and mask the int8 code load with `keep`,
-so a failing item's code row is never fetched: at bs 16, a pass rate of
-0.001 scores 18–39 % faster than a pass rate of 1.0 on the same layout
-(D = 128). What a failing lane still costs at `D_PAD ≤ 256` is its share
-of the tile's `tl.dot` and epilogue. Past 256 the tile skip above removes
-both for an all-fail tile (validation rows *ST-DLOOP* and *Probe-scorer
-tile skipping (#16)*).
-
-### `codesigned_probe_score_exact` — IVF + INT8 + exact AND-of-OR
-
-[`ops/triton/codesigned_probe_score_exact.py`](../../retrieve/src/retrieve/ops/triton/codesigned_probe_score_exact.py).
-
-Same layout, launch shape and IVF + INT8 scoring path as
-`codesigned_probe_score`; swaps the bloom subset test for an exact
-AND-of-OR attribute predicate fully unrolled over `(C, A_max)` against the
-cluster-sorted `[N, C, A_max]` narrow item attrs (SilverTorch's
-`item_clause_attrs` buffer) and `[B, C]` query attrs. Per program: inner
-OR over `A_max` attribute slots per clause, outer AND over `C` clauses,
-reverse-XOR per clause, with `q_c == -1` overriding to "always passes" —
-the same `common.clause_pass` helper as the standalone `clause_mask`
-kernel (`ids=pos`, `load_mask=valid`), fused into the score path and
-applied only to the probed items. No false positives (cf. bloom mode).
-It reads `C·A_max` int64 attrs per item, 160 B at arXiv's `C = 5, A_max = 4`
-and more than the code row. This is why exact mode is the slowest of the
-three here (validation's head-to-head).
-
-**Tile config.** `CodesignedProbeScoreExactConfig(block_p, num_warps,
-num_stages, block_d, skip)`, one per `D_PAD` bound in the module's `CONFIGS` (table in
-[SilverTorch kernels](#silvertorch-kernels)). Re-tune via its own
-subcommand, `uv run tune-kernels codesigned-probe-score-exact`, whose
-regime axes are `(N, B, C, A_MAX, D)` (repeatable `--regime`, one `D` per
-run). The score buffer is `torch.empty([B, width])`, written in
-full, with the same id epilogue.
-
-
-### `bloom_full_mask` — the full-N mask (`bloom_path="full"`)
-
-[`ops/triton/bloom_full_mask.py`](../../retrieve/src/retrieve/ops/triton/bloom_full_mask.py).
-`SilverTorch(bloom_path="full")` (bloom, triton or torch) is the
-co-design ablation inside our own kernels (roadmap C5-OURS). The subset
-test first runs over every item. The probe scorer then reads that
-result instead of evaluating the filter on the probed slots. This
-separates the co-design idea from Meta's host-bound partial-mask path,
-which is what the official `bloom_path` compares (V-PROF3).
-
-The mask is the AND of the query's rows of `bloom_transposed`:
-
-```
-mask[b, w] = AND over active i of bloom_transposed[qpos[b, i], w]   # [B, ceil(N / 64)] int64
-```
-
-So bit `n % 64` of word `n // 64` is item `n`'s subset test (cluster-sorted
-order, as the scorer addresses it). One program covers 1,024 words of one
-row and reads `C · k_hash` rows of the index: `B · C · k_hash · N / 8`
-bytes, the full-N cost the partial path avoids. A query with no active
-clause gets an all-ones row.
-
-**The scorer is unchanged.** The layer passes the mask to
-`codesigned_probe_score_bloom` as a one-row table per query:
-- `query_bit_positions = [[b]]`;
-- `bloom_transposed = mask`;
-- `bloom_bit_freq` = the partial path's own bound, `min` over the query's
-  active bits.
-
-Each slot then loads one mask word instead of `C · k_hash` index words.
-The skip gate makes the same decisions, and the keep set and the dot are
-the same, so `full` equals `partial` bit for bit: ids and scores, triton
-and torch
-([`test_bloom_full_mask.py`](../../retrieve/tests/parity/test_bloom_full_mask.py)).
-The default `partial` path calls the same op with the same tensors as
-before the option existed. The forward is graph-capturable, with no
-skips or breaks
-([`test_silvertorch_compile.py`](../../retrieve/tests/compile/test_silvertorch_compile.py)).
+`SilverTorch` runs phase 1 of Algorithm 1 in torch (k-means, the cluster-sorted CSR layout, int8
+quantization, the centroid top-`n_probe`) and phases 2+3 on Meta's ops: as published
+(`backend="official"`, next) or adapted (`backend="official-fork"`, the default; its own section
+follows). Both backends register the same index (`indexing.ivf.csr_layout`): `item_codes` in
+cluster-sorted order, `cluster_offsets [n_lists + 1]`, `cluster_sizes`, `sort_perm` (sorted
+position → original id) and `inv_perm`, with the filter buffers in the same sorted order. A query
+row's probed clusters are laid out back to back, so the scorer's output is `[B, width]` with
+`width = indexing.ivf.probe_width(cluster_sizes, n_probe)`, the sum of the `n_probe` largest
+clusters: a static bound on any row's item count, cached as the Python int
+`SilverTorch._probe_width` and rederived by `set_query_params` and by the load hook.
+`register_index` / `set_query_params` raise unless `width ≥ k`.
 
 ### `official` — Meta's `torch.ops.st.*` kernels as the reference backend
 
@@ -1716,12 +1043,11 @@ gate state is in [validation](../../research/validation.md#library-gates).
 **Layout.** Phase 1 is ours and shared: the same `KMeans`,
 the same `quantize_int8_global` codes, the same centroid top-`n_probe`.
 The official scorer reads the same cluster-sorted CSR every backend
-registers ([SilverTorch kernels](#silvertorch-kernels)). Forward passes
+registers ([above](#silvertorch-on-metas-ops)). Forward passes
 `cluster_ids = probe_ids [B, n_probe]`, `cluster_length =
 cluster_sizes[probe_ids]` and `max_tensor_size_per_row` equal to the
-compact width `_probe_width` the Triton scorer writes. The official output
-is therefore our `[B, width]` (rounded up to 32), and the host
-`masked_topk` costs the same in every arm. Returned indices are sorted
+compact probe width `_probe_width`. The official output is therefore `[B, width]` (rounded up to
+32). Returned indices are sorted
 positions and map back through `sort_perm`. Slots the op never writes
 (pads, filtered docs) carry `indices == -1` and become `-inf` / `-1`.
 
@@ -1773,8 +1099,8 @@ Nothing else upstream is used — no `BloomIndexSearchModule`, no
 **Scores** (`OfficialConfig.score_path`). `"int32"`:
 `divisor_for_int8=-1` returns the raw int32 dot; the host epilogue
 `(dot.float() · q_scale[b]) · global_scale` is the same two
-left-associated fp32 multiplies as the Triton kernel and the torch path,
-so scores are **bit-identical** (the parity contract). `"fp16"`
+left-associated fp32 multiplies as the adapted code's epilogue, so scores are **bit-identical**
+(the parity contract, [Numerics](#numerics)). `"fp16"`
 (default — the instantiation Meta ships for int8 serving, hence the
 timed path): `divisor_for_int8 = default_divisor(D)`, the smallest power
 of two with `127²·D / divisor ≤ 65504` (16 / 32 / 64 at D = 64 / 128 /
@@ -1842,13 +1168,12 @@ forward raises `RuntimeError` when traced. Measured on the A100
 19 are the scoring kernels; the rest is payload prep — scans, a
 `repeat_interleave`, fills), `fused_kmean_ann_with_partial_masks` 19 / 4,
 the partial-response bloom search 13 / 2 with two H2D plan uploads, so a
-bloom forward is ≈ 32 launches and ≥ 5 syncs against Triton's one launch.
+bloom forward is ≈ 32 launches and ≥ 5 syncs (the adapted code: 9-12 launches, none).
 The CPU expression parse (≈ 59 µs per call at B=16) is query
 preparation: it runs in `prepare_queries`, outside the timed forward,
 and the harness records it as `query_prep_ms`
 ([evaluation](evaluation.md#query-preparation)). T7 records the forward's
-syncs with the filter already prepared. The official arm loses at small `P` / `B=1` for host reasons, so
-the kernel-only tier of the head-to-head is what compares kernels.
+syncs with the filter already prepared.
 
 **Run as Meta intends (OFFICIAL-REWORK).** Everything query-side runs in
 `prepare_queries`, outside the timed forward:
@@ -1886,15 +1211,6 @@ So a whole-forward CUDA-graph capture fails on every path, and the arm stays
 eager (OF-3). Meta's released `setup.py` compiles the host side of its `.cu`
 files at gcc `-O0` (OF-11). The same sources at `-O3` are bit-identical and
 0.77-0.98× as fast ([OFFICIAL-REWORK](../../research/artifacts/official-rework/README.md)).
-
-**Measured.** The head-to-head against Triton (end to end, kernel-only,
-phase 2, parity, memory) is in
-[validation](../../research/validation.md#official-against-our-triton-reimplementation),
-with tables in [artifacts](../../research/artifacts/official-silvertorch/b3/tables.md).
-Both scorers now read the same CSR. The b3 split (Meta's
-scorer 10.9–17.8× ours on goodreads) was our former padded probe layout,
-and it closed with TF-9 / TF-1. The current kernel-only numbers, re-run on
-the b3 methodology, are in the same validation section.
 
 ### `official-fork` — our fork of Meta's ops
 
@@ -1959,7 +1275,7 @@ It returns `(ids int64 [B, k], scores fp32 [B, k])` with `-1` / `-inf` pads.
 
 **Bloom width (C12).** `OfficialConfig.bloom_width`: `"configured"` (the fork's default) builds the
 official bloom with `bloom_index_build_fixed`, every 2048-doc bundle `m_bits` bits per doc (the
-layer's `m_bits` is then required), so its index is `N · m_bits / 8` bytes like Triton's;
+layer's `m_bits` is then required), so its index is `N · m_bits / 8` bytes;
 `"upstream"` keeps Meta's `max terms · k · b_multiplier` per bundle (OF-10), the only width
 `"official"` has.
 
@@ -2020,9 +1336,21 @@ transposed index reads ~40× fewer filter bytes than the row-wise Triton
 form and is 2.1–2.5× faster kernel-only (1.3× wall) once the scorer has
 memory-level parallelism; a DSL port is kernel-for-kernel within noise of
 the C++ backend, its cost being host launch overhead; and every backend
-collapses to one latency under CUDA-graph replay. The transposed index
-is back in Triton, over the cluster-sorted order rather than per-cluster
-word spans: [`codesigned_probe_score`](#codesigned_probe_score--ivf--int8--bloom).
+collapses to one latency under CUDA-graph replay.
+
+**The Triton SilverTorch** (`SilverTorch(backend="triton")`, its `backend="torch"` reference and
+`bloom_path="full"`: the `codesigned_probe_score*` and `bloom_full_mask` ops, their reference
+twins, the transposed bloom index with its per-bit frequency table, the probe scorers' shared
+prep / top-k / id-epilogue scaffold and their `tune-kernels` entries) and **our LiNR bloom
+filter** (`BloomFilter`, the `bloom_match` / `bloom_compact` / `bloom_match_scores` ops, the
+`bloom_hash` builders and the per-clause salt, `functional.bloom_subset_match`) were deleted after
+the adapted official backend's review and parity gates were green; the tag
+`triton-silvertorch-final` holds them, and
+[decisions](../../research/decisions.md#goal-and-scheduling) has the ruling (the study runs LiNR
+with the exact filter only; the bloom in the study is Meta's, inside SilverTorch). Their
+measurements are superseded results in
+[validation](../../research/validation.md#superseded-results-not-for-the-paper) and are not
+cited.
 
 ## Adding an op
 
@@ -2045,10 +1373,8 @@ way a kernel ships half-integrated.
    kernel's `_impl`.
 5. `retrieve/tests/parity/test_<k>.py` — kernel vs. reference, following
    [testing.md](testing.md#new-parity-test-for-a-triton-kernel).
-6. A compile/graph-break gate: a row in `test_silvertorch_compile.py` or
-   `test_linr_compile.py` if a module's forward calls the op under
-   `torch.compile`, or a dedicated case in `tests/compile/` if it
-   doesn't already fall under one of those.
+6. A compile/graph-break gate: a row in `test_linr_compile.py` if a module's forward calls
+   the op under `torch.compile`, or a dedicated case in `tests/compile/` otherwise.
 7. This file — a kernel section with its inputs/outputs, launch grid,
    tile config and any numerics caveat.
 8. [architecture.md](architecture.md)'s op table (`## Kernels`) — one row

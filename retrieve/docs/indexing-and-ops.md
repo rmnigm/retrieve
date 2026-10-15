@@ -19,8 +19,7 @@ modules use them for you.
 | `project_oporp_1bit_query` | `(query, signs, perm, k_bits) -> [B, k_bits // 64] int64` | `OneBitKNN` |
 | `quantize_simhash_1bit` | `(embs, k_bits, seed=0) -> (bits [N, k_bits // 64] int64, r [k_bits, D] fp32)` — SimHash; `k_bits` may exceed `D` | `SimHashKNN` |
 | `project_simhash_1bit_query` | `(query, r) -> [B, k_bits // 64] int64` | `SimHashKNN` |
-| `generate_seeds`, `generate_clause_salt`, `build_signatures`, `build_query_signatures` | the bloom hash: `k_hash` seed pairs, the per-clause salt, item signatures `[N, m_bits // 64]` and query signatures `[B, m_bits // 64]` | `BloomFilter`, `SilverTorch(filter_mode="bloom")` |
-| `build_transposed_sigs`, `build_query_bit_positions` | the transposed bloom index `[m_bits, ceil(N / 64)]` of row-wise signatures, and a query's set-bit positions `[B, C * k_hash]` (`-1` = inactive clause) | `SilverTorch(filter_mode="bloom")` on `triton` / `torch` |
+
 
 `KMeans.fit` is deterministic: same `seed` and same input give bit-identical centroids and
 assignments on repeated calls, on CPU and on CUDA, with either `init`. The centroid update sums
@@ -47,35 +46,38 @@ bits, signs, perm = quantize_oporp_1bit(embs)   # bits: [100000, 2] int64 at k_b
 
 | name | what it does |
 | --- | --- |
-| `masked_topk(scores, k, valid=None, gather_ids=None, pad_to_k=True)` | the shared top-k epilogue: mask to `-inf`, top-k, map local → global ids, `-1` where the score is not finite |
+| `two_level_topk(scores, k)` | `torch.topk` up to ties, in two levels on wide rows (block maxima, then the k best blocks' items) |
+| `masked_topk(scores, k, valid=None, gather_ids=None, pad_to_k=True)` | the shared top-k epilogue: mask to `-inf`, top-k (`two_level_topk`), map local → global ids, `-1` where the score is not finite |
 | `counts_to_valid(counts, p)` | `[B]` counts → `[B, P]` prefix mask |
 | `compact_mask(mask)` | `[B, N]` bool → `(ids [B, N], counts [B])`: the first `counts[b]` ids of each row are the passing items |
 | `combine_masks(*masks)` | element-wise AND of `[B, N]` masks; `None` inputs ignored |
 | `combine_indices(filters, query_clause_attrs)` | sparse cascade across several filters; order them most-selective first |
 | `post_filter_topk(topk_ids, post_mask)` | apply a filter **after** top-k: `(ids, counts)` with filtered positions set to `-1` |
 | `popcount_int64(x)` | per-element popcount of an int64 tensor |
-| `clause_subset_match`, `bloom_subset_match` | the two subset predicates over gathered candidates (what `evaluate_subset` runs) |
+| `clause_subset_match` | the exact predicate over gathered candidates (what `ExactAttributeFilter.evaluate_subset` runs) |
 
 ## `retrieve.ops`
 
 ```python
 import retrieve.ops.triton              # registers torch.ops.retrieve.* (Triton)
-retrieve.ops.triton.codesigned_probe_score(query, probe_ids, cluster_offsets, item_codes, sort_perm, global_scale, k, width)
-retrieve.ops.reference.codesigned_probe_score(...)   # same signature, pure torch, torch.equal to the above
+retrieve.ops.triton.clause_mask(item_clause_attrs, clause_is_reverse, query_clause_attrs)
+retrieve.ops.reference.clause_mask(...)   # same signature, pure torch, torch.equal to the above
 retrieve.ops.official.ensure_loaded(); retrieve.ops.official.st.fused_kmean_ann(...)   # Meta's op
 retrieve.ops.available_backends()       # ("triton", "torch"), plus "official" / "official-fork" where each loads
 ```
 
 | op | `triton` / `reference` | consumer |
 | --- | --- | --- |
-| `codesigned_probe_score`, `codesigned_probe_score_bloom`, `codesigned_probe_score_exact` | fused IVF probe + INT8 dot (+ bloom / exact predicate) + top-k | `SilverTorch(backend="triton" / "torch")`; not in the release ([modules](modules.md#silvertorch)) |
-| `bloom_match`, `bloom_compact` | bloom subset test → `[B, N]` bool / compact candidates | `BloomFilter` |
-| `clause_mask`, `clause_compact` | exact clause predicate → `[B, N]` bool / compact candidates | `ExactAttributeFilter` |
+
+| `clause_mask`, `clause_mask_scores`, `clause_compact` | exact clause predicate → `[B, N]` bool / masked scores / compact candidates | `ExactAttributeFilter` |
+| `clause_mask_packed` | the clause predicate packed into Meta's `filtering_bit_mask` | `SilverTorch(backend="official", filter_mode="exact")` |
+| `gemv_scores` | one query's dense fp32 scores in cuBLAS's order | `PostfilterKNN` at `B = 1` |
 | `fused_masked_knn_topk` | gather + fp32-accumulated dot over candidate ids + top-k | `PrefilterKNN` |
 | `oporp_1bit_match_topk_full`, `oporp_1bit_match_topk_indirect` | XOR + popcount + top-k, full scan / through candidate ids | `OneBitKNN`, `SimHashKNN` |
 
-`retrieve.ops.official` is the adapter over Meta's `torch.ops.st.*` (`official_probe_score`,
-the bloom index and expression-parser helpers, `OfficialConfig`, `OfficialMissing`); the ops
-themselves are reachable verbatim as `retrieve.ops.official.st.<name>` once `ensure_loaded()`
+`retrieve.ops.official` is the adapter over Meta's `torch.ops.st.*` and the adapted
+`torch.ops.stfork.*` (`official_probe_score`, `fork_search`, the bloom index and
+expression-parser helpers, `OfficialConfig`, `OfficialMissing`); the ops themselves are reachable
+verbatim as `retrieve.ops.official.st.<name>` / `.stfork.<name>` once `ensure_loaded(backend)`
 ran. `retrieve.modules.official` re-exports Meta's four `silvertorch.modules` classes the same
 lazy way. Both need the `official` extra. `retrieve.ops.tune` is the `tune-kernels` autotune CLI.

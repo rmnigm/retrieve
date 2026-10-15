@@ -1,4 +1,4 @@
-"""META-FORK compile gate (controller, 2026-10-11): ``torch.library.opcheck`` on every ``stfork::``
+"""The adapted code's compile gate: ``torch.library.opcheck`` on every ``stfork::``
 op (schema, fake, autograd registration, AOT dispatch); ``SilverTorch(backend="official-fork")``
 compiles ``fullgraph`` with 0 graph breaks in the default and ``reduce-overhead`` modes, with
 ``dynamic`` False and True (batch size varying), outputs ``torch.equal`` to eager; ``torch.export``
