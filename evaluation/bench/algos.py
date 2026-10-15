@@ -5,13 +5,13 @@ harness name → library class, the filter kinds and backends, ``PATHS`` derived
 ``PATHS[(algo, filter_kind, backend)]`` is the code path that actually runs, or ``None`` when there
 is no such cell: ``DISPATCH``'s label for the module's backend (``cublas`` where the flag is a
 no-op, ``None`` where the constructor raises — ``official`` / ``official-fork`` outside
-SilverTorch), suffixed with the
-filter's backend on filter cells of the cuBLAS algos (``cublas+triton``: cuBLAS scoring, Triton
-``clause_mask``), and ``None`` on ``linr_v2 / none`` — its candidate source *is* the filter.
-``postfilter`` is the harness's own baseline (``bench.postfilter``), not a library module:
-``DISPATCH`` gains its row here, torch only, filter cells only. ``tests/bench/test_paths.py`` pins
-the derived table. The standalone filter modules of ``official`` / ``official-fork`` cells are
-Triton: ``filter_backend``.
+SilverTorch), suffixed with the filter's backend on clause cells of the cuBLAS algos
+(``cublas+triton``: cuBLAS scoring, Triton ``clause_mask``); ``None`` on ``linr_v2 / none`` (its
+candidate source *is* the filter) and on every bloom cell but SilverTorch's (the bloom filter is
+SilverTorch's own; LiNR runs the exact filter). ``postfilter`` is the harness's own baseline
+(``bench.postfilter``), not a library module: ``DISPATCH`` gains its row here, torch only, clause
+cells only. ``tests/bench/test_paths.py`` pins the derived table. The standalone filter modules of
+``official`` / ``official-fork`` cells are Triton: ``filter_backend``.
 """
 
 from __future__ import annotations
@@ -60,6 +60,8 @@ def _path(algo: str, filter_kind: str, backend: str) -> str | None:
     p = DISPATCH[ALGOS[algo].__name__][backend]
     if p is None or (algo in ("linr_v2", "postfilter") and filter_kind == "none"):
         return None
+    if filter_kind == "bloom" and algo != "silvertorch":
+        return None
     return f"{p}+{backend}" if p == "cublas" and filter_kind != "none" else p
 
 
@@ -77,23 +79,21 @@ def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
 def official_config(
     algo: str, filter_kind: str, backend: str, params: dict[str, Any]
 ) -> OfficialConfig | None:
-    """The ``bloom_path``, ``score_path`` (fp16 | int32, the H2H-final arms) and ``recheck``
-    build params as ``OfficialConfig`` on the two official backends; ``None`` (the library
-    default, ``partial`` / ``fp16`` / the backend's own recheck) when all keys are absent or the
-    backend is triton. ``bloom_path`` means something on ``silvertorch / bloom`` on official,
-    official-fork (``partial`` only; the layer refuses ``full``) and triton (there the layer's own
-    ``bloom_path``), ``score_path`` on ``silvertorch`` on the official backends, ``recheck`` on
+    """The ``bloom_path``, ``score_path`` (fp16 | int32) and ``recheck`` build params as
+    ``OfficialConfig`` on the two official backends; ``None`` (the library default, ``partial`` /
+    ``fp16`` / the backend's own recheck) when all keys are absent. ``bloom_path`` means something
+    on ``silvertorch / bloom`` on official and official-fork (``partial`` only there; the layer
+    refuses ``full``), ``score_path`` on ``silvertorch`` on the official backends, ``recheck`` on
     ``silvertorch / bloom`` on official-fork (``false`` only on official); each raises anywhere
     else."""
     kw = {k: params[k] for k in ("bloom_path", "score_path", "recheck") if k in params}
     if not kw:
         return None
     if "bloom_path" in kw and (
-        (algo, filter_kind) != ("silvertorch", "bloom")
-        or backend not in (*OFFICIAL_BACKENDS, "triton")
+        (algo, filter_kind) != ("silvertorch", "bloom") or backend not in OFFICIAL_BACKENDS
     ):
         raise ValueError(
-            f"bloom_path applies to silvertorch/bloom on the official backends or triton only, got "
+            f"bloom_path applies to silvertorch/bloom on the official backends only, got "
             f"{algo}/{filter_kind}/{backend}"
         )
     if "score_path" in kw and (algo != "silvertorch" or backend not in OFFICIAL_BACKENDS):
@@ -109,7 +109,7 @@ def official_config(
             f"recheck applies to silvertorch/bloom on official-fork (false only on official), got "
             f"{algo}/{filter_kind}/{backend} recheck={kw['recheck']}"
         )
-    return OfficialConfig(**kw) if backend in OFFICIAL_BACKENDS else None
+    return OfficialConfig(**kw)
 
 
 def build_filter(
@@ -168,11 +168,8 @@ def build(
         mode = FILTER_MODE[filter_kind]
         bloom = BLOOM_DEFAULTS if mode == "bloom" else {}
         official = official_config(algo, filter_kind, backend, p)
-        bloom_path = p.pop("bloom_path", None)
-        p.pop("score_path", None)
-        p.pop("recheck", None)
-        if backend == "triton" and bloom_path is not None:
-            p["bloom_path"] = bloom_path
+        for key in ("bloom_path", "score_path", "recheck"):
+            p.pop(key, None)
         module = SilverTorch(
             k=k, filter_mode=mode, seed=seed, backend=backend, official=official,
             **{**SILVERTORCH_DEFAULTS, **bloom, **p},

@@ -52,11 +52,9 @@ FIXED_BACKEND = {"postfilter": "torch"}
 DATASET_LABEL = {
     "goodreads": "Goodreads",
     "arxiv": "arXiv",
-    "yfcc10m": "YFCC-10M",
     "pubmed": "PubMed",
     "goodreads-synth": "Goodreads (synthetic filter)",
     "arxiv-synth": "arXiv (synthetic filter)",
-    "yfcc10m-synth": "YFCC-10M (synthetic filter)",
 }
 SPEEDUP_BASE = "linr_v1_filter_mask"
 
@@ -1040,7 +1038,7 @@ def fig_latency_violin(c) -> list[Path]:
 
 # ----- paper exhibits (docs/system/evaluation.md § Paper exhibits) -----------------------
 
-REAL = ("goodreads", "arxiv", "yfcc10m", "pubmed")
+REAL = ("goodreads", "arxiv", "pubmed")
 EXHIBIT_K = 100
 EXHIBIT_BS = (1, 16)
 CLAIMS = Path(__file__).resolve().parents[1] / "claims.yaml"

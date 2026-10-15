@@ -58,7 +58,7 @@ def test_validate_layout_text_shape(tmp_path):
     # PubMed's cmd_queries breakage: eval_split shorter than the query set.
     short = write_tiny_dataset(tmp_path / "short", n_split=5)
     assert layout.validate_layout(short, short / "content") == ["eval_split rows 5 != queries 8"]
-    # The prefix policy (YFCC, PubMed): ``prefix: null`` declares a prefix-free encoder and
+    # The prefix policy (PubMed): ``prefix: null`` declares a prefix-free encoder and
     # is clean; a sidecar without the key at all is a problem, not a pass.
     declared = write_tiny_dataset(tmp_path / "declared")
     (declared / "content" / "text_emb.meta.json").write_text(json.dumps({"prefix": None}))
@@ -71,7 +71,7 @@ def test_validate_layout_text_shape(tmp_path):
     assert problem.startswith(f"{keyless / 'content' / 'query_emb.meta.json'}: no 'prefix' key")
     with pytest.raises(RuntimeError, match="no 'prefix' key"):
         layout.assert_prefixes(keyless / "content")
-    # YFCC's 2026-09-06 breakage: no prefix sidecars at all.
+    # no prefix sidecars at all
     bare = write_tiny_dataset(tmp_path / "bare")
     (bare / "content" / "text_emb.meta.json").unlink()
     (problem,) = layout.validate_layout(bare, bare / "content")

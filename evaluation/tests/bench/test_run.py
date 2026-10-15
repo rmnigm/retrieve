@@ -306,13 +306,12 @@ def test_postfilter_records_oracle_recall_per_k(tiny_configs, tmp_path):
     ds, suites = tiny_configs
     jobs = load_matrix(ds, suites, "postfilter")
     out = tmp_path / "results"
-    assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 9}
+    assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 6}
     recs = _records(out / "postfilter" / "tiny-d64.jsonl")
     exact = {(r["filter_kind"], r["sweep"]): r for r in recs if r["algo"] != "postfilter"}
     post = [r for r in recs if r["algo"] == "postfilter"]
     assert sorted((r["filter_kind"], r["sweep"], r["params"]["alpha"]) for r in post) == [
-        (fk, sw, a) for fk, sw in (("bloom", "c0"), ("clause", "c0"), ("clause", "c0c1"))
-        for a in (1, 2)
+        (fk, sw, a) for fk, sw in (("clause", "c0"), ("clause", "c0c1")) for a in (1, 2)
     ]  # fmt: skip
     for r in post:
         assert r["backend"] == "torch" and r["path"] == "cublas+torch"

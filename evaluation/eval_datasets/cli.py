@@ -20,8 +20,6 @@ ETL = {
     "goodreads": "goodreads",
     "yambda": "yambda",
     "synth-arxiv": "synth_arxiv",
-    "yfcc": "yfcc",
-    "yfcc-check-gt": "yfcc_check_gt",
     "pubmed": "pubmed",
     "kuairand": "kuairand",
     "openalex": "openalex",

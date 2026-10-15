@@ -163,9 +163,10 @@ def test_quality_suite_collapses_same_path_backends():
 def test_filter_suite_arms_sweeps_and_seeds():
     jobs = load_matrix(MINI, SUITES, "filter")
     # (fk, sweep) pairs per dim: clause c0, c0c1 (c9_off disabled) + bloom c0 = 3. Per pair and
-    # seed: linr_v2 2 paths on all 3; linr_v3 (sweeps [c0]) on 2; silvertorch triton on 3;
-    # official (bloom only) on 1 → 6 + 2 + 3 + 1 = 12 per dim and seed.
-    assert len(jobs) == 2 * 3 * 12
+    # seed: linr_v2 2 paths on the 2 clause pairs; linr_v3 (sweeps [c0]) on clause c0;
+    # silvertorch triton on 3; official (bloom only) on 1 → 4 + 1 + 3 + 1 = 9 per dim and seed
+    # (LiNR runs no bloom cell: PATHS is None there).
+    assert len(jobs) == 2 * 3 * 9
     assert _counts(jobs, "dim", "filter_kind", "sweep") == Counter(
         {
             (d, fk, sw): n
@@ -173,7 +174,7 @@ def test_filter_suite_arms_sweeps_and_seeds():
             for (fk, sw), n in {
                 ("clause", "c0"): 12,
                 ("clause", "c0c1"): 9,
-                ("bloom", "c0"): 15,
+                ("bloom", "c0"): 6,
             }.items()
         }
     )
@@ -237,8 +238,8 @@ def test_deep_suite_build_query_split():
     ]
     assert st[-1].key({"n_lists": 64, "n_probe": 16})["params"] == {"n_lists": 64, "n_probe": 16}
     assert v3[0].build == {} and v3[0].query == ({"candidate_pool": 20}, {"candidate_pool": 40})
-    assert {j.dim for j in jobs} == {32} and {j.filter_kind for j in jobs} == {"bloom"}
-    assert {j.seed for j in jobs} == {0, 1}
+    assert {j.dim for j in jobs} == {32} and {j.seed for j in jobs} == {0, 1}
+    assert {j.filter_kind for j in st} == {"bloom"} and {j.filter_kind for j in v3} == {"clause"}
     assert jobs[0].bloom == {"m_bits": 128, "k_hash": 3}  # suite override on top of the default
 
 
@@ -280,7 +281,7 @@ def test_narrows_apply_before_collapse():
     jobs = load_matrix(
         MINI, SUITES, "filter", sweeps=["c0"], dims=[32], seeds=[1], ks=[10], batch_sizes=[2]
     )
-    assert len(jobs) == 9 and all(
+    assert len(jobs) == 6 and all(
         j.ks == (10,) and j.batch_sizes == (2,) and j.seed == 1 for j in jobs
     )
 
@@ -730,15 +731,6 @@ def test_v3bits_pubmed_is_clause_only_at_k_bits_256_and_768():
     assert {q["candidate_pool_frac"] for j in pm for q in j.query} == {0.01, 0.05}
     gr = _real("v3bits", "goodreads")
     assert {j.build["k_bits"] for j in gr} == {64, 128}
-
-
-def test_no_dataset_sets_an_exact_gate():
-    """The fp16-storage allowance was YFCC's only (user 2026-10-10): every dataset gates at the
-    floor."""
-    gates = {f.stem: load_dataset(f, _ds_dim(f)) for f in sorted(CFG.glob("*.yaml"))
-             if f.stem != "suites"}  # fmt: skip
-    assert {n for n, d in gates.items() if d.exact_gate is not None} == set()
-    assert {run.exact_gate(d, 100) for d in gates.values()} == {run.EXACT_MIN_RECALL}
 
 
 def test_normalize_is_off_for_pubmed_only(tmp_path):

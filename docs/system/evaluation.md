@@ -78,9 +78,7 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    `n_targets_in_filter` recorded). Metrics accumulate as running sums on
    device, one sync at the end. The exact algos (`EXACT_ALGOS`:
    `linr_v1_filter_mask`, `linr_v2`) must
-   reach `recall_oracle@k_max ≥ 0.99` (fp16 tolerance), or the dataset's
-   `exact_gate` when `k_max` < 1000 (`run.exact_gate`; no config sets one since YFCC
-   left the study); a failure is
+   reach `recall_oracle@k_max ≥ 0.99` (`run.EXACT_MIN_RECALL`, fp16 tolerance); a failure is
    recorded as `failed` and then raises `QualityGateError`, which ends the
    run. Cross-backend correctness belongs to the library's parity suite
    ([testing](testing.md)); the harness keeps only a *wiring* check, the
@@ -286,11 +284,16 @@ one row the library does not have, the harness's `Postfilter` (torch only;
 
 | algo | `none` | `clause` / `bloom` | `official` / `official-fork` |
 |---|---|---|---|
-| `linr_v1_filter_mask` (`PostfilterKNN`, fp16 cuBLAS + mask) | `cublas` (triton and torch collapse) | `cublas+triton` / `cublas+torch` (the filter's kernel) | — |
-| `linr_v2` (`PrefilterKNN` over the filter's candidate list) | — (the candidate source is the filter) | `triton` / `torch` | — |
-| `linr_v3` (`OneBitKNN` top-`candidate_pool` → `PrefilterKNN`) | `triton` / `torch` | `triton` / `torch` | — |
+| `linr_v1_filter_mask` (`PostfilterKNN`, fp16 cuBLAS + mask) | `cublas` (triton and torch collapse) | `cublas+triton` / `cublas+torch` (the filter's kernel); no bloom cell | — |
+| `linr_v2` (`PrefilterKNN` over the filter's candidate list) | — (the candidate source is the filter) | `triton` / `torch`; no bloom cell | — |
+| `linr_v3` (`OneBitKNN` top-`candidate_pool` → `PrefilterKNN`) | `triton` / `torch` | `triton` / `torch`; no bloom cell | — |
 | `silvertorch` (IVF + INT8, predicate fused: `filter_mode` none / exact / bloom) | `triton` / `torch` | `triton` / `torch` | `official` / `official-fork` |
-| `postfilter` (the harness's baseline: fp16 cuBLAS, top-`alpha*k`, then the filter) | — | `cublas+torch` (no triton cell) | — |
+| `postfilter` (the harness's baseline: fp16 cuBLAS, top-`alpha*k`, then the filter) | — | `cublas+torch` (no triton cell); no bloom cell | — |
+
+A bloom cell exists on `silvertorch` only (the bloom filter is SilverTorch's;
+LiNR runs the exact filter, [decisions](../../research/decisions.md#goal-and-scheduling)):
+`PATHS` is `None` on every other algo's bloom triple, so `load_matrix` skips
+them.
 
 `official` is Meta's reference backend and exists for
 `silvertorch` only; its standalone filter modules are Triton
@@ -315,15 +318,11 @@ buffers inside `index_mib`). `build(algo, item_embs, k=, backend=,
 filter_kind=, filter_mod=, item_attrs=, clause_is_reverse=, params=,
 seed=)` is the one factory; it refuses `None`-path cells and `n_probe >
 n_lists`. The build param `bloom_path` (`partial` | `full`, the S9
-co-design ablation) exists on `silvertorch / bloom` on two backends
-(anywhere else `load_matrix` raises `ConfigError`):
-- **official:** `SilverTorch(official=OfficialConfig(bloom_path=…))`,
-  through `algos.official_config`;
-- **triton:** the layer's own `SilverTorch(bloom_path=…)` (C5-OURS,
-  [kernels](kernels.md#bloom_full_mask--the-full-n-mask-bloom_pathfull)).
-
-Without the key the library default runs, which is `bloom_path="partial"`
-on both. The build param `recheck` (bool, META-FORK C13) sets
+co-design ablation) exists on `silvertorch / bloom` on the official backends
+only, as `SilverTorch(official=OfficialConfig(bloom_path=…))` through
+`algos.official_config` (anywhere else `load_matrix` raises `ConfigError`;
+`official-fork` takes `partial` only). Without the key the library default
+runs, which is `bloom_path="partial"`. The build param `recheck` (bool, META-FORK C13) sets
 `OfficialConfig(recheck=…)` on `silvertorch / bloom` on `official-fork`
 (`false` only on `official`, which has no recheck): `false` is Meta's
 bloom, false positives included, which recall then counts as misses
@@ -447,8 +446,8 @@ so the old records still read. There is no unfiltered `quality` suite ([decision
 | `nsweep-codesign` | laion1m / 3m / 10m / 30m `c0_domain`, `tags4`, bs 16 + 64, eager | official bloom `bloom_path` {partial, full} × `n_probe` {32, 128} at the scaled `n_lists` | C5 across N |
 | `seeds-c1`, `seeds-c1-laion30m`, `seeds-c7` | the C1 crossover cells at bs 16 (arxiv-synth d128 p 0.2 / 0.5, laion30m-synth p 0.1 / 0.2) and the 30 M score-path cell at bs 64 | seeds {0, 1, 2} on one box (pod b), so each CI is over one box; own suites, so these keys are separate from the main grid's seed-0 cells of `synth` / `laion30m-synth` / `c7-scorepath` | the CIs those cells carry |
 
-No suite runs SilverTorch's `triton` / `torch` backends, LiNR (or the postfilter) on a bloom filter, or YFCC: they are out
-of the study ([decisions](../../research/decisions.md#goal-and-scheduling)). The adapted SilverTorch (`official-fork`)
+No suite runs SilverTorch's `triton` / `torch` backends or YFCC: they are out
+of the study ([decisions](../../research/decisions.md#goal-and-scheduling)); LiNR and the postfilter have no bloom cell at all. The adapted SilverTorch (`official-fork`)
 runs from the FULL-RERUN suites ([`research/artifacts/full-rerun/`](../../research/artifacts/full-rerun/README.md)).
 
 ### IVF tuning
@@ -498,7 +497,6 @@ checkpoint: data/goodreads-work-id/checkpoints/sasrec-ssm-logq-d{dim}/best_model
 dims: [64, 128, 256]
 encode: {batch_size: 512, num_workers: 8, max_seq_length: 200}       # SASRec datasets only
 users_limit: 10000                                                    # or null
-# exact_gate: 0.9716                                                  # optional: the exact-algo floor at k_max < 1000
 # normalize: false                                                   # content_dir only: score raw dot products (pubmed)
 # self_match: true                                                    # optional: queries are catalogue items (Self-match)
 filters:                                                              # optional
@@ -555,7 +553,7 @@ the index. Its `query:` params (`n_probe`, `candidate_pool`,
 `set_query_params` to the built index, so `deep` is two k-means per
 `(dataset, sweep, seed)`, not ten. Putting a query param under `build:`
 (or the reverse) is a `ConfigError`. So is a param on an arm where it has
-no meaning: `bloom_path` off silvertorch / bloom / (official, official-fork, triton) (on official-fork only `partial`: the layer raises on `full`), `score_path` off silvertorch / (official, official-fork), `recheck` off silvertorch / bloom / official-fork (or `true` on official), `m_bits` /
+no meaning: `bloom_path` off silvertorch / bloom / (official, official-fork) (on official-fork only `partial`: the layer raises on `full`), `score_path` off silvertorch / (official, official-fork), `recheck` off silvertorch / bloom / official-fork (or `true` on official), `m_bits` /
 `k_hash` off silvertorch / bloom ([bloom widths](#bloom-widths-as-build-params)),
 `compile` off a torch arm ([compiled arms](#compiled-arms)),
 `candidate_pool_frac` off `linr_v3` ([pool fractions](#pool-fractions)), and `k_bits` off
@@ -741,7 +739,7 @@ Any exception inside a cell (an OOM on the torch path included) becomes a
 `status: failed` record with the traceback and `stage` (`build`,
 `query_params`, `quality`, `perf`) and the loop continues. Three things
 stop the process: `KeyboardInterrupt`; `QualityGateError` — an exact
-algo (`linr_v1_filter_mask`, `linr_v2`) below `recall_oracle@k_max ≥ 0.99` (or its dataset's `exact_gate`)
+algo (`linr_v1_filter_mask`, `linr_v2`) below `recall_oracle@k_max ≥ 0.99`
 — which is recorded first; and a sticky CUDA error (`run.STICKY_CUDA`:
 `CUDA error`, `illegal memory access`, `device-side assert` in the
 message), also recorded first and then re-raised, because the context is

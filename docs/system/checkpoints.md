@@ -239,8 +239,8 @@ The registry lives in
 | `arxiv-papers` | `pinkmeme/eval-arxiv-papers` |
 | `kuairand` | `pinkmeme/eval-kuairand` |
 
-The `yambda-5b` and `kuairand` repos (and `yfcc10m`, also in `EVAL_REPOS`) were
-deleted by the user (2026-10-15): their keys remain in the registry but resolve to nothing.
+The `yambda-5b` and `kuairand` repos were deleted by the user (2026-10-15): their keys remain
+in the registry but resolve to nothing.
 
 A given checkpoint then lands at
 `pinkmeme/eval-<dataset>/tree/main/checkpoints/<ckpt-id>/` rather than its

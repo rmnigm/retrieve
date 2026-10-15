@@ -451,8 +451,8 @@ def test_matched_bands_give_qps_at_recall_per_selectivity_band(tmp_path):
 
 # ----- G-report: a schema-4 campaign tree, every arm of every suite (the record contract) ---
 
-N_ITEMS = {"goodreads": 797_084, "arxiv": 2_984_617, "yfcc10m": 9_998_311, "pubmed": 10_000_000}
-DIM = {"goodreads": 128, "arxiv": 128, "yfcc10m": 192, "pubmed": 768}
+N_ITEMS = {"goodreads": 797_084, "arxiv": 2_984_617, "pubmed": 10_000_000}
+DIM = {"goodreads": 128, "arxiv": 128, "pubmed": 768}
 DETERMINISTIC = ("linr_v1_filter_mask", "linr_v2", "postfilter")
 
 
@@ -566,11 +566,10 @@ def _campaign_tree(root):
         first = _rec4(root, dataset, suite, algo, backend, seed=0, **kw)
         _rec4(root, dataset, suite, algo, backend, seed=1, source=first, **kw)
 
-    # filter: four datasets, the headline arms
+    # filter: three datasets, the headline arms
     for ds, sw in (
         ("goodreads", "c0_genre"),
         ("arxiv", "c0_maincat"),
-        ("yfcc10m", "tags_and"),
         ("pubmed", "c0_mesh"),
     ):
         g = _group(f"{ds}-v1v2", ["linr_v1_filter_mask", "linr_v2"], 0)
@@ -967,7 +966,7 @@ def test_every_paper_exhibit_is_produced_from_a_schema_4_campaign_tree(campaign)
         "figures/fig-f4a-bloomwidth.png",
         "figures/fig-f4b-codesign.png",
         "matched_recall.json",
-        *(f"tables/tab-t2_{d}.tex" for d in ("goodreads", "arxiv", "yfcc10m", "pubmed")),
+        *(f"tables/tab-t2_{d}.tex" for d in ("goodreads", "arxiv", "pubmed")),
     } <= names
     assert c.prov["status"] == {"failed": 1, "ok": c.prov["n_records"] - 2, "partial": 1}
     for p in c.written:

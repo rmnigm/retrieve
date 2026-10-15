@@ -55,19 +55,13 @@ def test_official_config_from_bloom_path(params, bloom_path):
 
 @pytest.mark.parametrize(
     ("algo", "filter_kind", "backend"),
-    [("silvertorch", "bloom", "torch"), ("silvertorch", "clause", "official"),
-     ("silvertorch", "clause", "triton"), ("linr_v3", "bloom", "triton")],
+    [("silvertorch", "bloom", "torch"), ("silvertorch", "bloom", "triton"),
+     ("silvertorch", "clause", "official"), ("linr_v3", "bloom", "triton")],
 )  # fmt: skip
 def test_official_config_rejects_bloom_path_elsewhere(algo, filter_kind, backend):
     with pytest.raises(ValueError, match="bloom_path applies to"):
         A.official_config(algo, filter_kind, backend, {"bloom_path": "full"})
     assert A.official_config(algo, filter_kind, backend, {"n_probe": 4}) is None
-
-
-def test_bloom_path_on_triton_is_the_layers_own():
-    """C5-OURS: on silvertorch / bloom / triton ``bloom_path`` is a SilverTorch kwarg, not an
-    ``OfficialConfig``."""
-    assert A.official_config("silvertorch", "bloom", "triton", {"bloom_path": "full"}) is None
 
 
 def test_official_config_recheck():
@@ -187,7 +181,7 @@ def test_linr_v3_k_bits():
     assert m(x[:6])[0].shape == (6, 4)
 
 
-@pytest.mark.parametrize("fk", ["clause", "bloom"])
+@pytest.mark.parametrize("fk", ["clause"])
 @pytest.mark.parametrize("seed", [0, 1])
 @torch.inference_mode()
 def test_linr_v3_k_bits_at_d_is_the_default_build(fk, seed):
@@ -246,7 +240,7 @@ def _postfilter_reference(x, q, mask, k: int, alpha: int):
     return ids, sc
 
 
-@pytest.mark.parametrize("fk", ["clause", "bloom"])
+@pytest.mark.parametrize("fk", ["clause"])
 @torch.inference_mode()
 def test_postfilter_equals_the_torch_reference(fk):
     x, q, attrs, qa = _data()
@@ -271,7 +265,8 @@ def test_postfilter_equals_the_torch_reference(fk):
 def test_postfilter_refusals():
     x, _, attrs, _ = _data()
     f = A.build_filter("clause", attrs, backend="torch")
-    for fk, backend in (("none", "torch"), ("clause", "triton"), ("clause", "official")):
+    for fk, backend in (("none", "torch"), ("bloom", "torch"), ("clause", "triton"),
+                        ("clause", "official")):  # fmt: skip
         with pytest.raises(ValueError, match="no code path"):
             A.build("postfilter", x, k=4, backend=backend, filter_kind=fk, filter_mod=f)
     m = A.build("postfilter", x, k=4, backend="torch", filter_kind="clause", filter_mod=f,

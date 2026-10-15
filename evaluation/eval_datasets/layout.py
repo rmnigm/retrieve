@@ -105,7 +105,7 @@ def check_items_aligned(n_items: int, n_attrs: int, *, what: str) -> None:
 def prefix_problem(meta: Path, expected: str) -> str | None:
     """The prefix policy, in one place: a ``*.meta.json`` sidecar must carry a ``prefix`` key
     equal to the nomic prefix the harness expects **or explicitly ``null``** — the encoder has
-    no prefix concept (YFCC's CLIP descriptors, MedCPT's precomputed vectors), a declared fact
+    no prefix concept (MedCPT's precomputed vectors), a declared fact
     rather than an omission. A sidecar *without* the key is a problem: it cannot be told apart
     from a forgotten prefix. Returns the message, or ``None`` when the sidecar is fine."""
     with open(meta) as f:

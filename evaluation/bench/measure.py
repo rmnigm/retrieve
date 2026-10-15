@@ -453,10 +453,10 @@ RANGE_PREFIX = "## "  # profiler range annotations booked as device events (comp
 
 
 # Like-for-like kernel groups for T3; a kernel's group is the first whose substrings its
-# name contains (evaluation.md § Measurement protocol). Our scorer fuses the bloom test; Meta's
-# scoring is process_cluster + payload kernels, its bloom test bloom_search kernels: all "scorer".
+# name contains (evaluation.md § Measurement protocol). Meta's scoring is the process_cluster +
+# payload kernels, its bloom test the bloom_search kernels: all "scorer".
 KERNEL_SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("scorer", ("_codesigned_probe_score", "::fused_kmean_ann::", "::bloom_search::")),
+    ("scorer", ("::fused_kmean_ann::", "::bloom_search::")),
     ("topk", ("::mbtopk::", "::sbtopk::", "radixSortKVInPlace", "bitonicSortKVInPlace")),
     ("epilogue", ("gpu_index_kernel", "_scatter_gather_elementwise_kernel")),
 )

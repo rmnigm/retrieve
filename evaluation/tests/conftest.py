@@ -104,7 +104,7 @@ def tiny_configs(tmp_path: Path) -> tuple[Path, Path]:
         "    - {algo: linr_v3, backends: [torch], query: {candidate_pool: [8]}}\n"
         "e2e1:\n  datasets: [tiny]\n  filter_kinds: [none, clause]\n  ks: [2, 4]\n"
         "  batch_sizes: [1, 2]\n  arms: [{algo: linr_v1_filter_mask, backends: [torch]}]\n"
-        "postfilter:\n  datasets: [tiny]\n  filter_kinds: [clause, bloom]\n  ks: [2, 4]\n"
+        "postfilter:\n  datasets: [tiny]\n  filter_kinds: [clause]\n  ks: [2, 4]\n"
         "  batch_sizes: [1, 2]\n  arms:\n    - {algo: linr_v1_filter_mask, backends: [torch]}\n"
         "    - {algo: postfilter, backends: [torch], query: {alpha: [1, 2]}}\n"
         "arms:\n  datasets: [tiny]\n  filter_kinds: [clause, bloom]\n  ks: [2, 4]\n"

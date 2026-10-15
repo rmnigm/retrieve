@@ -15,7 +15,7 @@ Inputs:
   same columns (scalars only), coded with the items' vocabulary; a value no item has is
   ``-1``, which turns that clause off for that query.
 - **targets** (optional): ``.npy`` ``[U]`` 0-indexed item rows. Without them, each query's
-  target is its exact unfiltered top-1 item (yfcc10m's convention).
+  target is its exact unfiltered top-1 item.
 
 A clause is ``NAME[=COLUMN][!]``: ``COLUMN`` defaults to ``NAME``, and ``!`` makes the clause
 reverse (passes items *without* the query's value). A sweep is ``NAME=CLAUSE,CLAUSE``; the
