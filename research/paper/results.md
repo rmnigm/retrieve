@@ -26,7 +26,7 @@ batch, with SilverTorch and LiNR timed in the same process.
 
 ## 1. Quality, speed and memory under filtering
 
-Table 1 shows each method on one real filter per dataset, at k = 100 and a batch of 16. SilverTorch appears at its
+Table 1 shows each method on one real filter at a time, at k = 100 and a batch of 16. SilverTorch appears at its
 default of 24 probes and at the fastest setting that reaches recall 0.90 and 0.95. LiNR V3 appears at the smallest pool
 (as a share of the passing items) that reaches the same targets. Speed-up is against exact LiNR V1. Three filters are
 shown here; the page has every filter and batch size.
@@ -79,26 +79,25 @@ filter but one. The exception is PubMed's MeSH filter, where only 0.02 % of item
 Table 2 holds SilverTorch to a recall target and compares it with the fastest LiNR that reaches the same target: exact V1
 or V2, or V3 at its smallest sufficient pool. Each cell shows how many times faster SilverTorch is (bold: SilverTorch
 faster). "Share" is the fraction of clusters SilverTorch probes. ◐: half or more of the clusters; "top": not reached
-within three quarters, with the best recall reached. Real filters, k = 100; the page has the full grid (k = 100, 1000,
-2048, synthetic filters).
+within three quarters, with the best recall reached. Real filters, k = 100; Table 2b gives the synthetic filters, and the page has the full grid (k = 100, 1000, 2048).
 
 **Table 2.**
 
 | Dataset · filter | Pass | 0.90: share | bs 1 | bs 16 | bs 64 | 0.95: share | bs 1 | bs 16 | bs 64 |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
 | Goodreads 0.8M · `c0_genre` | 33 % | 0.80 % | **1.29×** | **2.98×** | **6.18×** | 1.6 % | **1.27×** | **2.98×** | **5.63×** |
-| LAION 1M · `c0_domain` | 0.95 % | 50 % ◐ | 0.92× | **1.09×** | 0.75× | 75 % ◐ | 0.72× | 0.78× | 0.52× |
 | LAION 1M · `tags4` | 0.27 % | 50 % ◐ | **1.04×** | 0.71× | 0.44× | 75 % ◐ | 0.80× | 0.49× | 0.29× |
+| LAION 1M · `c0_domain` | 0.95 % | 50 % ◐ | 0.92× | **1.09×** | 0.75× | 75 % ◐ | 0.72× | 0.78× | 0.52× |
 | arXiv 3M · `all4` | 0.94 % | 25 % | **3.22×** | **4.96×** | **4.77×** | 25 % | **3.22×** | **3.43×** | **2.82×** |
 | arXiv 3M · `c0_maincat` | 14 % | 3.1 % | **2.03×** | **6.72×** | **5.97×** | 25 % | **2.02×** | **2.41×** | **1.69×** |
 | arXiv 3M · `c3_nversions` | 44 % | 3.1 % | **2.82×** | **6.50×** | **5.72×** | 25 % | **2.64×** | **1.78×** | **1.17×** |
-| LAION 3M · `c0_domain` | 0.95 % | 50 % ◐ | 0.76× | **1.35×** | 0.87× | 75 % ◐ | 0.64× | **1.01×** | 0.60× |
 | LAION 3M · `tags4` | 0.27 % | 25 % | **1.94×** | **2.19×** | **1.41×** | top 0.91 | – | – | – |
-| LAION 10M · `c0_domain` | 0.95 % | 50 % ◐ | 0.99× | **1.33×** | 0.78× | 75 % ◐ | 0.79× | 0.95× | 0.54× |
+| LAION 3M · `c0_domain` | 0.95 % | 50 % ◐ | 0.76× | **1.35×** | 0.87× | 75 % ◐ | 0.64× | **1.01×** | 0.60× |
 | LAION 10M · `tags4` | 0.27 % | 25 % | **4.22×** | **3.78×** | **2.26×** | 25 % | **2.17×** | **1.50×** | 0.86× |
+| LAION 10M · `c0_domain` | 0.95 % | 50 % ◐ | 0.99× | **1.33×** | 0.78× | 75 % ◐ | 0.79× | 0.95× | 0.54× |
 | PubMed 10M · `c0_mesh` | 0.02 % | 12 % | **3.20×** | **7.97×** | **7.87×** | 25 % | **1.35×** | **2.83×** | **2.47×** |
-| LAION 30M · `c0_domain` | 0.95 % | 25 % | **3.03×** | **4.38×** | **2.78×** | top 0.91 | – | – | – |
 | LAION 30M · `tags4` | 0.27 % | 12 % | **7.39×** | **7.02×** | **4.38×** | 25 % | **5.15×** | **3.81×** | **2.29×** |
+| LAION 30M · `c0_domain` | 0.95 % | 25 % | **3.03×** | **4.38×** | **2.78×** | top 0.91 | – | – | – |
 
 Three patterns stand out. **First**, the share of clusters SilverTorch must probe decides the outcome. Over all 276 cells,
 183 reach the target within a quarter of the clusters, and there SilverTorch beats the best LiNR in 181, with a median of
@@ -107,6 +106,42 @@ clusters, and SilverTorch wins 13 of those. The other 42 do not reach it even at
 cases are filters whose passing items are thinly spread across clusters: LAION's domain filter, and its tag filter on
 the small LAION subsets. This is consistent with the classic shortage of candidates: a query's nearest clusters hold few items that pass, so recall has to be bought with more probes, while an exact scan pays the same price whatever the filter.
 **Third**, SilverTorch's lead narrows at a batch of 64 (on LAION 30M's tag filter: 7.4× at one query, 4.4× at 64). This is consistent with V1's full scan being one matrix product shared by the whole batch, while each SilverTorch query probes its own clusters and so amortises less.
+
+**Table 2b.** The same, on the synthetic filters (items pass at random).
+
+| Dataset · filter | Pass | 0.90: share | bs 1 | bs 16 | bs 64 | 0.95: share | bs 1 | bs 16 | bs 64 |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Goodreads-synth 0.8M · random 0.1 % | 0.10 % | 50 % ◐ | **1.06×** | **1.60×** | **1.38×** | 50 % ◐ | **1.06×** | **1.60×** | **1.38×** |
+| Goodreads-synth 0.8M · random 1 % | 1.0 % | 6.2 % | **1.06×** | **2.78×** | **3.97×** | 12 % | **1.06×** | **2.74×** | **2.58×** |
+| Goodreads-synth 0.8M · random 10 % | 10.0 % | 1.6 % | **1.12×** | **2.88×** | **5.87×** | 3.1 % | **1.11×** | **2.88×** | **5.10×** |
+| Goodreads-synth 0.8M · no filter | 100 % | 1.6 % | **1.63×** | **2.89×** | **5.85×** | 1.6 % | **1.63×** | **2.88×** | **5.26×** |
+| arXiv-synth 3M · random 0.1 % | 0.10 % | 25 % | **1.66×** | **5.05×** | **4.39×** | top 0.94 | – | – | – |
+| arXiv-synth 3M · random 1 % | 1.0 % | 25 % | **1.70×** | **5.71×** | **5.36×** | 25 % | **1.70×** | **4.03×** | **3.19×** |
+| arXiv-synth 3M · random 10 % | 10.0 % | 6.2 % | **1.96×** | **5.80×** | **5.21×** | 12 % | **1.95×** | **4.23×** | **3.20×** |
+| arXiv-synth 3M · no filter | 100 % | 3.1 % | **4.27×** | **5.72×** | **4.38×** | 25 % | **3.55×** | **1.37×** | 0.83× |
+| LAION-synth 10M · random 0.1 % | 0.10 % | 25 % | **3.11×** | **5.46×** | **3.86×** | top 0.94 | – | – | – |
+| LAION-synth 10M · random 1 % | 0.99 % | 12 % | **3.84×** | **6.87×** | **4.85×** | 25 % | **2.92×** | **3.96×** | **2.55×** |
+| LAION-synth 10M · random 10 % | 10 % | 6.2 % | **5.54×** | **7.86×** | **5.78×** | 25 % | **3.15×** | **2.89×** | **1.74×** |
+| LAION-synth 10M · no filter | 100 % | 1.6 % | **13.6×** | **6.83×** | **4.68×** | 6.2 % | **9.30×** | **2.39×** | **1.36×** |
+| PubMed-synth 10M · random 0.1 % | 0.10 % | 12 % | **3.32×** | **6.70×** | **7.73×** | 25 % | **1.35×** | **2.20×** | **2.40×** |
+| PubMed-synth 10M · random 1 % | 1.0 % | 12 % | **2.95×** | **6.04×** | **6.19×** | top 0.93 | – | – | – |
+| PubMed-synth 10M · random 10 % | 10.0 % | 6.2 % | **5.82×** | **9.90×** | **4.83×** | top 0.92 | – | – | – |
+| PubMed-synth 10M · no filter | 100 % | 1.6 % | **23.0×** | **5.77×** | **2.57×** | top 0.91 | – | – | – |
+| LAION-synth 30M · random 0.1 % | 0.10 % | 25 % | **4.57×** | **7.68×** | **5.77×** | 25 % | **3.08×** | **4.35×** | **3.06×** |
+| LAION-synth 30M · random 1 % | 1.0 % | 6.2 % | **6.36×** | **12.9×** | **9.45×** | 12 % | **4.11×** | **6.13×** | **4.16×** |
+| LAION-synth 30M · random 10 % | 10 % | 3.1 % | **10.2×** | **14.2×** | **9.29×** | 12 % | **5.21×** | **4.36×** | **2.48×** |
+| LAION-synth 30M · no filter | 100 % | 1.6 % | **33.9×** | **9.83×** | **5.88×** | 6.2 % | **17.3×** | **2.86×** | **1.56×** |
+
+The synthetic filters separate the pass rate from how the passing items are spread. They pass items at random, so a
+query's nearest clusters hold their fair share of passing items at any rate, and SilverTorch beats the best LiNR at
+recall 0.90 on every synthetic filter and batch size (1.1–34×). The share of clusters it needs falls as more items pass:
+on LAION-synth 30M from a quarter at 0.1 % to 3 % at 10 % and 1.6 % with no filter. At 10 % on the 10–30 M sets it is
+4.8–14× faster than the best LiNR, against 0.8–7.4× on LAION's real filters at the same sizes, which pass 1 % or less.
+Rarity alone does not explain the gap: from 3 M items up, the random 0.1 % filter needs at most a quarter of the clusters, consistent
+with the real filters' passing items being thin in a query's nearest clusters, not merely rare. At 0.95 the lead
+shrinks, most at a batch of 64 with no filter (0.8–1.6×), and PubMed-synth does not reach 0.95 at 1 % or more (top
+0.91–0.93), consistent with int8 scores limiting recall on PubMed, as on its broad real filters. Between 10 % and 100 %
+SilverTorch was timed only at these four rates; the 20 % and 50 % filters were run for LiNR alone (Figure 2).
 
 ## 3. Effect of batch size on speed
 

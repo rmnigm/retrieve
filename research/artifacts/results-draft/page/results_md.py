@@ -79,27 +79,39 @@ T = {}
 T["T1a"] = t1("pubmed|c0_mesh", 16)
 T["T1b"] = t1("laion30m|tags4", 16)
 T["T1c"] = t1("laion1m|c0_domain", 16)
-T["T2"] = md(
-    [
-        "Dataset · filter",
-        "Pass",
-        "0.90: share",
-        "bs 1",
-        "bs 16",
-        "bs 64",
-        "0.95: share",
-        "bs 1",
-        "bs 16",
-        "bs 64",
-    ],
-    [
-        [f"{r['ds']} · `{r['sweep']}`", pct(r["pass_rate"]), share(r, 0.9)]
-        + [sp(r["sp0.9"].get(str(b))) for b in (1, 16, 64)]
-        + [share(r, 0.95)]
-        + [sp(r["sp0.95"].get(str(b))) for b in (1, 16, 64)]
-        for r in D["msum"]
-    ],
-)
+
+
+def t2(syn):
+    return md(
+        [
+            "Dataset · filter",
+            "Pass",
+            "0.90: share",
+            "bs 1",
+            "bs 16",
+            "bs 64",
+            "0.95: share",
+            "bs 1",
+            "bs 16",
+            "bs 64",
+        ],
+        [
+            [
+                f"{r['ds']} · {r['sweep'] if r['syn'] else '`' + r['sweep'] + '`'}",
+                pct(r["pass_rate"]),
+                share(r, 0.9),
+            ]
+            + [sp(r["sp0.9"].get(str(b))) for b in (1, 16, 64)]
+            + [share(r, 0.95)]
+            + [sp(r["sp0.95"].get(str(b))) for b in (1, 16, 64)]
+            for r in D["msum"]
+            if r["syn"] == syn
+        ],
+    )
+
+
+T["T2"] = t2(False)
+T["T2s"] = t2(True)
 
 
 def us(v):
