@@ -86,7 +86,11 @@ Staging is **pull → use → prune → re-pull**, never hoard.
 The private Hub quota is not exposed by the API; it measures between ~95.8
 and 116 GB. Deleting a path frees no private quota until the repo's history
 is squashed (`HfApi().super_squash_history`): usage after the results
-cleanup is 95.76 GB, of which 84.09 GB are current files.
+cleanup was 95.76 GB. Current files in the dataset repos (measured
+2026-10-15, after the YFCC legs and `chains/` left `pinkmeme/eval-results` and
+`pinkmeme/eval-yfcc10m`, `eval-yambda-5b` and `eval-kuairand` were deleted):
+55.8 GB — `eval-yambda-500m` 19.6, `eval-pubmed` 17.2, `eval-goodreads-work-id`
+9.7, `eval-results` 6.3, `eval-arxiv-papers` 3.1 GB; the rest under 0.01 GB.
 
 A layout that follows the rule on a network-volume pod:
 
