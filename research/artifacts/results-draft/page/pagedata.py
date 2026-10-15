@@ -336,9 +336,9 @@ if len(c3):
     claims.append(
         [
             "C3",
-            "part",
-            "far smaller",
-            f"<b>LiNR: native masking is about 100× slower than a custom kernel.</b> Against plain PyTorch the custom kernel is {rng(pt[pt.perf_bs == 1].torch_over_triton, 1)}× faster at one query and {rng(pt[pt.perf_bs == 16].torch_over_triton, 1)}× at bs 16 (Goodreads-synth, timed eagerly). "
+            "no",
+            "does not hold as stated",
+            f"<b>LiNR: native masking is about 100× slower than a custom kernel.</b> Same direction, far smaller. Against plain PyTorch the custom kernel is {rng(pt[pt.perf_bs == 1].torch_over_triton, 1)}× faster at one query and {rng(pt[pt.perf_bs == 16].torch_over_triton, 1)}× at bs 16 (Goodreads-synth, timed eagerly). "
             f"Against torch.compile (max-autotune) it is {rng(ma[ma.perf_bs == 1].torch_over_triton)}× at one query, so compiled PyTorch is sometimes faster, and {rng(ma[ma.perf_bs == 16].torch_over_triton)}× at bs 16, across Goodreads, arXiv, PubMed and the synthetic sets.",
         ]
     )
@@ -349,7 +349,7 @@ claims.append(
     [
         "C4",
         "ok",
-        "holds",
+        "holds on Meta's bloom as adapted",
         f"<b>SilverTorch bloom filter: about 0.067 % false positives at 1024 bits.</b> At Meta's default of 1024 bits and 5 hashes, SilverTorch's own bloom lets through at most {100 * f1024[f1024.k_hash == 5].fp_rate_mean.max():.6f} % of the items that fail the filter ({100 * f1024.fp_rate_mean.max():.4f} % with 3 hashes; PubMed's MeSH filter), and none on Goodreads and arXiv. "
         f"At the timed settings, at most {D['fp']['share_max']} % of the items it passes are false, and recall moves by at most {D['fp']['cost_max']} against the exact filter. Narrower filters let more through: {100 * fw[(fw.dataset == 'pubmed') & (fw.m_bits == 64)].fp_rate_mean.max():.1f} % on PubMed at 64 bits, where recall at a fixed probe setting falls to {pm.min():.2f} from {pm.max():.2f}.",
     ]
@@ -361,7 +361,7 @@ if len(c5n.size()):
         [
             "C5",
             "part",
-            "at 10–30 M only",
+            "wins at 10–30 M only",
             f"<b>SilverTorch co-design: 1.79–2.15× faster.</b> On Meta's code as published, filtering inside the probed clusters is {c5n.median()[30_000_000]:.2f}× faster (median) than filtering the whole index first at 30 M items, "
             f"{c5n.median()[10_000_000]:.2f}× at 10 M, and slower below that ({c5n.median()[1_000_000]:.2f}× at 1 M).",
         ]
