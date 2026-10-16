@@ -41,5 +41,9 @@ Stage 3 runs at bs 16 only; bs 1 would have added more than an hour.
 with its own official-fork build. laion10m-synth reads pod e's copy of laion10m. In FR, laion10m was timed on pod 1. Every SilverTorch
 / LiNR ratio in this leg is read inside one run on one copy.
 
+**Unstable cells.** Stages 1 and 2: none. Stage 3: **20 probe-sweep cells unstable (n_probe <= 256), kept flagged, not rerun**. They are
+SilverTorch at sub-millisecond latency at bs 16, the same pattern earlier one-time reruns could not stabilise (10 / 11 stayed unstable);
+the user's budget had run out (controller, 2026-10-16). FR's policy applies: the records keep their `unstable` flag.
+
 Raw outputs are on the Hub at `fr/synth-mid-curve-pode-s0`, `fr/synth-mid-timed-pode-s0` and `fr/synth-mid-probesweep-pode-s0`
-(plus `-rerun` for unstable cells). Their manifests are in the hub index.
+(no `-rerun`). Their manifests are in the hub index.
