@@ -9,9 +9,9 @@ behind an open dependency.
 
 `retrieve/` is a GPU retrieval library (PyTorch + Triton; package
 `torchretrieve`, not yet on PyPI (roadmap F4); imports as `retrieve`). `evaluation/` is the benchmark and
-training harness that produces the numbers for a master's thesis
-(its sources are kept out of this repository) and, now, a reproducibility paper
-([`research/decisions.md`](research/decisions.md#goal-and-scheduling)). It is a uv
+training harness that produces the numbers for a master's thesis and a
+reproducibility paper (both kept outside this repository;
+[`research/decisions.md`](research/decisions.md#goal-and-scheduling)). It is a uv
 workspace with one `.venv` at the root; `README.md` has the layout and the
 install commands.
 
@@ -30,9 +30,8 @@ Naming that must stay straight in code, docs and prose:
   CHANGES)", never "a fork". `backend="torch"` is reserved for a pure-torch
   SilverTorch path; none exists.
 - **Meta's code as published** (pinned `21aa35e`, `backend="official"` while
-  it was in the workspace) is the "as published" column of
-  [Meta as published vs adapted](research/paper/meta-published-vs-adapted.md),
-  not an arm of the study. It left the library and the workspace at RENAME;
+  it was in the workspace) was the bit-exact parity reference, not an arm
+  of the study. It left the library and the workspace at RENAME;
   its last bit-exact parity run against the adapted code stands behind the
   tag `meta-published-parity-final`. Records keep the names they were
   written with (`official-fork`, `official`); `bench merge` maps them.
@@ -45,7 +44,7 @@ Naming that must stay straight in code, docs and prose:
   with it (user, 2026-10-15): LiNR runs the exact filter only, and the
   bloom in the study is Meta's, inside SilverTorch.
 - **LiNR** variants are V1–V3 as in the paper (our int8 V4 left the
-  library in campaign v2; [decisions](research/decisions.md#campaign-v2-user-2026-10-08)).
+  library in campaign v2; [decisions](research/decisions.md#campaign-design)).
 
 ## Where things are documented
 
@@ -54,8 +53,7 @@ page frontmatter, tags, links, the contradiction policy). Both say what is
 true **now**; no history.
 
 - **`research/`** is the agentic research wiki: the queue, the decisions,
-  what was measured, the paper drafts, the process. Not for users of the
-  release. [`research/index.md`](research/index.md) lists every page.
+  what was measured, the process. Not for users of the release. [`research/index.md`](research/index.md) lists every page.
 - **`docs/`** is the released project's documentation (how the library and
   the harness work), and [`retrieve/docs/`](retrieve/docs/) the library user
   guide that ships in the sdist. [`docs/index.md`](docs/index.md) lists them.
@@ -81,22 +79,7 @@ In `research/`:
   they can be re-derived; the raw outputs (records, JSON dumps, logs) are
   on the Hub under `artifacts/<plan>/`, listed in
   [`research/artifacts/hub-index.md`](research/artifacts/hub-index.md).
-- `research/paper/`: the reproducibility paper's own sections, each number
-  traced to [`validation.md`](research/validation.md) or an artifact:
-  [`claims.md`](research/paper/claims.md) (the papers' claims and C1–C7 for
-  this study),
-  [`reproduction-deviations.md`](research/paper/reproduction-deviations.md) (paper
-  vs us, Meta's code vs Meta's paper, defects reproducing found in our own
-  code, and the unexplained residuals),
-  [`meta-published-vs-adapted.md`](research/paper/meta-published-vs-adapted.md)
-  (what our adaptation of Meta's code changed, and the parity gate that
-  holds it to the published code),
-  [`provenance-and-disclosure.md`](research/paper/provenance-and-disclosure.md)
-  (hardware, software, what may be cited, what was and was not compared),
-  [`results.md`](research/paper/results.md) (the results draft),
-  [`abstract.md`](research/paper/abstract.md) (the submitted abstract),
-  [`ecir-criteria.md`](research/paper/ecir-criteria.md) and
-  [`release-and-licenses.md`](research/paper/release-and-licenses.md).
+- The paper is kept outside this repository.
 - [`research/environment/storage.md`](research/environment/storage.md): the
   GPU pods' disks, what lives where, the budget, the Hub quota.
 - `articles/`: pandoc renderings of the papers. Frozen; cite, never edit.
