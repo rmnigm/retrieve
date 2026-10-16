@@ -583,6 +583,7 @@ class TestKMeansInit:
     ([decisions](research/decisions.md § Library): every recorded number was taken on it)."""
 
     def test_default_is_random(self):
+        require_official("official-fork")
         assert SilverTorch(k=1, n_lists=1, n_probe=1).kmeans_init == "random"
 
     @pytest.mark.parametrize("backend", BACKENDS)

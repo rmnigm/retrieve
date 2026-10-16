@@ -87,9 +87,6 @@ class SilverTorch(RetrievalModule):
                 f"filter_mode must be 'none', 'bloom', or 'exact', got {filter_mode!r}"
             )
         check_backend(backend, SilverTorchBackend)
-        official_mod.ensure_loaded(backend)
-        if backend == "official":
-            ops_for("triton")  # exact mode packs our clause_mask into Meta's bit mask
         self.official: OfficialConfig = official if official is not None else OFFICIAL_DEFAULT
         if backend == "official-fork" and self.official.bloom_path == "full":
             raise ValueError(
@@ -122,6 +119,9 @@ class SilverTorch(RetrievalModule):
             self.m_bits = 0
             self.k_hash = 0
 
+        official_mod.ensure_loaded(backend)
+        if backend == "official":
+            ops_for("triton")  # exact mode packs our clause_mask into Meta's bit mask
         self.filter_mode: FilterMode = filter_mode
         self.k = k
         self.n_lists = n_lists
