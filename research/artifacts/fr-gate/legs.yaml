@@ -1,0 +1,134 @@
+# FR-GATE: the final run's planned legs at the final scope (README.md). One entry per Hub subtree that carries the leg's
+# records; `supplements` are the `-rerun` subtrees whose records count toward the same cells. `config` names a config dir of
+# `config_dirs` (pod e's paths: the run's own dirs, plus two built by README.md for the TUNE-EXT picks); `tree` the tag whose
+# `bench.config.load_matrix` resolves the suites (fr = final-freeze b3bddc88, clause = final-freeze-clause 500284eb).
+# `files` legs carry no records: the gate checks the listed files exist.
+config_dirs:
+  fr: /scratch/fr/config
+  clause: /scratch/fr/config-clause
+  synth-mid: /scratch/fr/synth-mid/config
+  ext: /scratch/fr-gate/cfg-ext
+  clause-ext: /scratch/fr-gate/cfg-clause-ext
+trees:
+  fr: {tag: final-freeze, path: /scratch/wt/fr, venv: /venvs/fr}
+  clause: {tag: final-freeze-clause, path: /scratch/wt/fr-clause, venv: /venvs/fr-clause}
+defaults: {seed: 0, config: fr, tree: fr}
+d128_bloom: &d128_bloom [fr-timed-bloom-d128, fr-timed-bloom-k1000-d128, fr-timed-bloom-k2048-d128]
+d256_bloom: &d256_bloom [fr-timed-bloom-d256, fr-timed-bloom-k1000-d256]
+d768_bloom: &d768_bloom [fr-timed-bloom-d768, fr-timed-bloom-k1000-d768, fr-timed-bloom-k2048-d768]
+linr3: &linr3 [fr-linr-bs64, fr-linr-bs256, fr-linr-k2048]
+legs:
+  # ---- pod e, seed 0: stage 1
+  - {name: curve-d128-pode-s0, suites: [fr-curve-d128], datasets: [goodreads, arxiv]}
+  - {name: curve-d256-pode-s0, suites: [fr-curve-d256], datasets: [laion30m]}
+  - {name: curve-synth-d128-pode-s0, suites: [fr-curve-synth-s0-d128], datasets: [goodreads-synth, arxiv-synth, arxiv-corr-synth]}
+  - {name: curve-synth-d256-pode-s0, suites: [fr-curve-synth-s0-d256], datasets: [laion30m-synth]}
+  - {name: v3pool-pode-s0, supplements: [v3pool-pode-s0-rerun], suites: [fr-v3pool], datasets: [goodreads, arxiv, pubmed]}
+  - {name: v3pool-laion-pode-s0, suites: [fr-v3pool-laion], datasets: [laion30m]}
+  - {name: yambda-pode-s0, suites: [fr-yambda], datasets: [yambda-500m]}
+  - {name: linr-pode-s0, suites: *linr3, datasets: [goodreads, arxiv]}
+  - {name: linr-corr-pode-s0, suites: [fr-linr-corr], datasets: [arxiv-corr-synth]}
+  - {name: linr-synth-pubmed-pode-s0, suites: [fr-linr-synth-pubmed], datasets: [pubmed-synth]}
+  - {name: bloomwidth-pode-s0, suites: [fr-bloomwidth], datasets: [goodreads, arxiv, pubmed]}
+  # ---- pod e, seed 0: stage 2 (timed bloom at the picks)
+  - {name: timed-bloom-d256-pode-s0, suites: *d256_bloom, datasets: [laion30m]}
+  - {name: timed-bloom-d128-pode-s0, suites: *d128_bloom, datasets: [goodreads, arxiv]}
+  - {name: timed-bloom-synth-d256-pode-s0, suites: [fr-timed-bloom-synth-s0-d256], datasets: [laion30m-synth]}
+  - {name: timed-bloom-synth-d128-pode-s0, suites: [fr-timed-bloom-synth-s0-d128], datasets: [goodreads-synth, arxiv-synth]}
+  # ---- pod e, seed 0: final pass (queue.sh FINAL, pode)
+  - {name: final-filter-pode-s0, supplements: [final-filter-pode-s0-rerun], suites: [filter], datasets: [goodreads, arxiv]}
+  - {name: final-synth-pode-s0, suites: [synth], datasets: [goodreads-synth, arxiv-synth, arxiv-corr-synth]}
+  - {name: final-c3-pode-s0, suites: [c3], datasets: [goodreads-synth, arxiv-synth]}
+  - {name: final-c3-real-pode-s0, suites: [c3-real], datasets: [goodreads, arxiv]}
+  - {name: final-codesign-pode-s0, suites: [codesign], datasets: [arxiv, goodreads]}
+  - {name: final-bloomwidth-pode-s0, suites: [bloomwidth], datasets: [goodreads, arxiv, pubmed]}
+  - {name: final-bloomwidth-timed-pode-s0, suites: [bloomwidth-timed], datasets: [goodreads, arxiv, pubmed]}
+  - {name: final-v3bits-pode-s0, suites: [v3bits], datasets: [goodreads-synth, goodreads]}
+  - {name: final-seeds-c1-pode-s0, suites: [seeds-c1], datasets: [arxiv-synth]}
+  - {name: final-deep-pode-s0, suites: [deep], datasets: [goodreads, arxiv]}
+  - {name: final-h2h-pode-s0, suites: [h2h], datasets: [goodreads, arxiv]}
+  # ---- pod e: untimed, TUNE-EXT, clause row (lite), SYNTH-MID
+  - {name: untimed-pode-s0, files: [grade_bloom-d128.csv, grade_bloom-d256.csv, fp_adapted.csv, points-d128.json, points-d256.json],
+     note: "ceiling_adapted crashed here (FAILED); its rerun is untimed-ceil-pode-s0"}
+  - {name: untimed-ceil-pode-s0, files: [ceiling], min_files_in: {ceiling: 17}}
+  - {name: ext-curve-synth-pode-s0, config: ext, suites: [fr-ext-curve-synth-pode-d128], datasets: [goodreads-synth]}
+  - {name: ext-timed-bloom-synth-pode-s0, config: ext, suites: [fr-ext-timed-bloom-synth-pode-d128], datasets: [goodreads-synth]}
+  - {name: ext-grade-pode-s0, files: [grade_bloom-d128.csv, grade-pode-d128.json]}
+  - {name: ext-clause-synth-pode-s0, config: ext, suites: [fr-ext-timed-clause-synth-pode-d128], datasets: [goodreads-synth],
+     note: "the final pick_ext.py's clause-row suite for the goodreads-synth TUNE-EXT cell; no FR leg ran it, so the gate found it missing and the user had it run at final-freeze on pod e on 2026-10-16 (rulings note 2026-10-16-093000000)"}
+  - {name: timed-clause-lite-d128-pode-s0, config: clause, tree: clause, suites: [fr-timed-clause-lite-d128], datasets: [goodreads, arxiv]}
+  - {name: timed-clause-lite-d256-pode-s0, config: clause, tree: clause, suites: [fr-timed-clause-lite-d256], datasets: [laion30m]}
+  - {name: synth-mid-probesweep-pode-s0, config: synth-mid, suites: [fr-synth-mid-probesweep-d256], datasets: [laion30m-synth]}
+  - {name: synth-mid-curve-pode-s0, config: synth-mid, suites: [fr-synth-mid-curve-d256, fr-synth-mid-v3pool-d256], datasets: [laion10m-synth, laion30m-synth]}
+  - {name: synth-mid-timed-pode-s0, config: synth-mid, suites: [fr-synth-mid-timed-d256], datasets: [laion10m-synth, laion30m-synth]}
+  # ---- pod e cells, seeds 1-2 (variance: timed bloom only; seed 2 ran on pods 1 / f with pod e's inputs)
+  - {name: timed-bloom-d256-pode-s1, seed: 1, suites: *d256_bloom, datasets: [laion30m]}
+  - {name: timed-bloom-d128-pode-s1, seed: 1, suites: *d128_bloom, datasets: [goodreads, arxiv]}
+  - {name: timed-bloom-synth-d256-pode-s1, seed: 1, suites: [fr-timed-bloom-synth-s1-d256], datasets: [laion30m-synth-s1]}
+  - {name: timed-bloom-d256-pode-s2-onpodf, seed: 2, suites: *d256_bloom, datasets: [laion30m]}
+  - {name: timed-bloom-d128-pode-s2-onpod1, supplements: [timed-bloom-d128-pode-s2-onpod1-rerun], seed: 2, suites: *d128_bloom, datasets: [goodreads, arxiv]}
+  - {name: timed-bloom-synth-d128-pode-s2-onpod1, supplements: [timed-bloom-synth-d128-pode-s2-onpod1-rerun], seed: 2,
+     suites: [fr-timed-bloom-synth-s2-d128], datasets: [goodreads-synth-s2, arxiv-synth-s2]}
+  # ---- pod 1, seed 0: stage 1
+  - {name: curve-d768-pod1-s0, suites: [fr-curve-d768], datasets: [pubmed]}
+  - {name: curve-d256-pod1-s0, suites: [fr-curve-d256], datasets: [laion1m, laion3m, laion10m]}
+  - {name: curve-synth-d768-pod1-s0, suites: [fr-curve-synth-s0-d768], datasets: [pubmed-synth]}
+  - {name: curve-synth-d256-pod1-s0, suites: [fr-curve-synth-s0-d256], datasets: [laion1m-synth, laion3m-synth, laion10m-synth]}
+  - {name: v3pool-laion-pod1-s0, supplements: [v3pool-laion-pod1-s0-rerun], suites: [fr-v3pool-laion], datasets: [laion1m, laion3m, laion10m]}
+  - {name: linr-pod1-s0, supplements: [linr-pod1-s0-rerun], suites: *linr3, datasets: [pubmed]}
+  - {name: linr-laion-pod1-s0, suites: [fr-linr-bs64-laion], datasets: [laion1m, laion3m, laion10m, laion30m]}
+  # ---- pod 1, seed 0: stage 2
+  - {name: timed-bloom-d768-pod1-s0, suites: *d768_bloom, datasets: [pubmed]}
+  - {name: timed-bloom-d256-pod1-s0, supplements: [timed-bloom-d256-pod1-s0-rerun], suites: *d256_bloom, datasets: [laion1m, laion3m, laion10m]}
+  - {name: timed-bloom-synth-d768-pod1-s0, supplements: [timed-bloom-synth-d768-pod1-s0-rerun], suites: [fr-timed-bloom-synth-s0-d768], datasets: [pubmed-synth]}
+  - {name: timed-bloom-synth-d256-pod1-s0, supplements: [timed-bloom-synth-d256-pod1-s0-rerun], suites: [fr-timed-bloom-synth-s0-d256], datasets: [laion10m-synth]}
+  # ---- pod 1, seed 0: final pass (queue.sh FINAL, pod1; c7-scorepath and seeds-c7 dropped by the user 2026-10-14 14:00Z)
+  - {name: final-filter-pod1-s0, supplements: [final-filter-pod1-s0-rerun], suites: [filter], datasets: [pubmed]}
+  - {name: final-v3bits-pod1-s0, suites: [v3bits], datasets: [pubmed]}
+  - {name: final-c3-real-pod1-s0, suites: [c3-real], datasets: [pubmed]}
+  - {name: final-c3-pod1-s0, suites: [c3], datasets: [laion30m-synth]}
+  - {name: final-nsweep-pod1-s0, suites: [nsweep], datasets: [laion1m, laion3m, laion10m, laion30m]}
+  - {name: final-nsweep-synth-pod1-s0, supplements: [final-nsweep-synth-pod1-s0-rerun], suites: [nsweep-synth],
+     datasets: [laion1m-synth, laion3m-synth, laion10m-synth, laion30m-synth, arxiv-synth]}
+  - {name: final-nsweep-codesign-pod1-s0, supplements: [final-nsweep-codesign-pod1-s0-rerun], suites: [nsweep-codesign], datasets: [laion1m, laion3m, laion10m, laion30m]}
+  - {name: final-laion30m-pod1-s0, suites: [laion30m], datasets: [laion30m]}
+  - {name: final-laion30m-synth-pod1-s0, suites: [laion30m-synth], datasets: [laion30m-synth]}
+  - {name: final-laion30m-x-pod1-s0, suites: [laion30m-x], datasets: [laion30m]}
+  - {name: final-codesign-laion30m-pod1-s0, supplements: [final-codesign-laion30m-pod1-s0-rerun], suites: [codesign-laion30m], datasets: [laion30m]}
+  - {name: final-seeds-c1-laion30m-pod1-s0, suites: [seeds-c1-laion30m], datasets: [laion30m-synth]}
+  # ---- pod 1: untimed, TUNE-EXT (pod f ran the real-LAION cells), clause row (lite)
+  - {name: untimed-pod1-s0, files: [grade_bloom-d256.csv, grade_bloom-d768.csv, points-d256.json, points-d768.json],
+     note: "ceiling_adapted crashed here (FAILED; rerun = untimed-ceil-pod1-s0); score_gaps.py failed on the absent YFCC data (FAILED), no score_gaps.json"}
+  - {name: untimed-ceil-pod1-s0, files: [ceiling], min_files_in: {ceiling: 7}}
+  - {name: ext-curve-podf-s0, config: ext, suites: [fr-ext-curve-pod1-d256], datasets: [laion1m, laion3m, laion10m]}
+  - {name: ext-curve-synth-pod1-s0, config: ext, suites: [fr-ext-curve-synth-pod1-d256], datasets: [laion1m-synth, laion3m-synth]}
+  - {name: ext-timed-bloom-podf-s0, config: ext, suites: [fr-ext-timed-bloom-pod1-d256], datasets: [laion1m, laion3m, laion10m]}
+  - {name: ext-timed-bloom-k1000-podf-s0, config: ext, suites: [fr-ext-timed-bloom-k1000-pod1-d256], datasets: [laion1m, laion3m, laion10m]}
+  - {name: ext-timed-clause-podf-s0, config: ext, suites: [fr-ext-timed-clause-pod1-d256], datasets: [laion1m, laion3m, laion10m]}
+  - {name: ext-clause-synth-pod1-s0, supplements: [ext-clause-synth-pod1-s0-rerun], config: clause-ext, tree: clause,
+     suites: [fr-ext-timed-clause-synth-pod1-d256], datasets: [laion1m-synth, laion3m-synth]}
+  - {name: ext-grade-bloom-podf-s0, files: [grade_bloom-d256.csv, points-d256.json]}
+  - {name: timed-clause-lite-d768-pod1-s0, supplements: [timed-clause-lite-d768-pod1-s0-rerun], config: clause, tree: clause, suites: [fr-timed-clause-lite-d768], datasets: [pubmed]}
+  - {name: timed-clause-lite-d256-pod1-s0, supplements: [timed-clause-lite-d256-pod1-s0-rerun], config: clause, tree: clause, suites: [fr-timed-clause-lite-d256], datasets: [laion1m, laion3m, laion10m]}
+  # ---- pod 1 cells, seeds 1-2 (seed 2 ran on pod f)
+  - {name: timed-bloom-d768-pod1-s1, supplements: [timed-bloom-d768-pod1-s1-rerun], seed: 1, suites: *d768_bloom, datasets: [pubmed]}
+  - {name: timed-bloom-d256-pod1-s1, supplements: [timed-bloom-d256-pod1-s1-rerun], seed: 1, suites: *d256_bloom, datasets: [laion1m, laion3m, laion10m]}
+  - {name: timed-bloom-synth-d768-pod1-s1, supplements: [timed-bloom-synth-d768-pod1-s1-rerun], seed: 1, suites: [fr-timed-bloom-synth-s1-d768], datasets: [pubmed-synth-s1]}
+  - {name: timed-bloom-synth-d256-pod1-s1, supplements: [timed-bloom-synth-d256-pod1-s1-rerun], seed: 1, suites: [fr-timed-bloom-synth-s1-d256], datasets: [laion10m-synth-s1]}
+  - {name: timed-bloom-d768-podf-s2, seed: 2, suites: *d768_bloom, datasets: [pubmed]}
+  - {name: timed-bloom-d256-podf-s2, seed: 2, suites: *d256_bloom, datasets: [laion1m, laion3m, laion10m]}
+  - {name: timed-bloom-synth-d768-podf-s2, seed: 2, suites: [fr-timed-bloom-synth-s2-d768], datasets: [pubmed-synth-s2]}
+  - {name: timed-bloom-synth-d256-podf-s2, seed: 2, suites: [fr-timed-bloom-synth-s2-d256], datasets: [laion10m-synth-s2]}
+  # ---- config only
+  - {name: picks, files: [suites-timed.yaml]}
+batch_scaling_exceptions:  # D1-G (c) failures the user ruled known exceptions (gate.py passes with them listed, never silently)
+  - {subtree: final-synth-pode-s0, dataset: goodreads-synth, suite: synth, algo: linr_v2, backend: torch, sweep: p1, params: '{"compile": "max-autotune"}', k: 1000, mode: eager,
+     ruling: "user 2026-10-16 (rulings note 2026-10-16-093000000, item 2): the compiled torch baseline arm's bs-1 fast path; listed, not rerun"}
+dropped:  # not planned at the final scope; each with its ruling
+  - {leg: timed-bloom-synth-d128-pode-s1, why: "synthetic Goodreads / arXiv seed 1 dropped by the user (final scope)"}
+  - {leg: timed-bloom-synth-d256-pode-s2, why: "synthetic LAION 30M seed 2 dropped by the user (2026-10-15 ~14:51Z; pod f's leg 92 stopped at 0 cells, not uploaded)"}
+  - {leg: "metafork-pod1 / metafork-pode", why: "META-FORK grid dropped by the user (2026-10-14 10:00Z)"}
+  - {leg: "final-c7-scorepath-pod1-s0 / final-seeds-c7-pod1-s0", why: "c7 out (user, 2026-10-14 14:00Z)"}
+  - {leg: "timed-clause-d128 / d256 / d768", why: "the clause reference row runs lighter as fr-timed-clause-lite-* at tag final-freeze-clause, SilverTorch exact arms only (user, 2026-10-14 11:00Z)"}
+  - {leg: "stage 1, untimed, final pass at seeds 1-2; TUNE-EXT variance", why: "variance = the timed bloom legs only (user, 2026-10-14 08:50Z); no seed variance for TUNE-EXT points"}
+  - {leg: "every YFCC cell", why: "YFCC out of the study (user, 2026-10-13)"}
