@@ -832,20 +832,23 @@ def _layer(data, backend, filter_mode="none", *, reverse=None, official=None, **
 
 
 def _transplant(dst: SilverTorch, src: SilverTorch) -> None:
-    """Give ``dst`` the index of ``src`` (a module on the published backend), so a bit-exact layer
-    comparison is of the ops and not of two index builds: both backends register the same CSR,
-    so every buffer is copied verbatim (``KMeans.fit`` is reproducible, so the two builds would
-    agree anyway; sharing the index keeps the test independent of that)."""
+    """Give ``dst`` the index of ``src`` (a module on ``dst``'s backend or on the published one),
+    so a bit-exact layer comparison is of the ops and not of two index builds: both backends
+    register the same CSR, so every buffer is copied verbatim (``KMeans.fit`` is reproducible, so
+    the two builds would agree anyway; sharing the index keeps the test independent of that)."""
     for name in ("centroids", "item_codes", "global_scale", "cluster_offsets",
                  "cluster_sizes", "sort_perm", "inv_perm"):  # fmt: skip
         setattr(dst, name, getattr(src, name).clone())
     dst._global_scale_f = src._global_scale_f
     dst._probe_width = src._probe_width
     if dst.filter_mode == "exact":
-        dst.item_clause_attrs = src.item_clause_attrs.clone()
         dst.clause_is_reverse = src.clause_is_reverse.clone()
-        if dst.backend == "official-fork":  # the adapted code's own layout (CHANGES.md C14)
-            dst.item_clause_attrs, dst.clause_slots = of.fork_clause_attrs(dst.item_clause_attrs)
+        if dst.backend == src.backend:
+            dst.item_clause_attrs = src.item_clause_attrs.clone()
+            if dst.backend == "official-fork":
+                dst.clause_slots = src.clause_slots.clone()
+        else:  # published ``[N, C, A]`` attrs into the adapted code's layout (CHANGES.md C14)
+            dst.item_clause_attrs, dst.clause_slots = of.fork_clause_attrs(src.item_clause_attrs)
 
 
 @pytest.mark.parametrize(
@@ -894,8 +897,8 @@ def test_t6_layer_fp16_default_ranks_like_int32(data, filter_mode):
     if OB == "official-fork":
         require_official("official")
         pub = _layer(data, "official", filter_mode)
-        _transplant(pub, exact)
-        _assert_bitexact((ids_o, sc_o), pub(data["query"], _prep(pub, qa)))
+        _transplant(off, pub)
+        _assert_bitexact(off(data["query"], _prep(off, qa)), pub(data["query"], _prep(pub, qa)))
 
 
 @pytest.mark.parametrize("bloom_path", ["partial", "full"])
