@@ -1,0 +1,242 @@
+fr-synth-mid-curve-d256:
+  perf: false
+  datasets:
+  - laion10m-synth
+  - laion30m-synth
+  dims:
+  - 256
+  filter_kinds:
+  - bloom
+  ks:
+  - 100
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    laion10m-synth:
+    - p02
+    - p03
+    - p05
+    laion30m-synth:
+    - p02
+    - p03
+    - p05
+  arms:
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 4096
+      recheck:
+      - false
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p02
+        - p03
+        - p05
+        query:
+          n_probe:
+          - 8
+          - 16
+          - 24
+          - 32
+          - 64
+          - 128
+          - 256
+          - 512
+          - 1024
+      laion30m-synth:
+        sweeps:
+        - p02
+        - p03
+        - p05
+        query:
+          n_probe:
+          - 8
+          - 16
+          - 24
+          - 32
+          - 64
+          - 128
+          - 256
+          - 512
+          - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 16384
+      recheck:
+      - false
+    datasets:
+      laion10m-synth:
+        sweeps:
+        - p02
+        - p03
+        - p05
+        query:
+          n_probe:
+          - 8
+          - 16
+          - 32
+          - 64
+          - 128
+          - 256
+          - 512
+          - 1024
+          - 2048
+          - 4096
+      laion30m-synth:
+        sweeps:
+        - p02
+        - p03
+        - p05
+        query:
+          n_probe:
+          - 8
+          - 16
+          - 32
+          - 64
+          - 128
+          - 256
+          - 512
+          - 1024
+          - 2048
+          - 4096
+fr-synth-mid-v3pool-d256:
+  perf: false
+  datasets:
+  - laion10m-synth
+  - laion30m-synth
+  dims:
+  - 256
+  filter_kinds:
+  - clause
+  ks:
+  - 100
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    laion10m-synth:
+    - p02
+    - p03
+    - p05
+    laion30m-synth:
+    - p02
+    - p03
+    - p05
+  arms:
+  - algo: linr_v3
+    backends:
+    - triton
+    query:
+      candidate_pool_frac:
+      - 0.005
+      - 0.01
+      - 0.02
+      - 0.05
+      - 0.1
+      - 0.2
+    filter_kinds:
+    - clause
+fr-synth-mid-probesweep-d256:
+  datasets:
+  - laion30m-synth
+  dims:
+  - 256
+  filter_kinds:
+  - bloom
+  - clause
+  ks:
+  - 100
+  batch_sizes:
+  - 16
+  seeds:
+  - 0
+  sweeps:
+    laion30m-synth:
+    - p0001
+    - p001
+    - p01
+    - p1
+    - p02
+    - p03
+    - p05
+  interleave:
+  - by:
+    - algo
+    - n_lists
+  arms:
+  - algo: linr_v1_filter_mask
+    backends:
+    - triton
+    filter_kinds:
+    - clause
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 4096
+      recheck:
+      - false
+    datasets:
+      laion30m-synth:
+        sweeps:
+        - p0001
+        - p001
+        - p01
+        - p1
+        - p02
+        - p03
+        - p05
+        query:
+          n_probe:
+          - 24
+          - 32
+          - 64
+          - 128
+          - 256
+          - 512
+          - 1024
+  - algo: silvertorch
+    backends:
+    - official-fork
+    filter_kinds:
+    - bloom
+    build:
+      n_lists:
+      - 16384
+      recheck:
+      - false
+    datasets:
+      laion30m-synth:
+        sweeps:
+        - p0001
+        - p001
+        - p01
+        - p1
+        - p02
+        - p03
+        - p05
+        query:
+          n_probe:
+          - 24
+          - 64
+          - 256
+          - 1024
+          - 2048
+          - 4096
+          - 8192
