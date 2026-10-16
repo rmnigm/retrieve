@@ -1,10 +1,10 @@
 ---
 title: ecir-criteria
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-16
 type: summary
 tags: [paper]
-sources: [https://ecir2026.dryfta.com/calls/call-for-reproducibility-papers, research/decisions.md, research/paper/claims.md, research/validation.md, research/roadmap.md]
+sources: [https://ecir2026.dryfta.com/calls/call-for-reproducibility-papers, https://www.ecir2027.co.uk/call-for-reproducibility-papers, research/decisions.md, research/paper/claims.md, research/validation.md, research/roadmap.md]
 ---
 
 # The ECIR criteria, question by question
@@ -17,8 +17,9 @@ official SilverTorch code, adapted by us, against LiNR V1-V3.
 
 **Where the questions come from.** The ECIR 2026 call
 ([call](https://ecir2026.dryfta.com/calls/call-for-reproducibility-papers)),
-quoted in its own words. The 2027 call was not online on 2026-10-10; when it
-appears, compare the lists and update this page.
+quoted in its own words. The ECIR 2027 call (now "replicability") keeps the
+list word for word, except "reproduction" → "replication" in the first
+Impact question ([venue](venue.md)).
 
 **How to read the tables.**
 

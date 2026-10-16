@@ -1,7 +1,7 @@
 ---
 title: release-and-licenses
 created: 2026-10-10
-updated: 2026-10-10
+updated: 2026-10-16
 type: summary
 tags: [paper, release]
 sources: [https://github.com/MengtingWan/goodreads, https://info.arxiv.org/help/license/index.html, https://huggingface.co/datasets/open-index/open-arxiv, https://ftp.ncbi.nlm.nih.gov/pub/lu/MedCPT/pubmed_embeddings/README.txt, https://www.nlm.nih.gov/databases/download/terms_and_conditions.html, https://www.ncbi.nlm.nih.gov/home/about/policies/, https://github.com/harsha-simhadri/big-ann-benchmarks/blob/main/neurips23/README.md, https://laion.ai/blog/relaion-5b/, https://github.com/meta-recsys/silvertorch, https://ecir2026.dryfta.com/calls/call-for-reproducibility-papers]
@@ -87,11 +87,10 @@ patterns: rerun it on the final subtree set before F4.
 
 ## 4. Double-blind review
 
-The ECIR 2026 call (the 2027 call was not online on 2026-10-10) reviews
-reproducibility papers double-blind, discourages arXiv preprints, and says
-software goes "to an anonymous repository that is linked to in the
-submission" or into EasyChair
-([call](https://ecir2026.dryfta.com/calls/call-for-reproducibility-papers)).
+The ECIR 2027 call reviews replicability papers double-blind, discourages
+arXiv preprints, desk-rejects submissions "not submitted anonymously", and
+says software goes "to an anonymous repository that is linked to in the
+submission" or into EasyChair ([venue](venue.md#anonymity)).
 Three things identify the author today. They are not secret, so the plan
 keeps the paper from pointing at them rather than hiding them:
 
