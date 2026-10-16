@@ -2,7 +2,6 @@
 module whose ``k`` setter slices the top-k without touching a buffer (H §7's "no layer bakes
 ``k``"), the filter is a submodule counted by ``index_bytes``, ``set_query_params``
 re-validates, and ``build`` refuses ``None``-path cells and invalid combos. The three
-SilverTorch modules are built once per session with ``n_iter=2`` (``silvertorch_modules``);
 the tests that share them are read-only beyond ``.k``."""
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ import torch
 
 from bench import algos as A
 from bench.measure import index_bytes
-from retrieve import OfficialConfig, SilverTorch
+from retrieve import OfficialConfig
 
 N, D = 256, 64
 
@@ -80,23 +79,6 @@ def test_official_config_recheck():
             A.official_config(algo, fk, backend, {"recheck": value})
 
 
-ST_PARAMS = {"n_lists": 8, "n_probe": 4, "n_iter": 2}
-BLOOM = {"m_bits": 64, "k_hash": 2}
-
-
-@pytest.fixture(scope="session")
-def silvertorch_modules() -> dict[str, SilverTorch]:
-    x, _, attrs, _ = _data()
-    out = {}
-    for fk in A.FILTER_KINDS:
-        f = A.build_filter(fk, attrs, backend="torch")
-        out[fk] = A.build(
-            "silvertorch", x, k=8, backend="torch", filter_kind=fk, filter_mod=f,
-            item_attrs=attrs, params={**ST_PARAMS, **(BLOOM if fk == "bloom" else {})},
-        )  # fmt: skip
-    return out
-
-
 def _check_k_slice(module, call, k_big: int = 8, k_small: int = 3) -> None:
     module.k = k_big
     before = {n: b.clone() for n, b in module.state_dict().items()}
@@ -120,46 +102,24 @@ def _cells():
 
 @pytest.mark.parametrize("algo,fk", list(_cells()))
 @torch.inference_mode()
-def test_built_module_k_setter_slices(algo, fk, silvertorch_modules):
+def test_built_module_k_setter_slices(algo, fk):
     x, q, attrs, qa = _data()
-    if algo == "silvertorch":
-        m = silvertorch_modules[fk]
-        assert isinstance(m, SilverTorch) and m.filter_mode == A.FILTER_MODE[fk]
-    else:
-        f = A.build_filter(fk, attrs, backend="torch")
-        params = {"linr_v3": {"candidate_pool": 64}}.get(algo, {})
-        m = A.build(
-            algo, x, k=8, backend="torch", filter_kind=fk, filter_mod=f, item_attrs=attrs,
-            params=params,
-        )  # fmt: skip
+    f = A.build_filter(fk, attrs, backend="torch")
+    params = {"linr_v3": {"candidate_pool": 64}}.get(algo, {})
+    m = A.build(
+        algo, x, k=8, backend="torch", filter_kind=fk, filter_mod=f, item_attrs=attrs,
+        params=params,
+    )  # fmt: skip
     assert m.backend == "torch" and m.capturable is True
     _check_k_slice(m, lambda: m(q, m.prepare_queries(qa) if fk != "none" else None))
 
 
-def test_index_bytes_includes_filter_submodule(silvertorch_modules):
+def test_index_bytes_includes_filter_submodule():
     x, _, attrs, _ = _data()
     f = A.build_filter("clause", attrs, backend="torch")
     m = A.build("linr_v1_filter_mask", x, k=4, backend="torch", filter_kind="clause", filter_mod=f)
     assert m.filter is f and index_bytes(m) == index_bytes(m.idx) + index_bytes(f) > 0
-    st = silvertorch_modules["bloom"]
-    assert getattr(st, "filter", None) is None and "bloom_transposed" in st.state_dict()
-    assert A.build_filter("none", None) is None
-
-
-def test_silvertorch_query_params_revalidate():
-    x, q, _, _ = _data()
-    st = A.build(
-        "silvertorch", x, k=4, backend="torch", params={"n_lists": 8, "n_probe": 2, "n_iter": 2}
-    )
-    with pytest.raises(ValueError, match="cannot exceed n_lists"):
-        st.set_query_params(n_probe=9)
-    st.set_query_params(n_probe=8)
-    assert st.n_probe == 8
-    ids, _ = st(q)  # probing every list: every row is full
-    assert ids.shape == (6, 4) and bool((ids >= 0).all())
-    st.k = x.shape[0]  # the largest k the full probe pool admits ...
-    with pytest.raises(ValueError, match="probe pool"):
-        st.set_query_params(n_probe=1)  # ... which a single probed list cannot serve
+    assert A.build_filter("none", None) is None and A.build_filter("bloom", attrs) is None
 
 
 def test_linr_v3_query_params():
@@ -218,7 +178,7 @@ def test_build_refusals():
     with pytest.raises(ValueError, match="no code path"):
         A.build("linr_v1_filter_mask", x, k=4, backend="official")
     with pytest.raises(ValueError, match="invalid params"):
-        A.build("silvertorch", x, k=4, backend="torch", params={"n_lists": 4, "n_probe": 8})
+        A.build("silvertorch", x, k=4, backend="official-fork", params={"n_lists": 4, "n_probe": 8})
     assert A.is_valid_combo("silvertorch", {"n_lists": 16, "n_probe": 16})
     assert not A.is_valid_combo("silvertorch", {"n_lists": 16})  # default n_probe=24 > 16
     assert A.is_valid_combo("linr_v3", {"n_probe": 100}) and A.is_valid_combo("silvertorch", {})

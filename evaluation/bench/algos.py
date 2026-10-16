@@ -103,6 +103,8 @@ def build_filter(
 ) -> FilterModule | None:
     """The standalone exact filter of a ``clause`` cell; ``None`` for ``none`` and ``bloom`` (the
     bloom filter is SilverTorch's own)."""
+    if filter_kind not in FILTER_KINDS:
+        raise ValueError(f"unknown filter_kind {filter_kind!r}")
     if filter_kind != "clause":
         return None
     if item_attrs is None:

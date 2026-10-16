@@ -125,16 +125,15 @@ def _counts(jobs, *fields):
 
 def test_quality_suite_collapses_same_path_backends():
     jobs = load_matrix(MINI, SUITES, "quality")
-    # per dim: linr_v1 [triton, torch] → 1 (cublas), linr_v3 → 2, silvertorch → 3.
-    assert len(jobs) == 2 * (1 + 2 + 3)
+    # per dim: linr_v1 [triton, torch] → 1 (cublas), linr_v3 → 2, silvertorch → 2.
+    assert len(jobs) == 2 * (1 + 2 + 2)
     assert _counts(jobs, "algo", "backend", "path") == Counter(
         {
             ("linr_v1_filter_mask", "triton", "cublas"): 2,
             ("linr_v3", "triton", "triton"): 2,
             ("linr_v3", "torch", "torch"): 2,
-            ("silvertorch", "triton", "triton"): 2,
-            ("silvertorch", "torch", "torch"): 2,
             ("silvertorch", "official", "official"): 2,
+            ("silvertorch", "official-fork", "official-fork"): 2,
         }
     )
     j = jobs[0]
@@ -190,7 +189,9 @@ def test_filter_suite_arms_sweeps_and_seeds():
 def test_widths_compile_frac_ks_by_sweep_and_empty_slots():
     jobs = load_matrix(MINI, SUITES, "widths")
     st_bloom = [
-        j for j in jobs if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "triton", "bloom")
+        j
+        for j in jobs
+        if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "official-fork", "bloom")
     ]
     # m_bits gridded: the job's bloom carries it, the suite default fills k_hash.
     assert [(j.build, j.bloom) for j in st_bloom] == [
@@ -199,11 +200,13 @@ def test_widths_compile_frac_ks_by_sweep_and_empty_slots():
     ]
     # Not gridded: the key's params stay {} and the bloom is the default, as before.
     plain = [
-        j for j in jobs if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "triton", "clause")
+        j
+        for j in jobs
+        if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "official-fork", "clause")
     ]
     assert plain and all(j.build == {} for j in plain)
     assert all(j.bloom == {"m_bits": 64, "k_hash": 3} for j in plain)
-    compiled = [j for j in jobs if j.backend == "torch" and j.algo == "silvertorch"]
+    compiled = [j for j in jobs if j.backend == "torch" and j.algo == "linr_v1_filter_mask"]
     assert compiled and all(j.build == {"compile": "max-autotune"} for j in compiled)
     v3 = [j for j in jobs if j.algo == "linr_v3"]
     assert v3 and all(j.query == ({"candidate_pool_frac": 0.1},) for j in v3)
@@ -270,10 +273,9 @@ def test_narrows_apply_before_collapse():
         dims=[16],
         backends=["torch"],
         algos=["linr_v1_filter_mask", "silvertorch"],
-    )
+    )  # silvertorch has no torch path: only the cuBLAS job, labelled torch
     assert [(j.algo, j.backend, j.path) for j in jobs] == [
         ("linr_v1_filter_mask", "torch", "cublas"),
-        ("silvertorch", "torch", "torch"),
     ]
     jobs = load_matrix(MINI, SUITES, "filter", sweeps=["c0c1"], seeds=[1], ks=[10], batch_sizes=[2])
     # per dim: linr_v2 on two paths + silvertorch triton (no bloom c0c1, linr_v3 is c0-only)
@@ -314,19 +316,19 @@ def test_suite_errors_are_named():
     ("arms", "match"),
     [
         (
-            "[{algo: silvertorch, backends: [triton], build: {m_bits: [64]}}]",
+            "[{algo: silvertorch, backends: [official-fork], build: {m_bits: [64]}}]",
             "silvertorch/bloom only",
         ),
         (
-            "[{algo: silvertorch, backends: [triton], build: {compile: [max-autotune]}}]",
+            "[{algo: silvertorch, backends: [official-fork], build: {compile: [max-autotune]}}]",
             "torch arms only",
         ),
         (
-            "[{algo: silvertorch, backends: [torch], build: {compile: [default]}}]",
+            "[{algo: linr_v3, backends: [torch], build: {compile: [default]}}]",
             "torch arms only",
         ),
         (
-            "[{algo: silvertorch, backends: [triton], query: {candidate_pool_frac: [0.1]}}]",
+            "[{algo: silvertorch, backends: [official-fork], query: {candidate_pool_frac: [0.1]}}]",
             "linr_v3",
         ),
         ("[{algo: linr_v2, backends: [triton], sweeps: [nope]}]", r"sweeps \['nope'\] not in mini"),

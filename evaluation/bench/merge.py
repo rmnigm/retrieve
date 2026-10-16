@@ -13,21 +13,26 @@ from typing import Any
 
 import click
 import yaml
+from loguru import logger
 
 from bench import records
 
 EVAL_DIR = Path(__file__).resolve().parents[1]
 TABLES_VERSION = 1
 STATUS_RANK = {"ok": 2, "partial": 1, "failed": 0}
-ENV_SKIP = ("code_version", "commit", "git_branch", "host", "started")
+META_ENV = ("host", "started", "code_version", "commit")  # lifted into named columns by _meta
 
 
 def load(tree: Path) -> list[dict[str, Any]]:
     """Every record of ``tree`` with ``_subtree``, ``_file``, ``_line``, ``_cell`` and the
     ``_samples`` list (one per-call vector per perf entry that ran, or ``None``). The retired
-    ``bloom_fp_rate`` field is dropped on read, and so is every LiNR bloom record."""
+    ``bloom_fp_rate`` field is dropped on read, and so is every bloom record of an algo other than
+    SilverTorch (LiNR's and the postfilter's)."""
+    files = records.record_files(tree)
+    if not files:
+        logger.info("{}: no <suite>/*.jsonl record files (an untimed or config subtree)", tree)
     out = []
-    for path in records.record_files(tree):
+    for path in files:
         recs = records.read_records(path)
         for i, rec in enumerate(recs, 1):
             rec["_subtree"] = tree.name
@@ -53,7 +58,11 @@ def _pair_samples(path: Path, lines: list[dict[str, Any]], recs: list[dict[str, 
         if e.get("n") is not None
     ]
     if len(slots) != len(lines):
-        raise ValueError(f"{path}: {len(lines)} sample lines for {len(slots)} timed variants")
+        logger.warning(
+            "{}: {} sample lines for {} timed variants (a cell killed between its samples and its "
+            "record): no samples from this file", path, len(lines), len(slots),
+        )  # fmt: skip
+        return
     for (rec, i), line in zip(slots, lines, strict=True):
         e = rec["perf"][i]
         want = {**records.key_block(rec), "k": e["k"], "bs": e["bs"], "mode": e["mode"]}
@@ -101,7 +110,7 @@ def _tags(commit: str | None, cache: dict[str, str | None]) -> str | None:
 def _flat_env(env: dict[str, Any]) -> dict[str, Any]:
     out = {}
     for k, v in env.items():
-        if k in ENV_SKIP or k in records.ENV_COLUMNS:
+        if k in META_ENV or k in records.ENV_COLUMNS:
             continue
         if isinstance(v, dict):
             out.update({f"env_{k}_{kk}": vv for kk, vv in v.items()})
@@ -160,8 +169,15 @@ def manifest(trees: list[Path], recs: list[dict[str, Any]], rows: dict) -> dict[
     """``subtrees`` (provenance and counts per input tree, with what it supersedes) and ``cells``
     (per dataset / suite / algo / backend, the subtrees the accepted records come from)."""
     by_tree: dict[str, list] = {t.name: [] for t in trees}
+    supersedes: dict[str, set] = defaultdict(set)
     for r in recs:
         by_tree[r["_subtree"]].append(r)
+        if r["_superseded_by"] is not None:
+            supersedes[r["_superseded_by"]].add(r["_subtree"])
+    n_samples = Counter(s["subtree"] for s in rows["samples"])
+    tags: dict[str, set] = defaultdict(set)
+    for t in rows["records"]:
+        tags[t["subtree"]].add(t["tag"])
     subtrees = {}
     for tree in trees:
         rs = by_tree[tree.name]
@@ -176,7 +192,7 @@ def manifest(trees: list[Path], recs: list[dict[str, Any]], rows: dict) -> dict[
             "hosts": _sorted_set(e["host"] for e in env),
             "gpus": _sorted_set(e.get("gpu") for e in env),
             "commits": _sorted_set(e.get("commit") for e in env),
-            "tags": _sorted_set(t["tag"] for t in rows["records"] if t["subtree"] == tree.name),
+            "tags": _sorted_set(tags[tree.name]),
             "branches": _sorted_set(e.get("git_branch") for e in env),
             "code_versions": _sorted_set(e["code_version"] for e in env),
             "started": [started[0], started[-1]] if started else None,
@@ -184,10 +200,8 @@ def manifest(trees: list[Path], recs: list[dict[str, Any]], rows: dict) -> dict[
             "unstable": sum(1 for r in rs if r.get("unstable")),
             "accepted": sum(1 for r in rs if r["_accepted"]),
             "superseded": sum(1 for r in rs if not r["_accepted"]),
-            "supersedes": _sorted_set(
-                r["_subtree"] for r in recs if r["_superseded_by"] == tree.name
-            ),
-            "samples": sum(1 for s in rows["samples"] if s["subtree"] == tree.name),
+            "supersedes": sorted(supersedes[tree.name]),
+            "samples": n_samples[tree.name],
         }
     groups: dict[tuple, list] = defaultdict(list)
     for r in recs:
@@ -203,8 +217,7 @@ def manifest(trees: list[Path], recs: list[dict[str, Any]], rows: dict) -> dict[
                 "backend": backend,
                 "subtrees": _sorted_set(r["_subtree"] for r in rs),
                 "cells": len({r["_cell"] for r in rs}),
-                "accepted_ok": sum(1 for r in rs if r["status"] == "ok"),
-                "accepted_failed": sum(1 for r in rs if r["status"] == "failed"),
+                **{f"accepted_{s}": sum(1 for r in rs if r["status"] == s) for s in STATUS_RANK},
                 "seeds": _sorted_set(r["seed"] for r in rs),
                 "code_versions": _sorted_set(r["env"]["code_version"] for r in rs),
                 "filter_kinds": _sorted_set(r["filter_kind"] for r in rs),
@@ -234,7 +247,10 @@ def build(trees: list[Path], out: Path) -> dict[str, Any]:
 
 
 @click.command()
-@click.argument("trees", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.argument(
+    "trees", nargs=-1, required=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+)  # fmt: skip
 @click.option("--out", required=True, type=click.Path(path_type=Path), help="the tables' directory")
 def merge(trees: tuple[Path, ...], out: Path) -> None:
     """Merge fetched results trees into records / timings / samples tables and a manifest."""

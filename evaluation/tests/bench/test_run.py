@@ -501,19 +501,20 @@ def _arms(cfgs, **narrow):
     return load_matrix(ds, suites, "arms", **narrow)
 
 
+@pytest.mark.gpu
 def test_gridded_bloom_width_is_the_cells_own(tiny_configs, tmp_path):
-    """``m_bits`` in ``params`` sets that job's bloom (the module's index, the record's
-    ``bloom``) while the ungridded cell keeps the suite default and a key without ``m_bits``."""
-    jobs = _arms(tiny_configs, filter_kinds=["bloom"])
+    """``m_bits`` in ``params`` sets that job's bloom (the record's ``bloom``) while the
+    ungridded cell keeps the suite default and a key without ``m_bits``."""
+    ds, suites = tiny_configs
+    jobs = load_matrix(ds, suites, "widths")
     out = tmp_path / "results"
     assert dict(run.run(jobs, out_dir=out, skip_perf=True, **KW)) == {"partial": 3}
-    recs = _records(out / "arms" / "tiny-d64.jsonl")
+    recs = _records(out / "widths" / "tiny-d64.jsonl")
     by = {r["params"].get("m_bits"): r for r in recs}
     assert by[64]["bloom"] == {"m_bits": 64, "k_hash": 2}
     assert by[256]["bloom"] == {"m_bits": 256, "k_hash": 2}
     assert by[None]["bloom"] == {"m_bits": 64, "k_hash": 2}  # the suite default
-    assert by[None]["params"] == {"n_lists": 4, "n_probe": 2}
-    assert by[256]["index_mib"] > by[64]["index_mib"]  # the bloom words live in the index
+    assert by[None]["params"] == {"n_lists": 4, "recheck": False, "n_probe": 2}
     assert all(r["filter_mib"] == 0.0 for r in recs)  # no standalone filter on a bloom cell
 
 
@@ -552,14 +553,14 @@ def test_compiled_arm_times_its_warmup_apart_and_skips_graph(tiny_configs, tmp_p
     (max-autotune replays its own CUDA graphs). The compiler itself is faked on CPU."""
     calls = []
     monkeypatch.setattr(torch.nn.Module, "compile", lambda self, **kw: calls.append(kw))
-    jobs = _arms(tiny_configs, filter_kinds=["clause"], algos=["silvertorch"])
+    jobs = _arms(tiny_configs, algos=["linr_v2"])
     out = tmp_path / "results"
     assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 2}
     assert calls == [{"mode": "max-autotune"}] * 2
     recs = _records(out / "arms" / "tiny-d64.jsonl")
     assert {r["sweep"] for r in recs} == {"c0", "c0c1"}
     for r in recs:
-        assert r["params"] == {"n_lists": 4, "compile": "max-autotune", "n_probe": 2}
+        assert r["params"] == {"compile": "max-autotune"}
         assert r["compile_s"] > 0 and r["build_s"] > 0
         graph = [e for e in r["perf"] if e["mode"] == "graph"]
         assert graph and all(e["reason"] == "not_capturable" and e["median_ms"] is None
@@ -569,12 +570,12 @@ def test_compiled_arm_times_its_warmup_apart_and_skips_graph(tiny_configs, tmp_p
 
 
 def test_quality_cache_copies_seed_free_arms_only(tiny_configs, tmp_path, monkeypatch):
-    """G-cache (CPU): V1 and the postfilter copy seed 0's quality to seeds 1-2 (perf still runs
-    per seed); V3 and SilverTorch always recompute. A new code_version or other ks is a miss."""
+    """V1 and the postfilter copy seed 0's quality to seeds 1-2 (perf still runs per seed); V3
+    always recomputes. A new code_version or other ks is a miss."""
     ds, suites = tiny_configs
     out = tmp_path / "results"
     path = out / "cache" / "tiny-d64.jsonl"
-    assert dict(run.run(load_matrix(ds, suites, "cache"), out_dir=out, **KW)) == {"ok": 12}
+    assert dict(run.run(load_matrix(ds, suites, "cache"), out_dir=out, **KW)) == {"ok": 9}
     by = {(r["algo"], r["seed"]): r for r in _records(path)}
     for algo in ("linr_v1_filter_mask", "postfilter"):
         assert by[algo, 0]["quality_source"] is None and by[algo, 0]["seed_scope"] == "pool"
@@ -582,10 +583,9 @@ def test_quality_cache_copies_seed_free_arms_only(tiny_configs, tmp_path, monkey
             r = by[algo, seed]
             assert r["quality_source"] == {"seed": 0, "code_version": bench.code_version()}
             assert r["quality"] == by[algo, 0]["quality"] and r["perf"]
-    for algo in ("linr_v3", "silvertorch"):
-        for seed in (0, 1, 2):
-            r = by[algo, seed]
-            assert r["quality_source"] is None and r["seed_scope"] == "pool+build"
+    for seed in (0, 1, 2):
+        r = by["linr_v3", seed]
+        assert r["quality_source"] is None and r["seed_scope"] == "pool+build"
     # Fresh quality at seed 1 equals what the cache copied.
     fresh = tmp_path / "fresh"
     jobs = load_matrix(ds, suites, "cache", algos=["linr_v1_filter_mask"], seeds=[1])

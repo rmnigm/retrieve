@@ -1,6 +1,6 @@
 """``bench merge`` on two tiny trees: the accept rule per cell (ok over failed, stable over
-unstable, latest start), the samples pairing, a missing sidecar, a sidecar that does not pair,
-and the manifest's counts."""
+unstable, latest start), the samples pairing, a missing or orphaned sidecar, a sidecar line that
+pairs wrongly, and the manifest's counts."""
 
 from __future__ import annotations
 
@@ -137,11 +137,13 @@ def test_accept_rule_tables_and_manifest(trees, tmp_path):
     assert "cross_host_duplicates" not in man
 
 
-def test_a_sidecar_that_does_not_pair_raises(tmp_path):
+def test_a_sidecar_that_does_not_pair(tmp_path):
+    """An orphan line (a cell killed between its samples and its record) costs that file its
+    samples, not the merge; a line that pairs with the wrong record raises."""
     tree = _write(tmp_path / "leg", [_rec()])
     records.append_record(tree / "filter" / "goodreads-d128.samples.jsonl", {"ms": [1.0]})
-    with pytest.raises(ValueError, match="3 sample lines for 2 timed variants"):
-        merge.load(tree)
+    (rec,) = merge.load(tree)
+    assert rec["_samples"] == [None, None, None]
     tree = _write(tmp_path / "leg2", [_rec(seed=5)], sidecar=False)
     sidecar = tree / "filter" / "goodreads-d128.samples.jsonl"
     records.append_record(sidecar, _sample(_rec(seed=6), _entry(100, 1, 1.0)))

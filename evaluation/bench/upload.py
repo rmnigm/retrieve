@@ -281,6 +281,9 @@ def fetch(repo_id, prefix, results) -> None:
             raise click.ClickException("download does not match its manifest:\n" + "\n".join(bad))
         clash = [f["path"] for f in man["files"] if (results / f["path"]).is_file()
                  and sha256(results / f["path"]) != f["sha256"]]  # fmt: skip
+        other = results / "MANIFEST.json"
+        if other.is_file() and json.loads(other.read_text())["path_in_repo"] != prefix:
+            clash.append("MANIFEST.json (another subtree's: one fetched tree holds one subtree)")
         if clash:
             raise click.ClickException(
                 f"{results} already holds different copies of: {', '.join(clash)}"
