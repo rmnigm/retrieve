@@ -58,16 +58,12 @@ need a decision or an action only the user (or the controller) can take:
 
 ## Numbers and citability
 
-Every number in the paper comes from one of four sources, all citable
-(AGENTS.md rule 2): their gates are green in [validation](../validation.md).
+Every number in the paper comes from one of two sources (user ruling 2026-10-16):
 
 | source | what it gives | where |
 |---|---|---|
-| LiNR final pass | every LiNR V1-V3 number, the postfilter and `torch.compile` arms (C1-C3); Meta's code as published for C5 | Hub `campaign-final/merged-4016/results.parquet` (library `e16512f5`); [validation](../validation.md#campaign-v2-phase-v), rows EXHIBITS and D1-G (green, user 2026-10-11) |
-| NUMBERS legs | every SilverTorch number on the adapted code (C4 recall and memory, C6, the head-to-head), LiNR beside it where a leg ran it (V3 pools, bs 64 / 256, k 2048, correlated filters) | Hub `numbers/*` ([hub-index](../artifacts/hub-index.md)); [validation](../validation.md#numbers-adapted-silvertorch-over-the-study-grid) (green, controller ACCEPT 2026-10-12, three exclusions) |
-| META-FORK gates | the adapted code against Meta's code as published (C7, T3) | Hub `artifacts/meta-fork/*`; [validation](../validation.md#meta-fork-backendofficial-fork) (review ACCEPT at `1f6fed8`) |
-| bloom legs (**pending**, due 2026-10-13 16:00Z) | SilverTorch's bloom without recheck (curves, timed), LiNR V1 / V2 with the exact filter interleaved (the bloom side of §5) | Hub `numbers/A1-bloom`, `numbers/A2-bloom`; validation NUMBERS once their gate is green |
-| results-draft checks | the end-task bridge, the C6 ceiling split and local pass rate on adapted indexes | Hub `artifacts/results-draft/20261012-checks`, `-adapted`; validation NUMBERS rows |
+| the FULL-RERUN at `final-freeze` (every LiNR, adapted-SilverTorch, bloom, Yambda and head-to-head cell; the untimed false-positive and ceiling steps) | every measured number of the study, C1-C6 and the head-to-head; **not citable until its gate is green** | Hub `fr/*` and the FR results draft ([results](results.md), [validation](../validation.md#full-rerun)); the NUMBERS legs, `campaign-final` and D1 are superseded by it |
+| META-FORK gates (not remeasured by the rerun) | the adapted code against Meta's code as published (C7, T3): parity, syncs, capture, compile, the gate-grid speed | Hub `artifacts/meta-fork/*`; [validation](../validation.md#meta-fork-backendofficial-fork) (review ACCEPT at `1f6fed8`); **final, citable** |
 
 The tables and figures are built by
 [`build_results.py`](../artifacts/results-draft/build_results.py) into Hub
@@ -268,9 +264,9 @@ novelty the call asks for. Kept apart from §4 (survey pattern 2).
   `n_lists` / 4) there is no SilverTorch point (LAION `c0_domain` up to
   10 M, LAION 1 M, PubMed `all5`, 0.95 on PubMed). 0.99 is reached
   nowhere.
-- **Matched recall (pending, after the bloom legs):** LiNR V3 (approximate)
-  at 0.90 / 0.95, timed and interleaved with SilverTorch's bloom at the same
-  points (user, 2026-10-13).
+- **Matched recall:** LiNR V3 (approximate) at 0.90 / 0.95, timed and
+  interleaved with SilverTorch's bloom at the same points (the FR timed bloom
+  legs; user, 2026-10-13).
 - At its production setting (24 probes) SilverTorch is faster in 344 of
   345 cells (0.016-1.06 of LiNR at bs 1; the exception is LAION 1 M bloom
   `c0_domain` at bs 1, against exact LiNR) but its recall there is far from
@@ -278,23 +274,21 @@ novelty the call asks for. Kept apart from §4 (survey pattern 2).
 - Synthetic filters: at p ≥ 0.01 SilverTorch wins wherever it reaches the
   target (0.03-0.94); LiNR V1 wins the 17 reached cells at p ≥ 0.1 with
   bs ≥ 16 where many probes are needed (worst 2.7×). k 1000 shrinks the
-  reached cells (24 of 44 clause cells per batch size at 0.90 against 35 of 44 at k 100). Bloom filtering: pending the bloom legs (SilverTorch's own bloom, no recheck).
+  reached cells (24 of 44 clause cells per batch size at 0.90 against 35 of 44 at k 100). Bloom filtering: the FR timed bloom legs (SilverTorch's own bloom, no recheck), read in [results](results.md).
 - Index memory and build time: the adapted int8 clause index is 0.56-0.72
   of LiNR's fp16 index (PubMed 8.8 vs 15.8 GiB), but its bloom index is
   larger than LiNR's at ≤ 3 M; k-means build 2-4 s at ≤ 3 M, 10-29 min
   with 65536 lists, against about a second for LiNR.
 - The regime map in words: which arm to pick by pass rate × N × batch ×
   target recall.
-- **Pending the A2-bloom leg** (user directive, 2026-10-12): SilverTorch is
+- **The bloom side** (user directive, 2026-10-12): SilverTorch is
   evaluated with its probabilistic bloom filter as Meta ships it, false
   positives allowed and no recheck in the timed code (the recheck becomes
   grading only: recall against the exact oracle counts a false positive as
   a miss); SilverTorch's exact clause mode is our adaptation and leaves the
   head-to-head (at most a reference row). The bloom-side head-to-head
-  (SilverTorch bloom against LiNR exact, interleaved per cell) comes from `numbers/A1-bloom` (curves) and `numbers/A2-bloom`
-  (timed), due 2026-10-13 16:00Z (controller bloom plan, chain note
-  `numbers/2026-10-12-211500000-controller-bloom-plan.md`). The clause-filter claims above stand as
-  measured; which of them stay in §5 is set when the leg lands.
+  (SilverTorch bloom against LiNR exact, interleaved per cell) is the FR's
+  curve and timed-bloom legs ([results](results.md)).
 
 **Exhibits.**
 - **F3** recall-latency Pareto per dataset (SilverTorch probe curve against
@@ -382,7 +376,8 @@ verdict).
 ## Candidate findings
 
 The strongest results the material supports, ranked by what they add to
-the paper, each with its source. All seed 0, citable. Items marked *new*
+the paper, each with its source. All seed 0; the numbers are superseded by the
+full rerun, which regenerates them. Items marked *new*
 are not yet carried by the sections above or by the results draft.
 
 1. **At recall 0.90, SilverTorch is faster than exact LiNR wherever it

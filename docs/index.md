@@ -40,7 +40,7 @@ their headings are stable.
 - [testing](system/testing.md): the library suite's layout, fixtures,
   baselines and what each file asserts.
 - [evaluation](system/evaluation.md): the `bench` harness: measurement
-  protocol, config and suites, CLI, cell loop, records, report, upload.
+  protocol, config and suites, CLI, cell loop, records, report, upload, the merged tables.
 - [datasets](system/datasets.md): `eval_datasets` ETL per dataset, the
   on-disk layout contract, Hub I/O, encoder training.
 - [checkpoints](system/checkpoints.md): which encoder checkpoint each

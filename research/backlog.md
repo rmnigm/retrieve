@@ -43,6 +43,14 @@ the user moving it onto the roadmap.
   need fp16 items on the device and the oracle without its fp32 copy
   (Known defects below).
 
+## Unused dataset artifacts
+
+`item_attrs_wide.pt`, `wide_shelf_vocab.json`, `wide_shelf_global_freq.pt` and the
+`query_attrs_wide_1shelf` / `_2shelf` columns of `eval_split.parquet` (goodreads) are built by
+the ETL but never read: `bench.inputs.load_inputs` does not load them and `layout.load_query_attrs`
+reads only the `query_attrs_narrow` column. They exist for a wide-bloom sweep no suite runs. Keep
+or drop them as a unit; they are only meaningful together.
+
 ## After the paper
 
 - **`scripts/check_doc_links.py` cannot parse `for … in f(...)` in a CLI

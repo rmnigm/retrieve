@@ -51,7 +51,7 @@ hf download pinkmeme/eval-goodreads-work-id --repo-type dataset \
 Trained by the retired trainer with gBCE (per-position negatives). They
 are the bars the E1c models were measured against
 ([bars](../../research/validation.md#bars)), and the inputs of every record made
-before the switch: the golden goodreads cells and D1's `d1/goodreads` leg
+before the switch: the golden goodreads cells and the earliest goodreads legs
 use `gsasrec-d128-drop0.5-id`.
 
 | HF repo | ckpt-id |

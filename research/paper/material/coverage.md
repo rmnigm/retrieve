@@ -9,7 +9,7 @@ sources: [research/artifacts/hub-index.md, research/validation.md, research/pape
 
 # Coverage: every citable source and claim, and where the paper uses it
 
-> **Numbers superseded by the FULL-RERUN, not for the paper.** The figures on this page come from the NUMBERS legs and the final pass at earlier tags; the paper's tables are regenerated from the FULL-RERUN's `results.parquet` ([roadmap](../../roadmap.md) step 7, [validation](../../validation.md#full-rerun)). The structure and the rulings stand.
+> **Status (user ruling 2026-10-16).** Sections 1, 2 and 4 name sources the FULL-RERUN remeasured: **superseded; the full rerun regenerates them** (the `fr/` legs and their merged tables, [validation](../../validation.md#full-rerun)). Section 3 (META-FORK) names gates the rerun did not repeat: **final, citable** with the Hub subtrees as source. The structure and the rulings stand.
 
 Each row maps a citable source to the [outline](../outline.md) section that
 uses it, or says why it is not used. "§" is the outline's section; T / F
@@ -20,7 +20,7 @@ marked citable, the claims C1-C7 and every deviation id in
 [deviations](../reproduction-deviations.md). Proposals for citable material
 the outline did not yet use are marked **add**.
 
-## 1. Hub: NUMBERS legs (`numbers/*`, citable, gate green)
+## 1. Hub: NUMBERS legs (`numbers/*`): superseded; the full rerun regenerates them
 
 | subtree | what | used in |
 |---|---|---|
@@ -49,9 +49,9 @@ the outline did not yet use are marked **add**.
 | `numbers/L2b-v3pool-laion` | LiNR V3 pool, LAION | §4.2 (LAION rows, now in `c2_v3`) |
 | `numbers/L3-linr-corr` | LiNR on correlated filters | §4.1 (no change), §4.6 (correlated vs uniform) |
 | `numbers/L4-linr-k2048` | LiNR at k 2048 | §4.1, §5 |
-| `numbers/A1-bloom`, `numbers/A2-bloom` | **pending** (due 2026-10-13 16:00Z): SilverTorch bloom without recheck, curves and timed against LiNR V1 / V2 exact, interleaved | §4.4 (what the index's false positives cost), §5 bloom side |
+| `numbers/A1-bloom`, `numbers/A2-bloom` | SilverTorch bloom without recheck, curves and timed against LiNR V1 / V2 exact, interleaved; superseded by the FR curve and timed-bloom legs | §4.4 (what the index's false positives cost), §5 bloom side |
 
-## 2. Hub: the final pass (`campaign-final*`, citable, D1-G green)
+## 2. Hub: the final pass (`campaign-final*`): superseded; the full rerun regenerates it
 
 | subtree | used in |
 |---|---|
@@ -66,7 +66,7 @@ the outline did not yet use are marked **add**.
 | `artifacts/exhibits/20261011-final` | T1 fragment from the final pass (LiNR verdict wording): §2 T1 |
 | `artifacts/d1g-green/batch-vs-sum-20261011` | the 25 `bs16 < 16 × bs1` entries explained: §3 or §8, one line |
 
-## 3. Hub: META-FORK (`artifacts/meta-fork/*`)
+## 3. Hub: META-FORK (`artifacts/meta-fork/*`): final, citable (not remeasured by the rerun)
 
 | subtree | used in |
 |---|---|
@@ -77,7 +77,7 @@ the outline did not yet use are marked **add**.
 | `artifacts/meta-fork/laion30m-82fafb6`, `laion30m-8ff11e0` | earlier 30 M grids (168 / 168, 72 / 72), marked NOT CITABLE in hub-index; the head's records supersede them; T3 names them only as history if at all |
 | `artifacts/meta-fork/c0`, `c3-c4`, `k18-32c0d61-partial` | intermediate gates (NOT CITABLE per hub-index); not used |
 
-## 4. Hub: results draft (`artifacts/results-draft/*`)
+## 4. Hub: results draft (`artifacts/results-draft/*`): superseded by the FR results draft
 
 | subtree | used in |
 |---|---|
@@ -86,7 +86,7 @@ the outline did not yet use are marked **add**.
 | `artifacts/results-draft/20261012-adapted` | C6 ceiling split and local pass rate on adapted indexes (§4.6) |
 | `artifacts/results-draft/20261011` | the first draft on pre-NUMBERS records; superseded, not cited |
 
-## 5. Validation rows marked citable
+## 5. Validation rows (gates: final; measured numbers: superseded unless the rerun did not repeat them)
 
 | row | used in |
 |---|---|
@@ -131,7 +131,7 @@ the outline did not yet use are marked **add**.
 | D-4, D-5, D-7, D-8 | not in the paper: engineering defects of our harness / compile path with no bearing on a number (D-8's fix is the timed-region rule in §3) | — |
 | R-1, R-2, R-3, R-4 | §7: "no unexplained residual on the study's arms"; R-1 (V4) and R-2 (a golden cell) are not on study arms, R-3 is OF-7, R-4 a golden-cell residual on LiNR V2 / V3 at 4.5e-4 / 1.7e-5 | R-4 is on a study arm; **add** one clause to §7 that it is a golden-baseline residual below any reported precision |
 
-## 8. Citable but not yet used: proposals
+## 8. Not yet used: proposals (numbers from the FR tables)
 
 - **LiNR V1 at memory bandwidth** (`linr_vs_n.csv`): one sentence in §4.1
   explaining the crossover location (outline candidate 10).
