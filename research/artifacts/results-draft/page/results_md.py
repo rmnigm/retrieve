@@ -33,6 +33,26 @@ def md(head, rows):
     return "\n".join(out + ["| " + " | ".join(str(c) for c in r) + " |" for r in rows])
 
 
+def sig(v):
+    return "<0.001" if v < 0.0005 else f"{float(f'{v:.1g}'):g}"
+
+
+def pv(ds):
+    return D["pv"].get(ds, D["pv"]["*"])
+
+
+def pm_t(ds):
+    return f"±{50 * pv(ds)[0]:.1f} %"
+
+
+def pm_r(ds):
+    return "±" + sig(pv(ds)[1] / 2)
+
+
+def seedcap(ds):
+    return f" SilverTorch's seed spread on this dataset: time {pm_t(ds)}, recall {pm_r(ds)}."
+
+
 def bold(s, cond):
     return f"**{s}**" if cond else s
 
@@ -40,7 +60,8 @@ def bold(s, cond):
 def t1(key, bs):
     r = next(x for x in D["tab"] if x["key"] == key and x["bs"] == bs)
     best = min(x[2] for x in r["rows"] if x[2] is not None)
-    cap = f"{r['ds']}, filter `{r['sweep']}` (pass {pct(r['pass_rate'])}), d = {r['dim']}, k = 100, batch {bs}.\n\n"
+    cap = f"{r['ds']}, filter `{r['sweep']}` (pass {pct(r['pass_rate'])}), d = {r['dim']}, k = 100, batch {bs}. ±: SilverTorch's seed spread.\n\n"
+    t_, r_ = pv(r["ds"])
     return cap + md(
         [
             "Algorithm",
@@ -53,8 +74,18 @@ def t1(key, bs):
         [
             [
                 n,
-                f(rec, 3),
-                bold(f(ms, 3), ms == best),
+                f(rec, 3)
+                + (
+                    " ±" + sig(r_ / 2)
+                    if n.startswith("Silver") and rec is not None
+                    else ""
+                ),
+                bold(f(ms, 3), ms == best)
+                + (
+                    " ±" + sig(ms * t_ / 2)
+                    if n.startswith("Silver") and ms is not None
+                    else ""
+                ),
                 bold(fx(sp), ms == best),
                 cfg,
                 "–" if mb is None else f"{mb:,.0f}",
@@ -86,6 +117,7 @@ def t2(syn):
         [
             "Dataset · filter",
             "Pass",
+            "Seed ±",
             "0.90: share",
             "bs 1",
             "bs 16",
@@ -99,6 +131,7 @@ def t2(syn):
             [
                 f"{r['ds']} · {r['sweep'] if r['syn'] else '`' + r['sweep'] + '`'}",
                 pct(r["pass_rate"]),
+                pm_t(r["ds"]),
                 share(r, 0.9),
             ]
             + [sp(r["sp0.9"].get(str(b))) for b in (1, 16, 64)]
@@ -120,7 +153,7 @@ def us(v):
 
 b = D["batch"][0]
 best = [min(r[c] for r in b["rows"] if r[c] is not None) for c in (1, 2, 3)]
-T["T3"] = f"{b['ds']}, filter `{b['sweep']}`, k = 100.\n\n" + md(
+T["T3"] = f"{b['ds']}, filter `{b['sweep']}`, k = 100.{seedcap(b['ds'])}\n\n" + md(
     ["Algorithm", "B = 1", "B = 16", "B = 64"],
     [
         [r[0]] + [bold(us(r[c]), r[c] == best[c - 1]) for c in (1, 2, 3)]
@@ -130,6 +163,7 @@ T["T3"] = f"{b['ds']}, filter `{b['sweep']}`, k = 100.\n\n" + md(
 T["T4"] = md(
     [
         "Filter · size",
+        "Seed ±",
         "0.90: share",
         "bs 1",
         "bs 16",
@@ -140,6 +174,7 @@ T["T4"] = md(
     [
         [
             f"`{r['sweep']}` · {r['ds'].replace('LAION ', '')}",
+            pm_t(r["ds"]),
             "top " + f(r["top"])
             if r["frac"] is None
             else pct(r["frac"]) + (" ◐" if r["frac"] > 0.25 else ""),
@@ -163,7 +198,7 @@ T["T5"] = md(
     ],
 )
 s = next(x for x in D["sel"] if x["label"].startswith("LAION-synth 30M"))
-T["T6"] = f"{s['label']}, batch 16, k = 100.\n\n" + md(
+T["T6"] = f"{s['label']}, batch 16, k = 100.{seedcap(s['label'])}\n\n" + md(
     [
         "Pass rate",
         "V1, ms",
@@ -213,6 +248,7 @@ T["T8"] = md(
         "Items per cluster",
         "Probes",
         "Bloom ÷ exact (range)",
+        "Seed ±",
     ],
     [
         [
@@ -223,34 +259,39 @@ T["T8"] = md(
             if len(set(r["probes"].split("–"))) == 1
             else r["probes"],
             f"{bold(f(r['med']), r['med'] < 1)} ({f(r['lo'])}–{f(r['hi'])})",
+            pm_t(r["ds"]),
         ]
         for r in sorted(
             D["cbtab"], key=lambda r: (n_of[r["ds"]], r["ds"], r["sweep"], r["nl"])
         )
     ],
 )
-T["T9"] = md(
-    [
-        "Filter · clusters",
-        "Index, MiB",
-        "Build, s",
-        "Recall at 1/8",
-        "Recall at 1/4",
-        "Probes for 0.90",
-        "t_med, ms",
-    ],
-    [
+T["T9"] = (
+    seedcap("LAION 30M").strip()
+    + "\n\n"
+    + md(
         [
-            f"`{r['sweep']}` · {r['nl']:,}",
-            f"{r['mib']:,.0f}",
-            f(r["build"], 0),
-            f(r["r8"], 3),
-            f(r["r4"], 3),
-            "–" if r["probes"] is None else f"{r['probes']:,}",
-            f(r["ms"]),
-        ]
-        for r in D["nltab"]
-    ],
+            "Filter · clusters",
+            "Index, MiB",
+            "Build, s",
+            "Recall at 1/8",
+            "Recall at 1/4",
+            "Probes for 0.90",
+            "t_med, ms",
+        ],
+        [
+            [
+                f"`{r['sweep']}` · {r['nl']:,}",
+                f"{r['mib']:,.0f}",
+                f(r["build"], 0),
+                f(r["r8"], 3),
+                f(r["r4"], 3),
+                "–" if r["probes"] is None else f"{r['probes']:,}",
+                f(r["ms"]),
+            ]
+            for r in D["nltab"]
+        ],
+    )
 )
 pick = [
     "Goodreads 0.8M|c0_genre",
@@ -272,12 +313,9 @@ T["T11"] = md(
         "Dataset",
         "Seeds",
         "Settings",
-        "Time: median",
-        "Time: max",
-        "Recall: max",
-        "vs exact LiNR",
+        "Time range",
+        "Recall range",
         "Tuned cells",
-        "vs best LiNR",
         "Winner changes",
     ],
     [
@@ -285,42 +323,80 @@ T["T11"] = md(
             r["ds"],
             r["seeds"],
             r["points"],
-            f"{f(r['t_med'], 1)} %",
-            f"{f(r['t_max'], 1)} %",
-            f(r["r_max"], 3),
-            f"{f(r['w_med'], 1)} %",
+            f"{f(r['t'], 1)} %",
+            f(r["r"], 3),
             r["cells"],
-            "–" if r["fx_med"] is None else f"{f(r['fx_med'], 1)} %",
             r["flips"],
         ]
-        for r in D["vsum"]
+        for r in D["pvtab"]
     ],
 )
-T["T11b"] = md(
-    ["Cells", "Seed", "Machine", "Settings", "Median", "Range"],
+ps = D["psweep"]
+
+
+def at(f_, nl, np_):
+    return next((p for p in f_["pts"].get(str(nl), []) if p[0] == np_), None)
+
+
+def first90(f_, nl):
+    return next((p for p in f_["pts"].get(str(nl), []) if p[1] >= 0.9), None)
+
+
+def cell(p):
+    return "–" if p is None else f"{f(p[1], 3)} · {f(p[2])} ms"
+
+
+T["Tps"] = md(
     [
-        [
-            m["cells"],
-            m["seed"],
-            "another" if m["other"] else "same",
-            m["n"],
-            f(m["med"], 3),
-            f"{f(m['lo'], 3)}–{f(m['hi'], 3)}",
+        "Filter",
+        "24 probes",
+        "512 probes",
+        "1,024 probes",
+        "Smallest for 0.90",
+        "Tuned for 0.90",
+        "LiNR V1, ms",
+    ],
+    [
+        [f_["label"]]
+        + [cell(at(f_, 4096, n_)) for n_ in (24, 512, 1024)]
+        + [
+            "–"
+            if first90(f_, 4096) is None
+            else f"{first90(f_, 4096)[0]:,} probes · {f(first90(f_, 4096)[2])} ms",
+            next(
+                (
+                    f"{k[1]:,} / {k[2]:,} · {f(k[4])} ms"
+                    for k in f_["picks"]
+                    if k[0] == 0.9
+                ),
+                "–",
+            ),
+            f(f_["v1"]),
         ]
-        for m in D["machine"]
+        for f_ in ps["filters"]
     ],
 )
 vt_, vb = D["vtext"], D["vbelow"]
 T.update(
-    v_t=vt_["t"],
-    v_r=vt_["r"],
-    v_fx=vt_["fx"],
+    v_t=D["pvtext"]["t"],
+    v_r=D["pvtext"]["r"],
+    pv_all=D["pvtext"]["all_t"],
     v_flips="none" if vt_["flips"] == 0 else vt_["flips"],
     v_cells=vt_["cells"],
-    v_mach=vt_["mach"],
     v_below=f"At that setting {vb['n']} cells ({', '.join(vb['cells'])}) dip below the target at a later seed, by at most {vb['gap']}."
     if vb["n"]
     else "",
+)
+c_ = D["counts"]
+T.update(
+    c_cells=c_["cells"],
+    c_q=c_["quarter"],
+    c_qw=c_["quarter_wins"],
+    c_qmed=f"{c_['quarter_med']:.2f}",
+    c_qx=f"{1 / c_['quarter_med']:.1f}",
+    c_b=c_["beyond"],
+    c_bw=c_["beyond_wins"],
+    c_u=D["band"]["unreached"],
 )
 T["T12"] = md(
     ["", "Verdict", "The paper", "We measured"],

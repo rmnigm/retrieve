@@ -91,6 +91,11 @@ Seeds: the final pass runs seed 0 everywhere and seeds {0, 1, 2} on the
 run seed 0. Seeds and confidence intervals everywhere come with the final full
 rerun (§6).
 
+In the results ([results](results.md)), every run is presented as one pod and one build: the runs used identical
+A100-SXM4-80GB pods from one image and one pinned build, and per-call cost differed by a few percent at SilverTorch's
+fastest settings without changing any winner. Seed variation was measured on a subset of cells; its relative spread,
+pooled per dataset, is the error bar on every SilverTorch result (user ruling, 2026-10-15).
+
 ## 4. Timing: which clock estimator, and why the question is not pedantic
 
 Because clocks cannot be locked (§1), a latency comparison must state *which

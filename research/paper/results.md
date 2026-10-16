@@ -31,7 +31,7 @@ default of 24 probes and at the fastest setting that reaches recall 0.90 and 0.9
 (as a share of the passing items) that reaches the same targets. Speed-up is against exact LiNR V1. Three filters are
 shown here; the page has every filter and batch size.
 
-**Table 1a.** PubMed 10M, filter `c0_mesh` (pass 0.02 %), d = 768, k = 100, batch 16.
+**Table 1a.** PubMed 10M, filter `c0_mesh` (pass 0.02 %), d = 768, k = 100, batch 16. ±: SilverTorch's seed spread.
 
 | Algorithm | Recall@100 | t_med, ms | Speed-up vs V1 | Setting | Index, MiB |
 |---|--:|--:|--:|--:|--:|
@@ -39,11 +39,11 @@ shown here; the page has every filter and batch size.
 | LiNR V2 | 1.000 | 6.338 | 1.88× | exact | 16,174 |
 | LiNR V3, pool for 0.90 | 0.999 | 6.360 | 1.87× | pool 0.5 % | 17,090 |
 | LiNR V3, pool for 0.95 | 0.999 | 6.360 | 1.87× | pool 0.5 % | 17,090 |
-| SilverTorch, 24 probes | 0.580 | **0.241** | **49.4×** | 4096 lists / 24 | 8,710 |
-| SilverTorch, tuned for 0.90 | 0.909 | 0.795 | 15.0× | 4096 / 512 | 8,710 |
-| SilverTorch, tuned for 0.95 | 0.952 | 2.240 | 5.32× | 65536 / 16384 | 8,891 |
+| SilverTorch, 24 probes | 0.580 ±0.0008 | **0.241** ±0.004 | **49.4×** | 4096 lists / 24 | 8,710 |
+| SilverTorch, tuned for 0.90 | 0.909 ±0.0008 | 0.795 ±0.01 | 15.0× | 4096 / 512 | 8,710 |
+| SilverTorch, tuned for 0.95 | 0.952 ±0.0008 | 2.240 ±0.04 | 5.32× | 65536 / 16384 | 8,891 |
 
-**Table 1b.** LAION 30M, filter `tags4` (pass 0.27 %), d = 256, k = 100, batch 16.
+**Table 1b.** LAION 30M, filter `tags4` (pass 0.27 %), d = 256, k = 100, batch 16. ±: SilverTorch's seed spread.
 
 | Algorithm | Recall@100 | t_med, ms | Speed-up vs V1 | Setting | Index, MiB |
 |---|--:|--:|--:|--:|--:|
@@ -51,11 +51,11 @@ shown here; the page has every filter and batch size.
 | LiNR V2 | 0.999 | 19.915 | 0.84× | exact | 16,022 |
 | LiNR V3, pool for 0.90 | 0.948 | 19.558 | 0.86× | pool 10 % | 16,937 |
 | LiNR V3, pool for 0.95 | 0.983 | 19.673 | 0.85× | pool 20 % | 16,937 |
-| SilverTorch, 24 probes | 0.492 | **0.289** | **58.2×** | 4096 lists / 24 | 11,448 |
-| SilverTorch, tuned for 0.90 | 0.917 | 2.396 | 7.02× | 16384 / 2048 | 11,461 |
-| SilverTorch, tuned for 0.95 | 0.955 | 4.414 | 3.81× | 16384 / 4096 | 11,461 |
+| SilverTorch, 24 probes | 0.492 ±<0.001 | **0.289** ±0.001 | **58.2×** | 4096 lists / 24 | 11,448 |
+| SilverTorch, tuned for 0.90 | 0.917 ±<0.001 | 2.396 ±0.01 | 7.02× | 16384 / 2048 | 11,461 |
+| SilverTorch, tuned for 0.95 | 0.955 ±<0.001 | 4.414 ±0.02 | 3.81× | 16384 / 4096 | 11,461 |
 
-**Table 1c.** LAION 1M, filter `c0_domain` (pass 0.95 %), d = 256, k = 100, batch 16.
+**Table 1c.** LAION 1M, filter `c0_domain` (pass 0.95 %), d = 256, k = 100, batch 16. ±: SilverTorch's seed spread.
 
 | Algorithm | Recall@100 | t_med, ms | Speed-up vs V1 | Setting | Index, MiB |
 |---|--:|--:|--:|--:|--:|
@@ -63,16 +63,15 @@ shown here; the page has every filter and batch size.
 | LiNR V2 | 1.000 | 0.854 | 0.77× | exact | 534 |
 | LiNR V3, pool for 0.90 | 0.949 | 0.811 | 0.81× | pool 0.5 % | 565 |
 | LiNR V3, pool for 0.95 | 0.952 | 0.820 | 0.80× | pool 20 % | 565 |
-| SilverTorch, 24 probes | 0.567 | **0.208** | **3.15×** | 512 lists / 24 | 382 |
-| SilverTorch, tuned for 0.90 | 0.923 | 0.598 | 1.10× | 8192 / 4096 ◐ | 390 |
-| SilverTorch, tuned for 0.95 | 0.962 | 0.837 | 0.78× | 8192 / 6144 ◐ | 390 |
+| SilverTorch, 24 probes | 0.567 ±0.004 | **0.208** ±0.005 | **3.15×** | 512 lists / 24 | 382 |
+| SilverTorch, tuned for 0.90 | 0.923 ±0.004 | 0.598 ±0.01 | 1.10× | 8192 / 4096 ◐ | 390 |
+| SilverTorch, tuned for 0.95 | 0.962 ±0.004 | 0.837 ±0.02 | 0.78× | 8192 / 6144 ◐ | 390 |
 
 The results show three main patterns. **First**, at 24 probes SilverTorch is 3–58× faster than V1 at a batch of 16, but
 it returns a different answer: recall@100 is 0.33–0.89. Its time barely moves with catalogue size (0.19–0.29 ms per batch from 0.8 M to 30 M items), while V1's grows with it (0.57 ms on Goodreads, 16.8 ms on LAION 30M), consistent with SilverTorch scanning only 24 of 512–4,096 clusters and V1 scoring every item. **Second**, held to recall 0.90, SilverTorch still wins by a wide margin wherever a
 modest share of clusters is enough: 15× V1 on PubMed's MeSH filter, 7.0× on LAION 30M's tag filter, 6.7× on arXiv's main
 category. Where it must probe half the clusters (LAION's domain filter at 1–10 M items, its tag filter at 1 M), it lands
-between 0.7× and 1.4× of V1's speed. **Third**, among LiNR's variants exact V1 is the fastest at a batch of 16 on every
-filter but one. The exception is PubMed's MeSH filter, where only 0.02 % of items pass and V2 halves the time, consistent with it gathering just those. V3 at a pool reaching 0.90 beats the faster exact variant only on LAION's domain filter, by 2–7 %.
+between 0.7× and 1.4× of V1's speed. **Third**, on the real filters, exact V1 is the fastest of LiNR's variants at a batch of 16 on every filter but one. The exception is PubMed's MeSH filter, where only 0.02 % of items pass and V2 halves the time, consistent with it gathering just those. V3 at a pool reaching 0.90 beats the faster exact variant only on LAION's domain filter, by 2–7 %. On broad synthetic filters (20–50 % passing) at one query, V3 is the fastest LiNR on LAION-synth 10M and 30M, at 0.43–0.74 of the faster exact variant's time, consistent with its 1-bit pass costing less than gathering or scoring that many items exactly.
 
 ## 2. Speed at equal recall
 
@@ -83,69 +82,72 @@ within three quarters, with the best recall reached. Real filters, k = 100; Tabl
 
 **Table 2.**
 
-| Dataset · filter | Pass | 0.90: share | bs 1 | bs 16 | bs 64 | 0.95: share | bs 1 | bs 16 | bs 64 |
-|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| Goodreads 0.8M · `c0_genre` | 33 % | 0.80 % | **1.29×** | **2.98×** | **6.18×** | 1.6 % | **1.27×** | **2.98×** | **5.63×** |
-| LAION 1M · `tags4` | 0.27 % | 50 % ◐ | **1.04×** | 0.71× | 0.44× | 75 % ◐ | 0.80× | 0.49× | 0.29× |
-| LAION 1M · `c0_domain` | 0.95 % | 50 % ◐ | 0.92× | **1.09×** | 0.75× | 75 % ◐ | 0.72× | 0.78× | 0.52× |
-| arXiv 3M · `all4` | 0.94 % | 25 % | **3.22×** | **4.96×** | **4.77×** | 25 % | **3.22×** | **3.43×** | **2.82×** |
-| arXiv 3M · `c0_maincat` | 14 % | 3.1 % | **2.03×** | **6.72×** | **5.97×** | 25 % | **2.02×** | **2.41×** | **1.69×** |
-| arXiv 3M · `c3_nversions` | 44 % | 3.1 % | **2.82×** | **6.50×** | **5.72×** | 25 % | **2.64×** | **1.78×** | **1.17×** |
-| LAION 3M · `tags4` | 0.27 % | 25 % | **1.94×** | **2.19×** | **1.41×** | top 0.91 | – | – | – |
-| LAION 3M · `c0_domain` | 0.95 % | 50 % ◐ | 0.76× | **1.35×** | 0.87× | 75 % ◐ | 0.64× | **1.01×** | 0.60× |
-| LAION 10M · `tags4` | 0.27 % | 25 % | **4.22×** | **3.78×** | **2.26×** | 25 % | **2.17×** | **1.50×** | 0.86× |
-| LAION 10M · `c0_domain` | 0.95 % | 50 % ◐ | 0.99× | **1.33×** | 0.78× | 75 % ◐ | 0.79× | 0.95× | 0.54× |
-| PubMed 10M · `c0_mesh` | 0.02 % | 12 % | **3.20×** | **7.97×** | **7.87×** | 25 % | **1.35×** | **2.83×** | **2.47×** |
-| LAION 30M · `tags4` | 0.27 % | 12 % | **7.39×** | **7.02×** | **4.38×** | 25 % | **5.15×** | **3.81×** | **2.29×** |
-| LAION 30M · `c0_domain` | 0.95 % | 25 % | **3.03×** | **4.38×** | **2.78×** | top 0.91 | – | – | – |
+| Dataset · filter | Pass | Seed ± | 0.90: share | bs 1 | bs 16 | bs 64 | 0.95: share | bs 1 | bs 16 | bs 64 |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Goodreads 0.8M · `c0_genre` | 33 % | ±2.1 % | 0.80 % | **1.29×** | **2.98×** | **6.18×** | 1.6 % | **1.27×** | **2.98×** | **5.63×** |
+| LAION 1M · `tags4` | 0.27 % | ±2.3 % | 50 % ◐ | **1.04×** | 0.71× | 0.44× | 75 % ◐ | 0.80× | 0.49× | 0.29× |
+| LAION 1M · `c0_domain` | 0.95 % | ±2.3 % | 50 % ◐ | 0.92× | **1.09×** | 0.75× | 75 % ◐ | 0.72× | 0.78× | 0.52× |
+| arXiv 3M · `all4` | 0.94 % | ±1.2 % | 25 % | **3.22×** | **4.96×** | **4.77×** | 25 % | **3.22×** | **3.43×** | **2.82×** |
+| arXiv 3M · `c0_maincat` | 14 % | ±1.2 % | 3.1 % | **2.03×** | **6.72×** | **5.97×** | 25 % | **2.02×** | **2.41×** | **1.69×** |
+| arXiv 3M · `c3_nversions` | 44 % | ±1.2 % | 3.1 % | **2.82×** | **6.50×** | **5.72×** | 25 % | **2.64×** | **1.78×** | **1.17×** |
+| LAION 3M · `tags4` | 0.27 % | ±1.9 % | 25 % | **1.94×** | **2.19×** | **1.41×** | top 0.91 | – | – | – |
+| LAION 3M · `c0_domain` | 0.95 % | ±1.9 % | 50 % ◐ | 0.76× | **1.35×** | 0.87× | 75 % ◐ | 0.64× | **1.01×** | 0.60× |
+| LAION 10M · `tags4` | 0.27 % | ±0.9 % | 25 % | **4.22×** | **3.78×** | **2.26×** | 25 % | **2.17×** | **1.50×** | 0.86× |
+| LAION 10M · `c0_domain` | 0.95 % | ±0.9 % | 50 % ◐ | 0.99× | **1.33×** | 0.78× | 75 % ◐ | 0.79× | 0.95× | 0.54× |
+| PubMed 10M · `c0_mesh` | 0.02 % | ±1.7 % | 12 % | **3.20×** | **7.97×** | **7.87×** | 25 % | **1.35×** | **2.83×** | **2.47×** |
+| LAION 30M · `tags4` | 0.27 % | ±0.4 % | 12 % | **7.39×** | **7.02×** | **4.38×** | 25 % | **5.15×** | **3.81×** | **2.29×** |
+| LAION 30M · `c0_domain` | 0.95 % | ±0.4 % | 25 % | **3.03×** | **4.38×** | **2.78×** | top 0.91 | – | – | – |
 
-Three patterns stand out. **First**, the share of clusters SilverTorch must probe decides the outcome. Over all 276 cells,
-183 reach the target within a quarter of the clusters, and there SilverTorch beats the best LiNR in 181, with a median of
-0.29 of its time (about 3.4× faster). Another 51 cells reach the target only by probing half to three quarters of the
-clusters, and SilverTorch wins 13 of those. The other 42 do not reach it even at three quarters. **Second**, the hard
+Three patterns stand out. **First**, the share of clusters SilverTorch must probe decides the outcome. Over all 312 cells, 219 reach the target within a quarter of the clusters, and there SilverTorch beats the best LiNR in 216, with a median of 0.28 of its time (about 3.6× faster). Another 51 cells reach the target only by probing half to three quarters of the clusters, and SilverTorch wins 13 of those. The other 42 do not reach it even at three quarters. **Second**, the hard
 cases are filters whose passing items are thinly spread across clusters: LAION's domain filter, and its tag filter on
 the small LAION subsets. This is consistent with the classic shortage of candidates: a query's nearest clusters hold few items that pass, so recall has to be bought with more probes, while an exact scan pays the same price whatever the filter.
 **Third**, SilverTorch's lead narrows at a batch of 64 (on LAION 30M's tag filter: 7.4× at one query, 4.4× at 64). This is consistent with V1's full scan being one matrix product shared by the whole batch, while each SilverTorch query probes its own clusters and so amortises less.
 
 **Table 2b.** The same, on the synthetic filters (items pass at random).
 
-| Dataset · filter | Pass | 0.90: share | bs 1 | bs 16 | bs 64 | 0.95: share | bs 1 | bs 16 | bs 64 |
-|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| Goodreads-synth 0.8M · random 0.1 % | 0.10 % | 50 % ◐ | **1.06×** | **1.60×** | **1.38×** | 50 % ◐ | **1.06×** | **1.60×** | **1.38×** |
-| Goodreads-synth 0.8M · random 1 % | 1.0 % | 6.2 % | **1.06×** | **2.78×** | **3.97×** | 12 % | **1.06×** | **2.74×** | **2.58×** |
-| Goodreads-synth 0.8M · random 10 % | 10.0 % | 1.6 % | **1.12×** | **2.88×** | **5.87×** | 3.1 % | **1.11×** | **2.88×** | **5.10×** |
-| Goodreads-synth 0.8M · no filter | 100 % | 1.6 % | **1.63×** | **2.89×** | **5.85×** | 1.6 % | **1.63×** | **2.88×** | **5.26×** |
-| arXiv-synth 3M · random 0.1 % | 0.10 % | 25 % | **1.66×** | **5.05×** | **4.39×** | top 0.94 | – | – | – |
-| arXiv-synth 3M · random 1 % | 1.0 % | 25 % | **1.70×** | **5.71×** | **5.36×** | 25 % | **1.70×** | **4.03×** | **3.19×** |
-| arXiv-synth 3M · random 10 % | 10.0 % | 6.2 % | **1.96×** | **5.80×** | **5.21×** | 12 % | **1.95×** | **4.23×** | **3.20×** |
-| arXiv-synth 3M · no filter | 100 % | 3.1 % | **4.27×** | **5.72×** | **4.38×** | 25 % | **3.55×** | **1.37×** | 0.83× |
-| LAION-synth 10M · random 0.1 % | 0.10 % | 25 % | **3.11×** | **5.46×** | **3.86×** | top 0.94 | – | – | – |
-| LAION-synth 10M · random 1 % | 0.99 % | 12 % | **3.84×** | **6.87×** | **4.85×** | 25 % | **2.92×** | **3.96×** | **2.55×** |
-| LAION-synth 10M · random 10 % | 10 % | 6.2 % | **5.54×** | **7.86×** | **5.78×** | 25 % | **3.15×** | **2.89×** | **1.74×** |
-| LAION-synth 10M · no filter | 100 % | 1.6 % | **13.6×** | **6.83×** | **4.68×** | 6.2 % | **9.30×** | **2.39×** | **1.36×** |
-| PubMed-synth 10M · random 0.1 % | 0.10 % | 12 % | **3.32×** | **6.70×** | **7.73×** | 25 % | **1.35×** | **2.20×** | **2.40×** |
-| PubMed-synth 10M · random 1 % | 1.0 % | 12 % | **2.95×** | **6.04×** | **6.19×** | top 0.93 | – | – | – |
-| PubMed-synth 10M · random 10 % | 10.0 % | 6.2 % | **5.82×** | **9.90×** | **4.83×** | top 0.92 | – | – | – |
-| PubMed-synth 10M · no filter | 100 % | 1.6 % | **23.0×** | **5.77×** | **2.57×** | top 0.91 | – | – | – |
-| LAION-synth 30M · random 0.1 % | 0.10 % | 25 % | **4.57×** | **7.68×** | **5.77×** | 25 % | **3.08×** | **4.35×** | **3.06×** |
-| LAION-synth 30M · random 1 % | 1.0 % | 6.2 % | **6.36×** | **12.9×** | **9.45×** | 12 % | **4.11×** | **6.13×** | **4.16×** |
-| LAION-synth 30M · random 10 % | 10 % | 3.1 % | **10.2×** | **14.2×** | **9.29×** | 12 % | **5.21×** | **4.36×** | **2.48×** |
-| LAION-synth 30M · no filter | 100 % | 1.6 % | **33.9×** | **9.83×** | **5.88×** | 6.2 % | **17.3×** | **2.86×** | **1.56×** |
+| Dataset · filter | Pass | Seed ± | 0.90: share | bs 1 | bs 16 | bs 64 | 0.95: share | bs 1 | bs 16 | bs 64 |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Goodreads-synth 0.8M · random 0.1 % | 0.10 % | ±2.2 % | 50 % ◐ | **1.06×** | **1.60×** | **1.38×** | 50 % ◐ | **1.06×** | **1.60×** | **1.38×** |
+| Goodreads-synth 0.8M · random 1 % | 1.0 % | ±2.2 % | 6.2 % | **1.06×** | **2.78×** | **3.97×** | 12 % | **1.06×** | **2.74×** | **2.58×** |
+| Goodreads-synth 0.8M · random 10 % | 10.0 % | ±2.2 % | 1.6 % | **1.12×** | **2.88×** | **5.87×** | 3.1 % | **1.11×** | **2.88×** | **5.10×** |
+| Goodreads-synth 0.8M · no filter | 100 % | ±2.2 % | 1.6 % | **1.63×** | **2.89×** | **5.85×** | 1.6 % | **1.63×** | **2.88×** | **5.26×** |
+| arXiv-synth 3M · random 0.1 % | 0.10 % | ±1.8 % | 25 % | **1.66×** | **5.05×** | **4.39×** | top 0.94 | – | – | – |
+| arXiv-synth 3M · random 1 % | 1.0 % | ±1.8 % | 25 % | **1.70×** | **5.71×** | **5.36×** | 25 % | **1.70×** | **4.03×** | **3.19×** |
+| arXiv-synth 3M · random 10 % | 10.0 % | ±1.8 % | 6.2 % | **1.96×** | **5.80×** | **5.21×** | 12 % | **1.95×** | **4.23×** | **3.20×** |
+| arXiv-synth 3M · no filter | 100 % | ±1.8 % | 3.1 % | **4.27×** | **5.72×** | **4.38×** | 25 % | **3.55×** | **1.37×** | 0.83× |
+| LAION-synth 10M · random 0.1 % | 0.10 % | ±0.5 % | 25 % | **3.11×** | **5.46×** | **3.86×** | top 0.94 | – | – | – |
+| LAION-synth 10M · random 1 % | 0.99 % | ±0.5 % | 12 % | **3.84×** | **6.87×** | **4.85×** | 25 % | **2.92×** | **3.96×** | **2.55×** |
+| LAION-synth 10M · random 10 % | 10 % | ±0.5 % | 6.2 % | **5.54×** | **7.86×** | **5.78×** | 25 % | **3.15×** | **2.89×** | **1.74×** |
+| LAION-synth 10M · random 20 % | 20 % | ±0.5 % | 6.2 % | **4.97×** | **6.56×** | **4.12×** | 25 % | **2.92×** | **3.20×** | **2.00×** |
+| LAION-synth 10M · random 30 % | 30 % | ±0.5 % | 6.2 % | **4.98×** | **7.72×** | **5.75×** | 12 % | **2.92×** | **2.74×** | **1.67×** |
+| LAION-synth 10M · random 50 % | 50 % | ±0.5 % | 6.2 % | **4.55×** | **5.54×** | **3.67×** | 12 % | **2.57×** | **1.75×** | 0.99× |
+| LAION-synth 10M · no filter | 100 % | ±0.5 % | 1.6 % | **13.6×** | **6.83×** | **4.68×** | 6.2 % | **9.30×** | **2.39×** | **1.36×** |
+| PubMed-synth 10M · random 0.1 % | 0.10 % | ±1.0 % | 12 % | **3.32×** | **6.70×** | **7.73×** | 25 % | **1.35×** | **2.20×** | **2.40×** |
+| PubMed-synth 10M · random 1 % | 1.0 % | ±1.0 % | 12 % | **2.95×** | **6.04×** | **6.19×** | top 0.93 | – | – | – |
+| PubMed-synth 10M · random 10 % | 10.0 % | ±1.0 % | 6.2 % | **5.82×** | **9.90×** | **4.83×** | top 0.92 | – | – | – |
+| PubMed-synth 10M · no filter | 100 % | ±1.0 % | 1.6 % | **23.0×** | **5.77×** | **2.57×** | top 0.91 | – | – | – |
+| LAION-synth 30M · random 0.1 % | 0.10 % | ±0.2 % | 25 % | **4.57×** | **7.68×** | **5.77×** | 25 % | **3.08×** | **4.35×** | **3.06×** |
+| LAION-synth 30M · random 1 % | 1.0 % | ±0.2 % | 6.2 % | **6.36×** | **12.9×** | **9.45×** | 12 % | **4.11×** | **6.13×** | **4.16×** |
+| LAION-synth 30M · random 10 % | 10 % | ±0.2 % | 3.1 % | **10.2×** | **14.2×** | **9.29×** | 12 % | **5.21×** | **4.36×** | **2.48×** |
+| LAION-synth 30M · random 20 % | 20 % | ±0.2 % | 3.1 % | **8.40×** | **12.7×** | **8.16×** | 12 % | **4.18×** | **3.85×** | **2.17×** |
+| LAION-synth 30M · random 30 % | 30 % | ±0.2 % | 3.1 % | **8.46×** | **10.9×** | **6.80×** | 12 % | **4.05×** | **3.23×** | **1.80×** |
+| LAION-synth 30M · random 50 % | 50 % | ±0.2 % | 3.1 % | **7.85×** | **6.88×** | **3.95×** | 12 % | **3.43×** | **1.89×** | **1.02×** |
+| LAION-synth 30M · no filter | 100 % | ±0.2 % | 1.6 % | **33.9×** | **9.83×** | **5.88×** | 6.2 % | **17.3×** | **2.86×** | **1.56×** |
 
 The synthetic filters separate the pass rate from how the passing items are spread. They pass items at random, so a
 query's nearest clusters hold their fair share of passing items at any rate, and SilverTorch beats the best LiNR at
 recall 0.90 on every synthetic filter and batch size (1.1–34×). The share of clusters it needs falls as more items pass:
-on LAION-synth 30M from a quarter at 0.1 % to 3 % at 10 % and 1.6 % with no filter. At 10 % on the 10–30 M sets it is
-4.8–14× faster than the best LiNR, against 0.8–7.4× on LAION's real filters at the same sizes, which pass 1 % or less.
-Rarity alone does not explain the gap: from 3 M items up, the random 0.1 % filter needs at most a quarter of the clusters, consistent
-with the real filters' passing items being thin in a query's nearest clusters, not merely rare. At 0.95 the lead
-shrinks, most at a batch of 64 with no filter (0.8–1.6×), and PubMed-synth does not reach 0.95 at 1 % or more (top
-0.91–0.93), consistent with int8 scores limiting recall on PubMed, as on its broad real filters. Between 10 % and 100 %
-SilverTorch was timed only at these four rates; the 20 % and 50 % filters were run for LiNR alone (Figure 2).
+on LAION-synth 30M from a quarter at 0.1 % to 3 % from 10 to 50 % and 1.6 % with no filter. At 10–50 % on the 10–30 M
+sets it is 3.7–14× faster than the best LiNR, against 0.8–7.4× on LAION's real filters at the same sizes, which pass 1 %
+or less. Rarity alone does not explain the gap: from 3 M items up, the random 0.1 % filter needs at most a quarter of
+the clusters, consistent with the real filters' passing items being thin in a query's nearest clusters, not merely rare.
+Above 10 % the lead narrows as the pass rate grows, because SilverTorch's time at a fixed setting grows (section 8)
+while V1's does not: at 0.95 and a batch of 64 the two are even at 50 % (0.99–1.02×). PubMed-synth does not reach 0.95
+at 1 % or more (top 0.91–0.93), consistent with int8 scores limiting recall on PubMed, as on its broad real filters.
 
 ## 3. Effect of batch size on speed
 
-**Table 3.** Time per query (time per batch ÷ batch size). arXiv 3M, filter `c0_maincat`, k = 100.
+**Table 3.** Time per query (time per batch ÷ batch size). arXiv 3M, filter `c0_maincat`, k = 100. SilverTorch's seed spread on this dataset: time ±1.2 %, recall ±<0.001.
 
 | Algorithm | B = 1 | B = 16 | B = 64 |
 |---|--:|--:|--:|
@@ -169,16 +171,16 @@ the probed clusters, against building the filter over the whole index first. The
 
 **Table 4.**
 
-| Filter · size | 0.90: share | bs 1 | bs 16 | bs 64 | 24 probes: recall | 24 probes: bs 16 |
-|---|--:|--:|--:|--:|--:|--:|
-| `c0_domain` · 1M | 50 % ◐ | 0.92× | **1.09×** | 0.75× | 0.567 | 3.10× |
-| `c0_domain` · 3M | 50 % ◐ | 0.76× | **1.35×** | 0.87× | 0.493 | 8.40× |
-| `c0_domain` · 10M | 50 % ◐ | 0.99× | **1.33×** | 0.78× | 0.496 | 26.0× |
-| `c0_domain` · 30M | 25 % | **3.03×** | **4.38×** | **2.78×** | 0.551 | 55.0× |
-| `tags4` · 1M | 50 % ◐ | **1.04×** | 0.71× | 0.44× | 0.398 | 3.30× |
-| `tags4` · 3M | 25 % | **1.94×** | **2.19×** | **1.41×** | 0.334 | 8.90× |
-| `tags4` · 10M | 25 % | **4.22×** | **3.78×** | **2.26×** | 0.381 | 29.1× |
-| `tags4` · 30M | 12 % | **7.39×** | **7.02×** | **4.38×** | 0.492 | 58.2× |
+| Filter · size | Seed ± | 0.90: share | bs 1 | bs 16 | bs 64 | 24 probes: recall | 24 probes: bs 16 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `c0_domain` · 1M | ±2.3 % | 50 % ◐ | 0.92× | **1.09×** | 0.75× | 0.567 | 3.10× |
+| `c0_domain` · 3M | ±1.9 % | 50 % ◐ | 0.76× | **1.35×** | 0.87× | 0.493 | 8.40× |
+| `c0_domain` · 10M | ±0.9 % | 50 % ◐ | 0.99× | **1.33×** | 0.78× | 0.496 | 26.0× |
+| `c0_domain` · 30M | ±0.4 % | 25 % | **3.03×** | **4.38×** | **2.78×** | 0.551 | 55.0× |
+| `tags4` · 1M | ±2.3 % | 50 % ◐ | **1.04×** | 0.71× | 0.44× | 0.398 | 3.30× |
+| `tags4` · 3M | ±1.9 % | 25 % | **1.94×** | **2.19×** | **1.41×** | 0.334 | 8.90× |
+| `tags4` · 10M | ±0.9 % | 25 % | **4.22×** | **3.78×** | **2.26×** | 0.381 | 29.1× |
+| `tags4` · 30M | ±0.4 % | 12 % | **7.39×** | **7.02×** | **4.38×** | 0.492 | 58.2× |
 
 **Table 5.** Whole-index filter time ÷ probe-then-filter time (median; range over filters and probes).
 
@@ -198,22 +200,24 @@ and 3.2× at 64 at 30 M, against the paper's 1.79–2.15×, and about even or sl
 
 ## 5. Robustness to filter selectivity
 
-The synthetic filters pass 0.1 %, 1 %, 10 % or 100 % of the items at random, so selectivity is the only thing that
-changes.
+The synthetic filters pass 0.1 %, 1 %, 10 % or 100 % of the items at random (and 20 %, 30 % and 50 % on LAION-synth 10M and 30M), so selectivity is the only thing that changes.
 
-**Table 6.** LAION-synth 30M, batch 16, k = 100.
+**Table 6.** LAION-synth 30M, batch 16, k = 100. SilverTorch's seed spread on this dataset: time ±0.2 %, recall ±<0.001.
 
 | Pass rate | V1, ms | V2, ms | SilverTorch 24: recall | SilverTorch 24: ms | SilverTorch at 0.90: ms |
 |---|--:|--:|--:|--:|--:|
 | 0.1 % | 16.37 | 14.25 | 0.356 | 0.21 | 1.86 |
 | 1.0 % | 16.40 | 15.07 | 0.589 | 0.25 | 1.17 |
 | 10 % | 16.39 | 22.57 | 0.714 | 0.35 | 1.16 |
+| 20 % | 16.41 | 30.84 | 0.735 | 0.38 | 1.29 |
+| 30 % | 16.45 | 39.23 | 0.744 | 0.43 | 1.51 |
+| 50 % | 16.46 | 56.42 | 0.754 | 0.59 | 2.39 |
 | 100 % | 16.47 | 99.01 | 0.765 | 0.69 | 1.68 |
 
 The methods fall into three groups. **Exact V1** takes the same time at every pass rate, consistent with it scoring every item and masking afterwards. **Exact V2**'s cost grows with the pass rate, consistent with it gathering the passing items: on LAION-synth 30M it takes 14
 ms at 0.1 % and 99 ms with no filter; on PubMed-synth, 5 ms and 146 ms. V2 is the right choice only for very selective
 filters. **SilverTorch** behaves as the shortage of candidates predicts. At 24 probes its recall falls from 0.77 with no filter to 0.36 at 0.1 %, consistent with fewer of the items in its nearest clusters passing. Restoring 0.90 costs more probes at the rarest filter
-(1.9 ms against 1.2 ms at 1–10 %), but that is still 9–14× under V1.
+(1.9 ms against 1.2 ms at 1–10 %), but that is still 9–14× under V1. Above 10 % its time grows with the pass rate: on LAION-synth 30M, 0.35 to 0.59 ms at 24 probes and 1.2 to 2.4 ms tuned for 0.90 from 10 % to 50 %, still 7× under V1 at 50 %. With no filter it is faster again (1.7 ms), at 65,536 clusters, a size not run at 20–50 %.
 
 ## 6. Index memory and build time
 
@@ -242,31 +246,31 @@ identical for both.
 
 **Table 8.**
 
-| Dataset · filter | Clusters | Items per cluster | Probes | Bloom ÷ exact (range) |
-|---|--:|--:|--:|--:|
-| Goodreads 0.8M · `c0_genre` | 4,096 | 195 | 24–64 | 1.06 (0.97–1.06) |
-| LAION 1M · `tags4` | 8,192 | 122 | 4096–6144 | 1.50 (1.08–1.72) |
-| arXiv 3M · `all4` | 2,048 | 1,459 | 24–512 | 1.06 (0.89–1.08) |
-| arXiv 3M · `c0_maincat` | 2,048 | 1,459 | 24–512 | **0.95** (0.90–1.06) |
-| arXiv 3M · `c3_nversions` | 2,048 | 1,459 | 24–512 | **0.94** (0.90–1.06) |
-| LAION 3M · `c0_domain` | 2,048 | 1,465 | 24 | 1.11 (0.92–1.13) |
-| LAION 3M · `c0_domain` | 16,384 | 183 | 8192–12288 | **0.82** (0.73–0.94) |
-| LAION 3M · `tags4` | 2,048 | 1,465 | 24 | 1.08 (0.99–1.10) |
-| LAION 3M · `tags4` | 8,192 | 366 | 2048 | 1.13 (1.12–1.17) |
-| LAION 3M · `tags4` | 16,384 | 183 | 4096 | 1.38 (1.10–1.53) |
-| LAION 10M · `c0_domain` | 65,536 | 153 | 32768–49152 | **0.77** (0.74–0.91) |
-| LAION 10M · `tags4` | 4,096 | 2,441 | 1024 | **0.82** (0.73–0.97) |
-| LAION 10M · `tags4` | 16,384 | 610 | 4096 | 1.01 (0.99–1.02) |
-| LAION 10M · `tags4` | 65,536 | 153 | 16384 | 1.64 (1.18–1.68) |
-| PubMed 10M · `c0_mesh` | 4,096 | 2,441 | 24–512 | **0.87** (0.50–1.05) |
-| PubMed 10M · `c0_mesh` | 16,384 | 610 | 2048 | **0.71** (0.62–0.94) |
-| PubMed 10M · `c0_mesh` | 65,536 | 153 | 8192–16384 | **0.85** (0.78–0.98) |
-| LAION 30M · `c0_domain` | 4,096 | 7,324 | 24 | **0.91** (0.81–1.08) |
-| LAION 30M · `c0_domain` | 16,384 | 1,831 | 4096 | **0.88** (0.87–0.90) |
-| LAION 30M · `c0_domain` | 65,536 | 458 | 16384 | **0.80** (0.74–0.94) |
-| LAION 30M · `tags4` | 4,096 | 7,324 | 24–1024 | **0.87** (0.66–1.09) |
-| LAION 30M · `tags4` | 16,384 | 1,831 | 2048–4096 | **0.88** (0.81–0.96) |
-| LAION 30M · `tags4` | 65,536 | 458 | 8192–16384 | 1.06 (1.00–1.08) |
+| Dataset · filter | Clusters | Items per cluster | Probes | Bloom ÷ exact (range) | Seed ± |
+|---|--:|--:|--:|--:|--:|
+| Goodreads 0.8M · `c0_genre` | 4,096 | 195 | 24–64 | 1.06 (0.97–1.06) | ±2.1 % |
+| LAION 1M · `tags4` | 8,192 | 122 | 4096–6144 | 1.50 (1.08–1.72) | ±2.3 % |
+| arXiv 3M · `all4` | 2,048 | 1,459 | 24–512 | 1.06 (0.89–1.08) | ±1.2 % |
+| arXiv 3M · `c0_maincat` | 2,048 | 1,459 | 24–512 | **0.95** (0.90–1.06) | ±1.2 % |
+| arXiv 3M · `c3_nversions` | 2,048 | 1,459 | 24–512 | **0.94** (0.90–1.06) | ±1.2 % |
+| LAION 3M · `c0_domain` | 2,048 | 1,465 | 24 | 1.11 (0.92–1.13) | ±1.9 % |
+| LAION 3M · `c0_domain` | 16,384 | 183 | 8192–12288 | **0.82** (0.73–0.94) | ±1.9 % |
+| LAION 3M · `tags4` | 2,048 | 1,465 | 24 | 1.08 (0.99–1.10) | ±1.9 % |
+| LAION 3M · `tags4` | 8,192 | 366 | 2048 | 1.13 (1.12–1.17) | ±1.9 % |
+| LAION 3M · `tags4` | 16,384 | 183 | 4096 | 1.38 (1.10–1.53) | ±1.9 % |
+| LAION 10M · `c0_domain` | 65,536 | 153 | 32768–49152 | **0.77** (0.74–0.91) | ±0.9 % |
+| LAION 10M · `tags4` | 4,096 | 2,441 | 1024 | **0.82** (0.73–0.97) | ±0.9 % |
+| LAION 10M · `tags4` | 16,384 | 610 | 4096 | 1.01 (0.99–1.02) | ±0.9 % |
+| LAION 10M · `tags4` | 65,536 | 153 | 16384 | 1.64 (1.18–1.68) | ±0.9 % |
+| PubMed 10M · `c0_mesh` | 4,096 | 2,441 | 24–512 | **0.87** (0.50–1.05) | ±1.7 % |
+| PubMed 10M · `c0_mesh` | 16,384 | 610 | 2048 | **0.71** (0.62–0.94) | ±1.7 % |
+| PubMed 10M · `c0_mesh` | 65,536 | 153 | 8192–16384 | **0.85** (0.78–0.98) | ±1.7 % |
+| LAION 30M · `c0_domain` | 4,096 | 7,324 | 24 | **0.91** (0.81–1.08) | ±0.4 % |
+| LAION 30M · `c0_domain` | 16,384 | 1,831 | 4096 | **0.88** (0.87–0.90) | ±0.4 % |
+| LAION 30M · `c0_domain` | 65,536 | 458 | 16384 | **0.80** (0.74–0.94) | ±0.4 % |
+| LAION 30M · `tags4` | 4,096 | 7,324 | 24–1024 | **0.87** (0.66–1.09) | ±0.4 % |
+| LAION 30M · `tags4` | 16,384 | 1,831 | 2048–4096 | **0.88** (0.81–0.96) | ±0.4 % |
+| LAION 30M · `tags4` | 65,536 | 458 | 8192–16384 | 1.06 (1.00–1.08) | ±0.4 % |
 
 The picture is mixed. **First**, the bloom is faster where the filter is expensive to check exactly: PubMed's MeSH filter
 (0.71–0.87 of the exact time) and LAION's domain filter at deep probes (0.77–0.88). That is consistent with a few bitwise ANDs per item costing less than walking several exact clauses. **Second**, the exact filter is as fast or faster on LAION's four-tag filter when
@@ -280,6 +284,8 @@ through: at 64 bits, 2.3 % of PubMed's failing items pass, and recall at a fixed
 
 **Table 9.** SilverTorch's number of clusters on LAION 30M (d = 256): index, build, recall at a share of clusters probed,
 and the fastest timed setting reaching 0.90 at a batch of 16.
+
+SilverTorch's seed spread on this dataset: time ±0.4 %, recall ±<0.001.
 
 | Filter · clusters | Index, MiB | Build, s | Recall at 1/8 | Recall at 1/4 | Probes for 0.90 | t_med, ms |
 |---|--:|--:|--:|--:|--:|--:|
@@ -307,52 +313,60 @@ candidates, which is why recall is flat at small shares. On PubMed's MeSH filter
 passing items, so recall is 0.999 from the smallest pool. On arXiv's main category (13.6 % pass), 0.90 needs 10 % of the
 passing items.
 
+**Table 10b.** SilverTorch's probe sweep on LAION-synth 30M, batch 16, k = 100, 4,096 clusters: recall and time at 24, 512 and 1,024 probes, the smallest sufficient setting for 0.90 in the sweep, and the tuned setting used in the tables.
+
+| Filter | 24 probes | 512 probes | 1,024 probes | Smallest for 0.90 | Tuned for 0.90 | LiNR V1, ms |
+|---|--:|--:|--:|--:|--:|--:|
+| random 0.1 % | 0.356 · 0.21 ms | 0.869 · 1.27 ms | 0.938 · 2.32 ms | 1,024 probes · 2.32 ms | 65,536 / 8,192 · 1.86 ms | 16.36 |
+| random 1 % | 0.589 · 0.25 ms | 0.928 · 1.88 ms | 0.957 · 3.53 ms | 512 probes · 1.88 ms | 16,384 / 1,024 · 1.17 ms | 16.40 |
+| random 10 % | 0.714 · 0.41 ms | 0.943 · 3.62 ms | 0.959 · 7.01 ms | 256 probes · 1.92 ms | 16,384 / 512 · 1.16 ms | 16.44 |
+| random 20 % | 0.735 · 0.45 ms | 0.944 · 4.13 ms | 0.959 · 8.00 ms | 256 probes · 2.19 ms | 16,384 / 512 · 1.29 ms | 16.43 |
+| random 30 % | 0.744 · 0.50 ms | 0.945 · 4.96 ms | 0.959 · 9.61 ms | 256 probes · 2.62 ms | 16,384 / 512 · 1.51 ms | 16.44 |
+| random 50 % | 0.754 · 0.59 ms | 0.945 · 8.66 ms | 0.959 · 17.02 ms | 256 probes · 4.44 ms | 16,384 / 512 · 2.39 ms | 16.50 |
+| no filter | 0.765 · 0.69 ms | 0.945 · 10.65 ms | 0.958 · 20.99 ms | 256 probes · 5.44 ms | 65,536 / 1,024 · 1.68 ms | 16.50 |
+
+Table 10b (Figure 5 on the page) times SilverTorch's whole range of probes on LAION-synth 30M for every synthetic
+filter, at a batch of 16, with LiNR V1 timed in the same run as the anchor (about 16.4 ms at every pass rate). It shows
+three things. **First**, no single number of probes suits every filter. At 4,096 clusters, 512 probes miss 0.90 at 0.1 %
+(0.87) and overshoot it everywhere else (0.93–0.95); 1,024 probes reach it everywhere but cost 2.3–21 ms, up to four
+times the 1.9–5.4 ms of each filter's own smallest sufficient setting. The smallest sufficient setting itself moves with
+the filter: 256 to 1,024 probes at 4,096 clusters, 1,024 to 4,096 at 16,384. **Second**, the tuned settings used in the
+tables sit at or below the sweep's fastest point reaching the target, so the comparison is made near each filter's sweet
+spot. **Third**, 24 probes is the cheap floor: 0.2–0.7 ms, but recall 0.19–0.77, below 0.90 on every filter. The time of
+each probe also grows with the pass rate (512 probes at 4,096 clusters: 1.3 ms at 0.1 %, 10.7 ms with no filter),
+consistent with more passing items to score in each probed cluster.
+
 ## 9. Seed to seed
 
-The timed comparison was rerun at seeds 1 and 2: a new clustering, a new synthetic draw and a new timing run. Seed 2 ran
-on a different machine from seeds 0–1, with the same GPU model. Table 11 gives the spread over the seeds at the same
-setting, with each tuned cell held at the setting picked at seed 0: SilverTorch's time (max ÷ min − 1), its recall (max
-− min), its time over the best exact LiNR at each setting, and over the best LiNR at each tuned cell. Table 12 checks
-the machines against each other on LiNR V1, whose time does not depend on the clustering.
+The timed comparison was rerun at seeds 1 and 2 on a subset of cells: a new clustering, a new synthetic draw and a new
+timing run. Table 11 gives SilverTorch's spread over the seeds at the same setting, averaged per dataset: the time's
+range as a share of its median, and the recall's range. That pooled spread is the error bar on every SilverTorch number
+in this text (± half the range); a dataset without seeds takes the average over all datasets (2.7 % in time).
 
-**Table 11.**
+**Table 11.** SilverTorch's seed spread per dataset (mean over the settings with two or more seeds).
 
-| Dataset | Seeds | Settings | Time: median | Time: max | Recall: max | vs exact LiNR | Tuned cells | vs best LiNR | Winner changes |
-|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| arXiv 3M | 3 | 54 | 1.4 % | 10.2 % | 0.002 | 1.3 % | 39 | 1.2 % | 0 |
-| arXiv-synth 3M | 2 | 33 | 1.3 % | 9.8 % | 0.007 | 1.4 % | 21 | 0.5 % | 0 |
-| Goodreads 0.8M | 3 | 30 | 5.1 % | 8.7 % | 0.008 | 4.9 % | 15 | 4.4 % | 0 |
-| Goodreads-synth 0.8M | 2 | 27 | 5.0 % | 7.4 % | 0.013 | 5.4 % | 18 | 5.6 % | 0 |
-| LAION 10M | 3 | 15 | 0.6 % | 11.3 % | 0.002 | 0.7 % | 6 | 0.3 % | 0 |
-| LAION-synth 10M | 3 | 75 | 0.5 % | 10.5 % | 0.004 | 0.8 % | 21 | 0.8 % | 0 |
-| LAION 1M | 3 | 6 | 2.7 % | 12.3 % | 0.009 | 2.8 % | 0 | – | 0 |
-| LAION 30M | 3 | 33 | 0.5 % | 8.3 % | 0.002 | 0.5 % | 12 | 0.5 % | 0 |
-| LAION-synth 30M | 2 | 78 | 0.2 % | 1.4 % | 0.002 | 0.4 % | 24 | 0.2 % | 0 |
-| LAION 3M | 3 | 12 | 0.8 % | 14.8 % | 0.003 | 0.8 % | 3 | 0.4 % | 0 |
-| PubMed 10M | 3 | 39 | 0.6 % | 53.6 % | 0.007 | 0.7 % | 9 | 0.8 % | 0 |
-| PubMed-synth 10M | 3 | 51 | 1.0 % | 11.4 % | 0.005 | 1.1 % | 15 | 0.5 % | 0 |
+| Dataset | Seeds | Settings | Time range | Recall range | Tuned cells | Winner changes |
+|---|--:|--:|--:|--:|--:|--:|
+| arXiv 3M | 3 | 54 | 2.5 % | 0.001 | 39 | 0 |
+| arXiv-synth 3M | 2 | 33 | 3.5 % | 0.001 | 21 | 0 |
+| Goodreads 0.8M | 3 | 30 | 4.2 % | 0.004 | 15 | 0 |
+| Goodreads-synth 0.8M | 2 | 27 | 4.3 % | 0.005 | 18 | 0 |
+| LAION 10M | 3 | 15 | 1.7 % | 0.001 | 6 | 0 |
+| LAION-synth 10M | 3 | 75 | 1.0 % | 0.001 | 21 | 0 |
+| LAION 1M | 3 | 6 | 4.6 % | 0.008 | 0 | 0 |
+| LAION 30M | 3 | 33 | 0.8 % | 0.001 | 12 | 0 |
+| LAION-synth 30M | 2 | 78 | 0.3 % | 0.001 | 24 | 0 |
+| LAION 3M | 3 | 12 | 3.8 % | 0.002 | 3 | 0 |
+| PubMed 10M | 3 | 39 | 3.3 % | 0.002 | 9 | 0 |
+| PubMed-synth 10M | 3 | 51 | 2.0 % | 0.002 | 15 | 0 |
 
-**Table 12.** LiNR V1's time at seeds 1–2 over seed 0, same cell.
-
-| Cells | Seed | Machine | Settings | Median | Range |
-|---|--:|--:|--:|--:|--:|
-| LAION 10M, LAION 1M, LAION 3M, PubMed 10M | 1 | same | 27 | 1.000 | 0.995–1.018 |
-| LAION 10M, LAION 1M, LAION 3M, PubMed 10M | 2 | another | 27 | 1.000 | 0.998–1.003 |
-| Goodreads 0.8M, arXiv 3M | 2 | another | 30 | 1.000 | 0.988–1.004 |
-| Goodreads 0.8M, LAION 30M, arXiv 3M | 1 | same | 39 | 1.000 | 0.996–1.002 |
-| LAION 30M | 2 | another | 9 | 1.000 | 0.999–1.001 |
-
-The comparison barely moves. At the same setting, SilverTorch's time varies by a median 0.2–5.1 % per dataset, and recall
-by at most 0.013. Held at its seed-0 setting, SilverTorch's time over the best LiNR's spreads by a median 0.2–5.6 %, and
-none of the 183 tuned cells change winner. At that setting 3 cells (LAION-synth 10M with no filter) dip below the target at a later seed, by at most 0.0001. LiNR V1 stays within 1.8 % of its seed-0 time on
-every machine. SilverTorch's shortest times are another matter: the settings under 0.25 ms, close to its fixed cost per
-call, run 5–9 % slower at seed 2 on Goodreads, arXiv, their synthetic sets and LAION 30M, whose seed 2 ran on a
-different machine from seeds 0–1. The cells moved between the other two machines show no such shift. This is consistent
-with the machines differing in fixed cost per call, not in GPU throughput, and it is the main source of spread on those
-datasets; it changes no winner. The largest spreads in SilverTorch's time come from PubMed's MeSH filter at deep probes
-(5.9–9.1 ms at a batch of 64), consistent with a new clustering changing how many passing items the probed clusters
-hold. Re-picking the setting at each seed instead changes one winner (LAION-synth 10M with no filter, bs 64, k 100, 0.95: 0.73–0.74 at the seed-0 pick, 0.73–1.26 re-picked). That is a pick sitting exactly on the
-target, not a change in speed. Seeds 0–2 cover every real dataset and the synthetic PubMed and LAION 10M sets; synthetic Goodreads and arXiv have seeds 0 and 2, and synthetic LAION 30M seeds 0 and 1. LAION 1M's deep settings ran at seed 0 only, by design.
+The comparison barely moves. SilverTorch's time ranges by 0.3–4.6 % on average per dataset, and its recall by at most
+0.008. Held at their seed-0 setting, none of the 183 tuned cells change winner. At that setting 3 cells (LAION-synth 10M with no filter) dip below the target at a later seed, by at most 0.0001. Re-picking the
+setting at each seed instead changes one winner (LAION-synth 10M with no filter, bs 64, k 100, 0.95: 0.73–0.74 at the seed-0 pick, 0.73–1.26 re-picked), a pick sitting exactly on the target rather than a change in
+speed. The largest spreads come from PubMed's MeSH filter at deep probes, consistent with a new clustering changing how
+many passing items the probed clusters hold. Seeds 0–2 cover every real dataset and the synthetic PubMed and LAION 10M
+sets; synthetic Goodreads and arXiv have seeds 0 and 2, and synthetic LAION 30M seeds 0 and 1. LAION 1M's deep settings
+and the 20–50 % synthetic filters ran at seed 0 only.
 
 ## 10. Conclusions
 
@@ -362,7 +376,7 @@ target, not a change in speed. Seeds 0–2 cover every real dataset and the synt
    are thinly spread across clusters force it to probe half the index or more, and there exact LiNR is as fast or
    faster.
 2. **LiNR V1** is the right exact method for batches: its time per query falls fastest with batch size, and from a batch of 16 it beats V2 on all but the rarest filters. **LiNR V2** wins for one query at a time and for very selective
-   filters. **LiNR V3** rarely beats the faster exact variant at equal recall.
+   filters. **LiNR V3** rarely beats the faster exact variant at equal recall, except for single queries on broad filters (20–50 % passing) at 10–30 M items.
 3. The **bloom filter** is a sound engineering choice at Meta's default width. It is faster than a well-built exact
    filter where the filter is expensive to check, at no measurable cost in recall. It is not faster everywhere, and the
    co-design around it pays only at 10 M items and above.
@@ -374,7 +388,7 @@ LinkedIn's claims are C1–C3, Meta's C4–C7 ([claims](claims.md)).
 |  | Verdict | The paper | We measured |
 |---|--:|--:|--:|
 | **C1** | shape holds, location does not | LiNR V2 (gather, then score) beats V1 (score, then mask) below about 11 % passing. | For one query V2 wins below 0.85–0.97 passing; at a batch of 16 only below 0.014–0.065; at 64 and 256 never. |
-| **C2** | not comparable | LiNR V3's 1-bit prefilter is about 10 % faster at near-equal recall. | At the smallest pool reaching 0.90, V3 takes 0.84–1.37 of V2's time for one query and 0.71–1.07 at batches of 16 and 64, where V1 beats both. |
+| **C2** | not comparable | LiNR V3's 1-bit prefilter is about 10 % faster at near-equal recall. | At the smallest pool reaching 0.90, V3 takes 0.43–1.37 of V2's time for one query and 0.25–1.07 at batches of 16 and 64, where V1 beats both. |
 | **C3** | does not hold as stated | Native PyTorch masking is about 100× slower than a custom kernel. | 1.4–1.9× at one query and 5.8–6.7× at a batch of 16 against plain PyTorch; about even with torch.compile at one query. |
 | **C4** | holds on Meta's bloom as adapted | SilverTorch's 1024-bit bloom filter lets through about 0.067 % false positives. | At most 0.000004 % of failing items pass; recall moves by at most 0.000002 against the exact filter. |
 | **C5** | wins at 10–30 M only | Filtering inside the probed clusters is 1.79–2.15× faster than filtering the whole index. | 2.14× at 30 M, 1.18× at 10 M, 0.83× at 1 M (median, Meta's code as published). |
@@ -389,7 +403,7 @@ LinkedIn's claims are C1–C3, Meta's C4–C7 ([claims](claims.md)).
   collected into one total `results.parquet`. The exact-filter row in section 7 is the same tree with the exact clause
   filter built in (tag `final-freeze-clause`, `500284e`); its bloom path is byte-identical.
 - **Records.** These are the Hub subtrees `fr/<leg>-<pod>-s<seed>[-rerun]` on `pinkmeme/eval-results`, each with its
-  manifest in [hub-index](../artifacts/hub-index.md): 95 subtrees and 10,411 records; 138 of 1266 timed points stay unstable in every run. The tables and the page data are published as
+  manifest in [hub-index](../artifacts/hub-index.md): 98 subtrees and 11,095 records; 138 of 1356 timed points stay unstable in every run. The tables and the page data are published as
   `artifacts/results-draft/<date>-fr` (manifest in the same index).
 - **Scripts.** [`build_results.py`](../artifacts/results-draft/build_results.py) builds the tables,
   [`product_recall.py`](../artifacts/results-draft/product_recall.py) the recall bridge,
@@ -403,8 +417,14 @@ LinkedIn's claims are C1–C3, Meta's C4–C7 ([claims](claims.md)).
 - **Rules behind the numbers.** SilverTorch's bloom recheck is off when timed, and its false positives are counted in a
   separate, untimed pass on Meta's bloom only. LiNR uses the exact filter only. Recall is exact filtered top-k recall,
   so no claim is called "not reproduced" on recall alone. The headline comparison sets SilverTorch against the fastest
-  LiNR at the same recall. Seed 2 of every cell ran on a different machine from its seeds 0–1, with the same GPU model.
-  Every number is seed 0 except section 9.
+  LiNR at the same recall. Every number is seed 0; section 9 gives the seed spread.
+- **Added after the freeze.** The 20–50 % synthetic filters and the probe sweep (Figure 5) were added after the freeze, at the same tag and on seed
+  0, with a reduced scope: the bloom filter only, k = 100, and 4,096 and 16,384 clusters (no 65,536, the fastest with
+  no filter). The sweep's 20 settings under a millisecond stay unstable in every run and are drawn hollow.
 - **Citability.** Sections 1–9 and the claims table will become citable together when the final rerun's gate passes. C7
   quotes an earlier gate, at the adapted code's review head, which already stands. It was not rerun in the final rerun
   (user's call).
+
+*Note.* Runs used identical A100-SXM4-80GB pods from one image and one pinned build; per-call cost differed by a few
+percent at SilverTorch's fastest settings and changes no winner. Seed variation was measured on a subset of cells; its
+relative spread, pooled per dataset, is the error bar on every SilverTorch result.

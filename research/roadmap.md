@@ -139,14 +139,15 @@ one pod.
 
 ## The queue
 
-The order is the user's (2026-10-11): numbers for the paper first, from
-measurement legs on the adapted backend; the paper written on them; the
-code cleaned; and **the full rerun of everything, pinned to one tag**. The
-controller moved the rerun ahead of RENAME and TRITON-ST-DELETE (C1,
-2026-10-13, for the user's review): the code freezes now, and the cleanup
-follows the rerun.
+The full rerun at `final-freeze` is done bar its gate and the one post-freeze leg (7b SYNTH-MID). The export
+preparation (1b, 6, the merged tables, the comment cleanup and review; user, 2026-10-15) is done on branches and
+merges into `staging` only after 7's gate and 7b (user): `dev/export-lib` → `dev/export-harness` (holds lib) →
+`dev/docs-pass` (holds both). Then 5 RENAME and 9 EXPORT.
 
 ### 1b. DOCS-SPLIT: the project pages carry no research residue
+
+**Done on `dev/docs-pass` 4be8b7a3** (with the docs audit and the user's 2026-10-16 rulings; link checker 0);
+merges after 7's gate, after `dev/export-harness`.
 
 Needs 1 merged (`dev/meta-fork` edits the same pages); CPU, docs only,
 beside 2; before 5 and 6, which edit the same pages. `docs/system/` is the
@@ -163,17 +164,6 @@ does stays. Headings cited by code (`§`) keep their names.
 *Gate*: `python3 scripts/check_doc_links.py` 0 (bar `articles/`), every
 moved number present once in `research/`, no `docs/system` page naming a
 branch, pod or step's progress.
-
-### 3. QUALITY: tests, review and fixes, no functional change
-
-Running (user, 2026-10-11/12). A test developer (`dev/tests-pass`) and two
-review pairs whose findings two fixers apply (`dev/quality-lib`,
-`dev/quality-harness`); records must not move, bit-exact gates stay
-bit-exact. Merge order: tests, then the fixers rebased on it. Deferred to
-5 / 6 (they change the public surface or the records read): the
-`PreparedFilter` shape, the two `bloom_path` knobs, the Triton SilverTorch
-cut list, `tab_t3` / h2h, pre-schema-4 record readers, the duplicate
-`upload-checkpoint` CLI, ETLs for out-of-study datasets.
 
 ### 4. PAPER: the user writes it
 
@@ -203,6 +193,11 @@ package, the compile gate, outputs `torch.equal` before / after on the
 gate grid's int32 cells (a rename changes no behaviour).
 
 ### 6. TRITON-ST-DELETE: delete what the release cleanup had to leave
+
+**Done on `dev/export-lib` 75256824 (library) and `dev/export-harness` fdf56f60 (harness, holds lib)**, plus our
+LiNR bloom entirely and `bloom_fp_rate` (user, 2026-10-16) and the merged-tables command; CPU gates green.
+Left: the GPU gates (library suite, `test_official.py` adapted vs published, compile tests, the harness's GPU tests,
+the export-prep quality subset byte-identical to the FR records), after 7b frees the GPU; then merge.
 
 Needs FULL-RERUN finished (the user's rule: until then every file a final-run leg imports stays byte-identical to
 `final-freeze`, [decisions](decisions.md#goal-and-scheduling)). The user authorised the deletions (2026-10-13: our Triton
@@ -262,21 +257,37 @@ the credit covers about half of the seed-0 pass ([full-rerun § Sizing](artifact
 *Estimate*: [full-rerun § Sizing](artifacts/full-rerun/README.md#sizing): about 244 GPU-h for the full profile (the user's
 GO, 2026-10-13), 114 for its seed-0 pass; run seed-major, so a stop leaves a complete set at fewer seeds.
 
+### 7b. SYNTH-MID: 20 / 30 / 50 % synthetic, and a timed n_probe sweep (post-freeze)
+
+Running on pod e (user, 2026-10-15; brief `.chains/control/2026-10-15-193000000-synth-mid-leg-brief.md`, trimmed GO):
+`final-freeze`, seed 0; stage 3 the timed `n_probe` sweep on laion30m-synth (all seven filters, 4096 / 16384 lists,
+bs 16, LiNR V1 anchors), stage 1 bloom k 100 curves at p02 / p03 / p05 on laion10m- / laion30m-synth (4096 / 16384),
+stage 2 SilverTorch at the picks interleaved with LiNR V1 / V2 / V3, bs 1 / 16 / 64. To `fr/synth-mid-*-pode-s0`.
+Then the results page: SYNTH-MID folded in, the one-pod / pooled seed variance presentation and its end note
+(user, 2026-10-15, decisions).
+
 ### 8. F4: package the artifacts
 
 Needs 7. The results public, the PubMed slice or its build recipe with
 checksums, a tagged `torchretrieve` release (LiNR plus the adapted
 SilverTorch; the adapted code keeps Meta's Apache-2.0 licence and
 headers), a Zenodo DOI including the adapted source and Meta's pinned
-sdist, a one-command reproduction, an anonymised mirror
+sdist, a one-command way to run any eval and get its numbers (no paper-table rebuild in the repository; user,
+2026-10-16), a clean public Hub repo if the user publishes one (no LiNR bloom, no superseded data), an anonymised mirror
 (anonymous.4open.science) for the double-blind review. Needs the user's
 accounts and the release decisions.
+
+### 9. EXPORT: the released repository
+
+Needs 6 / 1b merged and 5. A branch cut from `staging` holding the code, the human docs (`README.md`, `docs/`,
+`retrieve/docs/`) and the agent docs (AGENTS.md / CLAUDE.md, pointing at nothing removed); without `articles/`,
+`.chains/` and `research/` (user, 2026-10-16, [decisions](decisions.md)). *Gate*: suites green on the branch, link
+checker 0 on it, no file under the dropped trees.
 
 ## Dependencies
 
 ```
-3 QUALITY ─> freeze ─> 7 FULL-RERUN ─> 4 PAPER tables (user) ─> 8 F4
-                          └─> 6 TRITON-ST-DELETE ─> 5 RENAME (both after the rerun has finished)
-1b DOCS-SPLIT (CPU, before 5)
+7 FULL-RERUN gate + 7b SYNTH-MID ─> merge 6 + 1b (branches done) ─> 5 RENAME ─> 9 EXPORT ─> 8 F4
+                                 └─> 4 PAPER tables (user)
 Needs the user: release decisions before F4
 ```

@@ -26,6 +26,13 @@ const lin = (lo, hi, a, b) => v => a + (v - lo) / (hi - lo) * (b - a);
 const pct = p => p >= 0.01 ? (p * 100).toFixed(p >= 0.1 ? 0 : 1) + " %" : (p * 100).toFixed(2) + " %";
 const fmtMs = v => v < 1 ? (v * 1000).toFixed(0) + " µs" : v < 10 ? v.toFixed(v < 2 ? 2 : 1) + " ms" : v.toFixed(0) + " ms";
 const clear = s => { while (s.firstChild) s.removeChild(s.firstChild); };
+/* SilverTorch's pooled seed spread per dataset label: [time range as a share of the median, recall range]; ± is half */
+const PV = ds => D.pv[ds] || D.pv["*"];
+const pmT = ds => "±" + (50 * PV(ds)[0]).toFixed(1) + " %";
+const sig = v => v < 0.0005 ? "<0.001" : String(+v.toPrecision(1));
+const pmR = ds => "±" + sig(PV(ds)[1] / 2);
+const seedCap = ds => ` SilverTorch's seed spread on this dataset: time ${pmT(ds)}, recall ${pmR(ds)}.`;
+function whisk(svg, x, y0, y1, c) { el("line", { x1: x, x2: x, y1: y0, y2: y1, stroke: c, "stroke-width": 1.2 }, svg); }
 
 const br = document.getElementById("bridge");
 if (br) br.textContent = `on Goodreads the two move together: Pearson ${D.bridge.bloom100} at k 100 and ${D.bridge.bloom1000} at k 1000 over SilverTorch's bloom settings, ${D.bridge.all_lo}–${D.bridge.all_hi} per filter over every method`;
@@ -92,11 +99,14 @@ function groups(sel, items, text) {
       el("line", { x1: B0, x2: B1, y1: ry(L[0]), y2: ry(L[0]), stroke: "var(--linr)", "stroke-dasharray": "6 4", "stroke-width": 1.5 }, svg);
       el("text", { x: B1, y: ry(L[0]) - 5, class: "axis", "text-anchor": "end", style: "fill:var(--linr)" }, svg, `LiNR ${L[1]}, exact`);
     }
+    const kds = k.label.split(" · ")[0], [kt, kr] = PV(kds);
     T.forEach(p => {
       const c = col(p[0]);
+      whisk(svg, rx(p[3]), ry(p[2] * (1 - kt / 2)), ry(p[2] * (1 + kt / 2)), c);
+      el("line", { x1: rx(Math.max(0, p[3] - kr / 2)), x2: rx(Math.min(1, p[3] + kr / 2)), y1: ry(p[2]), y2: ry(p[2]), stroke: c, "stroke-width": 1.2 }, svg);
       el("circle", { cx: rx(p[3]), cy: ry(p[2]), r: 5, fill: c, stroke: "var(--surface)", "stroke-width": 1.5 }, svg);
       el("text", { x: rx(p[3]) + 7, y: ry(p[2]) - 6, class: "axis" }, svg, p[1]);
-      bindTip(el("circle", { cx: rx(p[3]), cy: ry(p[2]), r: 10, class: "hit" }, svg), `<b>${p[0].toLocaleString("en")} clusters, ${p[1]} probes</b><br>recall@100 ${p[3]}<br>${fmtMs(p[2])} per batch` + (L ? `<br>${(p[2] / L[0]).toFixed(2)}× LiNR ${L[1]}'s time` : ""));
+      bindTip(el("circle", { cx: rx(p[3]), cy: ry(p[2]), r: 10, class: "hit" }, svg), `<b>${p[0].toLocaleString("en")} clusters, ${p[1]} probes</b><br>recall@100 ${p[3]} ${pmR(kds)}<br>${fmtMs(p[2])} per batch ${pmT(kds)}` + (L ? `<br>${(p[2] / L[0]).toFixed(2)}× LiNR ${L[1]}'s time` : ""));
     });
   }
   draw();
@@ -140,10 +150,12 @@ function groups(sel, items, text) {
       const sty = style(s.name) || { c: ramp[s.name], dash: "" };
       const d = s.pts.map((p, i) => (i ? "L" : "M") + sx(p[0]).toFixed(1) + " " + sy(p[1]).toFixed(1)).join(" ");
       el("path", { d, fill: "none", stroke: sty.c, "stroke-width": 2, "stroke-dasharray": sty.dash }, svg);
+      const st_ = !style(s.name), vt = PV(v.label)[0];
       s.pts.forEach(p => {
+        if (st_) whisk(svg, sx(p[0]), sy(p[1] * (1 - vt / 2)), sy(p[1] * (1 + vt / 2)), sty.c);
         el("circle", { cx: sx(p[0]), cy: sy(p[1]), r: 4, fill: sty.c, stroke: "var(--surface)", "stroke-width": 2 }, svg);
         const hit = el("circle", { cx: sx(p[0]), cy: sy(p[1]), r: 11, class: "hit" }, svg);
-        bindTip(hit, `<b>${s.name}</b><br>pass rate ${pct(p[0])}<br>${fmtMs(p[1])} per batch` + (p[2] != null ? `<br>recall@100 ${p[2]}` : "<br>exact (recall 1.0)"));
+        bindTip(hit, `<b>${s.name}</b><br>pass rate ${pct(p[0])}<br>${fmtMs(p[1])} per batch` + (st_ ? ` ${pmT(v.label)}` : "") + (p[2] != null ? `<br>recall@100 ${p[2]} ${pmR(v.label)}` : "<br>exact (recall 1.0)"));
       });
       const last = s.pts[s.pts.length - 1];
       const rec = s.pts.filter(p => p[2] != null).map(p => p[2]);
@@ -180,7 +192,8 @@ function groups(sel, items, text) {
         const f = r.flag ? "†" : "";
         const ex = r.ex != null && r.linr === "V3" ? ` (${r.ex}× the best exact LiNR)` : "", hf = r.half ? "; reaches the target only by probing about half or more of the lists" : "";
         const info = r.win === "ST" ? `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time${ex}${hf}` : (r.np == null ? `SilverTorch tops out at recall ${r.maxrec} within a 25 % scan (k ${r.k})` : `SilverTorch at ${r.nl} lists / ${r.np} probes takes ${r.ratio}× LiNR ${r.linr}'s time${ex}${hf}`);
-        h += r.win === "ST" ? `<td class="st" data-tip="${info}">${r.ratio.toFixed(2)}${f}${r.half ? "◐" : ""}</td>` : `<td class="li${r.np == null ? " def" : ""}" data-tip="${info}">${r.np == null ? r.linr : r.ratio.toFixed(2)}${f}</td>`;
+        const info2 = info + (r.np == null ? "" : ` (SilverTorch's time ${pmT(r.ds)})`);
+        h += r.win === "ST" ? `<td class="st" data-tip="${info2}">${r.ratio.toFixed(2)}${f}${r.half ? "◐" : ""}</td>` : `<td class="li${r.np == null ? " def" : ""}" data-tip="${info2}">${r.np == null ? r.linr : r.ratio.toFixed(2)}${f}</td>`;
       });
       h += "</tr>";
     });
@@ -287,12 +300,71 @@ function buttons(box, items, cur, on) {
   function draw() {
     const r = D.tab.find(x => x.key === key && x.bs === bs);
     const best = Math.min(...r.rows.map(x => x[2]).filter(x => x != null));
-    table("t-h2h", `Table 1. ${r.ds}, ${r.syn ? r.sweep === "no filter" ? "no filter" : "synthetic filter, " + r.sweep.replace("random ", "") + " of items pass at random" : "filter " + r.sweep + " (pass " + pct(r.pass_rate) + ")"}, d = ${r.dim}, k = 100, batch ${bs}.`,
+    const [t_, r_] = PV(r.ds), sm = v => ` <small>${v}</small>`;
+    table("t-h2h", `Table 1. ${r.ds}, ${r.syn ? r.sweep === "no filter" ? "no filter" : "synthetic filter, " + r.sweep.replace("random ", "") + " of items pass at random" : "filter " + r.sweep + " (pass " + pct(r.pass_rate) + ")"}, d = ${r.dim}, k = 100, batch ${bs}. ±: SilverTorch's seed spread (section 9).`,
       ["Algorithm", "Recall@100", "t<sub>med</sub>, ms", "Speed-up vs V1", "Setting", "Index, MiB"],
       r.rows.map(([name, rec, ms, sp, cfg, mib]) => {
         const b = ms === best;
-        return `<tr class="${cls(name)}"><td>${name}</td><td>${f(rec, 3)}</td><td>${b ? "<b>" + f(ms, 3) + "</b>" : f(ms, 3)}</td><td>${b ? "<b>" + fx(sp) + "</b>" : fx(sp)}</td><td class="l">${cfg}</td><td>${n0(mib)}</td></tr>`;
+        const isST = name.startsWith("SilverTorch");
+        const e1 = isST && rec != null ? sm("±" + sig(r_ / 2)) : "", e2 = isST && ms != null ? sm("±" + sig(ms * t_ / 2)) : "", e3 = isST && sp != null ? sm("±" + sig(sp * t_ / 2)) : "";
+        return `<tr class="${cls(name)}"><td>${name}</td><td>${f(rec, 3)}${e1}</td><td>${b ? "<b>" + f(ms, 3) + "</b>" : f(ms, 3)}${e2}</td><td>${b ? "<b>" + fx(sp) + "</b>" : fx(sp)}${e3}</td><td class="l">${cfg}</td><td>${n0(mib)}</td></tr>`;
       }));
+  }
+  draw();
+})();
+
+/* Section 2 counts */
+(function () {
+  const c = D.counts, set = (id, t) => { document.getElementById(id).textContent = t; };
+  set("c-cells", c.cells); set("c-q", c.quarter); set("c-qw", c.quarter_wins); set("c-qmed", c.quarter_med.toFixed(2));
+  set("c-qx", (1 / c.quarter_med).toFixed(1)); set("c-b", c.beyond); set("c-bw", c.beyond_wins); set("c-u", D.band.unreached);
+})();
+
+/* Figure 5: SilverTorch's probe sweep per filter */
+(function () {
+  const svg = document.getElementById("c-ps"), ctl = document.getElementById("ctl-ps"), lg = document.getElementById("lg-ps");
+  const P = D.psweep, F = P.filters, [pt, pr] = PV(P.ds);
+  let nl = 4096;
+  buttons(ctl, [[4096, "4,096 clusters"], [16384, "16,384 clusters"]], nl, v => { nl = v; draw(); });
+  const ramp = ["#9ec5f4", "#7fb1ee", "#5f9be6", "#3f84dc", "#2a6fc4", "#1d5aa3", "#123f75"];
+  F.forEach((x, i) => lg.insertAdjacentHTML("beforeend", `<span><i style="border-color:${ramp[i]}"></i>${x.label}</span>`));
+  lg.insertAdjacentHTML("beforeend", `<span><i class="dash" style="border-color:var(--linr)"></i>LiNR V1, exact</span>`);
+  function draw() {
+    clear(svg);
+    const X0 = 60, X1 = 600, Y0 = 330, Y1 = 16;
+    const all = F.flatMap(x => (x.pts[nl] || []).map(p => p[2])).concat(F.map(x => x.v1));
+    const m = log(0.85, 0.015, X0, X1), sx = r => m(1 - r), sy = log(Math.min(...all) * 0.8, Math.max(...all) * 1.25, Y0, Y1);
+    [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50].filter(t => sy(t) <= Y0 && sy(t) >= Y1).forEach(t => {
+      el("line", { x1: X0, x2: X1, y1: sy(t), y2: sy(t), stroke: "var(--grid)" }, svg);
+      el("text", { x: X0 - 8, y: sy(t) + 4, class: "axis", "text-anchor": "end" }, svg, fmtMs(t));
+    });
+    [0.2, 0.5, 0.75, 0.9, 0.95, 0.98].forEach(t => {
+      el("text", { x: sx(t), y: Y0 + 18, class: "axis", "text-anchor": "middle" }, svg, t);
+      if (t === 0.9 || t === 0.95) el("line", { x1: sx(t), x2: sx(t), y1: Y1, y2: Y0, stroke: "var(--ink-3)", "stroke-dasharray": "3 3" }, svg);
+    });
+    el("text", { x: (X0 + X1) / 2, y: Y0 + 32, class: "axis", "text-anchor": "middle" }, svg, "recall@100 (scale stretched toward 1)");
+    const fixed = nl === 4096 ? 512 : 2048, fp_ = F.map(x => (x.pts[nl] || []).find(p => p[0] === fixed)).filter(Boolean);
+    el("path", { d: fp_.map((p, j) => (j ? "L" : "M") + sx(p[1]).toFixed(1) + " " + sy(p[2]).toFixed(1)).join(" "), fill: "none", stroke: "var(--ink-3)", "stroke-width": 1.2, "stroke-dasharray": "2 3" }, svg);
+    if (fp_.length) { const q = fp_[fp_.length - 1]; el("text", { x: sx(q[1]) - 10, y: sy(q[2]) - 10, class: "axis", "text-anchor": "end" }, svg, `${fixed.toLocaleString("en")} probes on every filter`); }
+    el("text", { x: X0, y: 12, class: "lbl" }, svg, "time per batch");
+    const v1 = F.reduce((a, x) => a + x.v1, 0) / F.length;
+    el("line", { x1: X0, x2: X1, y1: sy(v1), y2: sy(v1), stroke: "var(--linr)", "stroke-dasharray": "6 4", "stroke-width": 1.5 }, svg);
+    el("text", { x: X0 + 4, y: sy(v1) - 5, class: "axis", style: "fill:var(--linr)" }, svg, "LiNR V1, exact");
+    F.forEach((x, i) => {
+      const pts = x.pts[nl] || [], c = ramp[i];
+      el("path", { d: pts.map((p, j) => (j ? "L" : "M") + sx(p[1]).toFixed(1) + " " + sy(p[2]).toFixed(1)).join(" "), fill: "none", stroke: c, "stroke-width": 2 }, svg);
+      pts.forEach(p => {
+        whisk(svg, sx(p[1]), sy(p[2] * (1 - pt / 2)), sy(p[2] * (1 + pt / 2)), c);
+        el("circle", { cx: sx(p[1]), cy: sy(p[2]), r: 3.5, fill: p[3] ? "var(--surface)" : c, stroke: c, "stroke-width": 1.5 }, svg);
+        bindTip(el("circle", { cx: sx(p[1]), cy: sy(p[2]), r: 9, class: "hit" }, svg), `<b>${x.label}, ${nl.toLocaleString("en")} clusters, ${p[0].toLocaleString("en")} probes</b><br>recall@100 ${p[1]} ${pmR(P.ds)}<br>${fmtMs(p[2])} per batch ${pmT(P.ds)}${p[3] ? "<br>unstable timing" : ""}<br>LiNR V1: ${fmtMs(x.v1)}`);
+      });
+      const p24 = pts.find(p => p[0] === 24);
+      if (p24 && i === F.length - 1) el("text", { x: sx(p24[1]) + 6, y: sy(p24[2]) + 14, class: "axis" }, svg, "24 probes");
+      x.picks.filter(k => k[1] === nl).forEach(k => {
+        el("circle", { cx: sx(k[3]), cy: sy(k[4]), r: 7, fill: "none", stroke: c, "stroke-width": 2 }, svg);
+        bindTip(el("circle", { cx: sx(k[3]), cy: sy(k[4]), r: 10, class: "hit" }, svg), `<b>${x.label}: tuned for ${k[0].toFixed(2)}</b><br>${k[1].toLocaleString("en")} clusters, ${k[2].toLocaleString("en")} probes<br>recall@100 ${k[3]}<br>${fmtMs(k[4])} per batch ${pmT(P.ds)}`);
+      });
+    });
   }
   draw();
 })();
@@ -309,11 +381,11 @@ function buttons(box, items, cur, on) {
   buttons(document.getElementById("ctl-msum"), [[false, "real filters"], [true, "synthetic filters"]], syn, v => { syn = v; draw(); });
   function draw() {
   let prev = null;
-  table("t-msum", "Table 2. SilverTorch at recall 0.90 and 0.95: times faster than the best LiNR at the same recall (bold: SilverTorch faster), k = 100. ◐: half or more of the clusters probed; –: not reached within three quarters (top recall shown).",
-    ["Dataset · filter", "Pass", "0.90: share", "bs 1", "bs 16", "bs 64", "0.95: share", "bs 1", "bs 16", "bs 64"],
+  table("t-msum", "Table 2. SilverTorch at recall 0.90 and 0.95: times faster than the best LiNR at the same recall (bold: SilverTorch faster), k = 100. ◐: half or more of the clusters probed; –: not reached within three quarters (top recall shown). Seed ±: SilverTorch's seed spread on that dataset, which applies to every number in the row.",
+    ["Dataset · filter", "Pass", "Seed ±", "0.90: share", "bs 1", "bs 16", "bs 64", "0.95: share", "bs 1", "bs 16", "bs 64"],
     D.msum.filter(r => !!r.syn === syn).map(r => {
       const g = r.ds !== prev ? " grp" : ""; prev = r.ds;
-      return `<tr class="${g}"><td>${r.ds} · ${r.syn ? (r.sweep === "no filter" ? "none" : "random") : r.sweep}</td><td>${pct(r.pass_rate)}</td>${share(r, 0.9)}${cell(r, 0.9, 1)}${cell(r, 0.9, 16)}${cell(r, 0.9, 64)}${share(r, 0.95)}${cell(r, 0.95, 1)}${cell(r, 0.95, 16)}${cell(r, 0.95, 64)}</tr>`;
+      return `<tr class="${g}"><td>${r.ds} · ${r.syn ? (r.sweep === "no filter" ? "none" : "random") : r.sweep}</td><td>${pct(r.pass_rate)}</td><td><small>${pmT(r.ds)}</small></td>${share(r, 0.9)}${cell(r, 0.9, 1)}${cell(r, 0.9, 16)}${cell(r, 0.9, 64)}${share(r, 0.95)}${cell(r, 0.95, 1)}${cell(r, 0.95, 16)}${cell(r, 0.95, 64)}</tr>`;
     }));
   }
   draw();
@@ -328,7 +400,7 @@ function buttons(box, items, cur, on) {
     const b = D.batch[i];
     const best = [1, 2, 3].map(c => Math.min(...b.rows.map(r => r[c]).filter(x => x != null)));
     const us = v => v == null ? "–" : v < 0.1 ? (v * 1000).toFixed(1) + " µs" : v.toFixed(3) + " ms";
-    table("t-batch", `Table 3. Time per query on ${b.ds}, filter ${b.sweep}, k = 100.`, ["Algorithm", "B = 1", "B = 16", "B = 64"],
+    table("t-batch", `Table 3. Time per query on ${b.ds}, filter ${b.sweep}, k = 100.${seedCap(b.ds)}`, ["Algorithm", "B = 1", "B = 16", "B = 64"],
       b.rows.map(r => `<tr class="${cls(r[0])}"><td>${r[0]}</td>${[1, 2, 3].map(c => `<td>${r[c] === best[c - 1] ? "<b>" + us(r[c]) + "</b>" : us(r[c])}</td>`).join("")}</tr>`));
   }
   draw();
@@ -339,11 +411,11 @@ function buttons(box, items, cur, on) {
   const order = D.scale.slice().sort((a, b) => a.sweep.localeCompare(b.sweep) || a.n - b.n);
   let prev = null;
   table("t-scale", "Table 4. LAION by catalogue size: SilverTorch at recall 0.90 against the best LiNR, and at 24 probes against the best exact LiNR (k = 100).",
-    ["Filter · size", "0.90: share", "bs 1", "bs 16", "bs 64", "24 probes: recall", "24 probes: bs 16"],
+    ["Filter · size", "Seed ±", "0.90: share", "bs 1", "bs 16", "bs 64", "24 probes: recall", "24 probes: bs 16"],
     order.map(r => {
       const g = r.sweep !== prev ? " grp" : ""; prev = r.sweep;
       const c = bs => r.sp[bs] == null ? `<td class="na">–</td>` : `<td>${r.sp[bs] >= 1 ? "<b>" + fx(r.sp[bs]) + "</b>" : fx(r.sp[bs])}</td>`;
-      return `<tr class="${g}"><td>${r.sweep} · ${r.ds.replace("LAION ", "")}</td><td class="l">${r.frac == null ? "top " + f(r.top) : pct(r.frac) + (r.frac > 0.25 ? " ◐" : "")}</td>${c(1)}${c(16)}${c(64)}<td>${f(r.r24, 3)}</td><td>${fx(r.sp24)}</td></tr>`;
+      return `<tr class="${g}"><td>${r.sweep} · ${r.ds.replace("LAION ", "")}</td><td><small>${pmT(r.ds)}</small></td><td class="l">${r.frac == null ? "top " + f(r.top) : pct(r.frac) + (r.frac > 0.25 ? " ◐" : "")}</td>${c(1)}${c(16)}${c(64)}<td>${f(r.r24, 3)}</td><td>${fx(r.sp24)}</td></tr>`;
     }));
   const ns = [...new Set(D.c5tab.map(r => r.n))].sort((a, b) => a - b);
   table("t-c5", "Table 5. Co-design on Meta's code as published: whole-index filter time over probe-then-filter time (median, range over filters and probes). Paper: 1.79–2.15×.",
@@ -358,7 +430,7 @@ function buttons(box, items, cur, on) {
   buttons(box, D.sel.map((s, j) => [j, s.label]), i, v => { i = v; draw(); });
   function draw() {
     const s = D.sel[i];
-    table("t-sel", `Table 6. ${s.label}, batch 16, k = 100: time per batch (ms) and SilverTorch's recall at 24 probes.`,
+    table("t-sel", `Table 6. ${s.label}, batch 16, k = 100: time per batch (ms) and SilverTorch's recall at 24 probes.${seedCap(s.label)}`,
       ["Pass rate", "V1, ms", "V2, ms", "SilverTorch 24: recall", "SilverTorch 24: ms", "SilverTorch at 0.90: ms"],
       s.rows.map(r => `<tr><td>${r[0]}</td><td>${f(r[1])}</td><td>${f(r[2])}</td><td>${f(r[3], 3)}</td><td>${f(r[4])}</td><td>${f(r[5])}</td></tr>`));
   }
@@ -374,11 +446,11 @@ table("t-mem", "Table 7. Index size (MiB) and SilverTorch build time, smallest t
 (function () {
   let prev = null;
   table("t-cb", "Table 8. SilverTorch's bloom filter time over its exact filter's, same clusters and probes (median over batch sizes and probe settings; range in small type). Below 1: bloom faster.",
-    ["Dataset · filter", "Clusters", "Items per cluster", "Probes", "Bloom ÷ exact"],
+    ["Dataset · filter", "Clusters", "Items per cluster", "Probes", "Bloom ÷ exact", "Seed ±"],
     D.cbtab.slice().sort((x, y) => (D.tab.find(t => t.ds === x.ds)?.n ?? 0) - (D.tab.find(t => t.ds === y.ds)?.n ?? 0) || x.ds.localeCompare(y.ds) || x.sweep.localeCompare(y.sweep) || x.nl - y.nl).map(r => {
       const g = r.ds + r.sweep !== prev ? " grp" : ""; prev = r.ds + r.sweep;
       const n = D.tab.find(x => x.ds === r.ds)?.n;
-      return `<tr class="${g}"><td>${r.ds} · ${r.sweep}</td><td>${r.nl.toLocaleString("en-US")}</td><td>${n ? n0(n / r.nl) : "–"}</td><td class="l">${r.probes.split("–")[0] === r.probes.split("–")[1] ? r.probes.split("–")[0] : r.probes}</td><td>${r.med < 1 ? "<b>" + f(r.med) + "</b>" : f(r.med)} <small>${f(r.lo)}–${f(r.hi)}</small></td></tr>`;
+      return `<tr class="${g}"><td>${r.ds} · ${r.sweep}</td><td>${r.nl.toLocaleString("en-US")}</td><td>${n ? n0(n / r.nl) : "–"}</td><td class="l">${r.probes.split("–")[0] === r.probes.split("–")[1] ? r.probes.split("–")[0] : r.probes}</td><td>${r.med < 1 ? "<b>" + f(r.med) + "</b>" : f(r.med)} <small>${f(r.lo)}–${f(r.hi)}</small></td><td><small>${pmT(r.ds)}</small></td></tr>`;
     }));
   const fp = D.fp;
   document.getElementById("fp-note").textContent = `at the timed settings at most ${fp.share_max} % of the items the bloom passes actually fail the filter (none at ${fp.zero} of ${fp.points} graded settings), there are no false negatives, and recall moves by at most ${fp.cost_max}.`;
@@ -387,7 +459,7 @@ table("t-mem", "Table 7. Index size (MiB) and SilverTorch build time, smallest t
 /* Tables 9-10: parameters */
 (function () {
   let prev = null;
-  table("t-nl", "Table 9. SilverTorch's number of clusters on LAION 30M (d = 256): index, build, recall at a share of clusters probed, and the fastest timed setting reaching 0.90 at batch 16.",
+  table("t-nl", "Table 9. SilverTorch's number of clusters on LAION 30M (d = 256): index, build, recall at a share of clusters probed, and the fastest timed setting reaching 0.90 at batch 16." + seedCap("LAION 30M"),
     ["Filter · clusters", "Index, MiB", "Build, s", "Recall at 1/8", "Recall at 1/4", "Probes for 0.90", "t<sub>med</sub>, ms"],
     D.nltab.map(r => {
       const g = r.sweep !== prev ? " grp" : ""; prev = r.sweep;
@@ -402,16 +474,13 @@ table("t-mem", "Table 7. Index size (MiB) and SilverTorch build time, smallest t
     rows.map(r => `<tr><td>${r.ds} · ${r.sweep}</td><td>${pct(r.pass_rate)}</td>${r.pts.map(p => `<td>${p[1] >= 0.9 ? "<b>" + f(p[1], 3) + "</b>" : f(p[1], 3)}</td>`).join("")}</tr>`));
 })();
 
-/* Tables 11-12: seed variance at the seed-0 pick, machine check */
+/* Table 11: pooled seed spread */
 (function () {
-  table("t-var", "Table 11. Spread over the seeds at the same setting, tuned cells at their seed-0 pick: SilverTorch's time (max ÷ min − 1), its recall (max − min), its time over the best exact LiNR, and over the best LiNR at each tuned cell.",
-    ["Dataset", "Seeds", "Settings", "Time: median", "Time: max", "Recall: max", "vs exact LiNR", "Tuned cells", "vs best LiNR", "Winner changes"],
-    D.vsum.map(r => `<tr><td>${r.ds}</td><td>${r.seeds}</td><td>${r.points}</td><td>${f(r.t_med, 1)} %</td><td>${f(r.t_max, 1)} %</td><td>${f(r.r_max, 3)}</td><td>${f(r.w_med, 1)} %</td><td>${r.cells}</td><td>${r.fx_med == null ? "–" : f(r.fx_med, 1) + " %"}</td><td>${r.flips}</td></tr>`));
-  table("t-mach", "Table 12. LiNR V1's time at seeds 1–2 over seed 0, same cell, by the machine that ran the seed.",
-    ["Cells", "Seed", "Machine", "Settings", "Median", "Range"],
-    D.machine.map(m => `<tr><td class="l">${m.cells}</td><td>${m.seed}</td><td>${m.other ? "another" : "same"}</td><td>${m.n}</td><td>${f(m.med, 3)}</td><td>${f(m.lo, 3)}–${f(m.hi, 3)}</td></tr>`));
+  table("t-var", "Table 11. SilverTorch's spread over the seeds at the same setting, mean over the settings with two or more seeds: time range as a share of the median, recall range; and the tuned cells held at their seed-0 setting.",
+    ["Dataset", "Seeds", "Settings", "Time range", "Recall range", "Tuned cells", "Winner changes"],
+    D.pvtab.map(r => `<tr><td>${r.ds}</td><td>${r.seeds}</td><td>${r.points}</td><td>${f(r.t, 1)} %</td><td>${f(r.r, 3)}</td><td>${r.cells}</td><td>${r.flips}</td></tr>`));
   const v = D.vtext, b = D.vbelow, set = (id, t) => { document.getElementById(id).textContent = t; };
-  set("v-t", v.t); set("v-r", v.r); set("v-fx", v.fx); set("v-cells", v.cells); set("v-mach", v.mach);
+  set("v-t", D.pvtext.t); set("v-r", D.pvtext.r); set("pv-all", D.pvtext.all_t); set("v-cells", v.cells);
   set("v-flips", v.flips === 0 ? "none" : v.flips);
   set("v-below", b.n ? `At that setting ${b.n} cells (${b.cells.join(", ")}) dip below the target at a later seed, by at most ${b.gap}.` : "");
   set("vflip", D.vflip.length ? D.vflip.join("; ").replace(/ p1,/, " with no filter,") : "none");
