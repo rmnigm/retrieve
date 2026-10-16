@@ -1,6 +1,6 @@
 # IVF-TUNE: SilverTorch `n_lists` and n95 per dataset size
 
-Roadmap IVF-TUNE ([decisions](../../../decisions.md#campaign-v2-user-2026-10-08), *IVF tuned per dataset size*). Quality
+Roadmap IVF-TUNE ([decisions](../../../decisions.md#campaign-design), *IVF tuned per dataset size*). Quality
 only, at campaign-v2 (`408b1188`): SilverTorch triton, clause, the median kept `filter` sweep, seed 0, bs 16, k 100,
 `n_probe` doubling per `n_lists` until `recall_oracle@100` ≥ 0.95, capped at `n_lists` / 4 (25 % of the items scanned;
 user, 2026-10-09). **The records are artifacts, not paper numbers**, in

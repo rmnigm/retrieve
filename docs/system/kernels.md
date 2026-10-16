@@ -467,7 +467,7 @@ bs 16, nearly all only storing `-inf`: bound by program count, not bytes
 ([v2-prof](../../research/artifacts/campaign-v2/v2-prof/README.md)). The stride
 does not change which program reduces a lane or how: each lane is still
 one `tl.sum` over D in the same layout, so scores are bit-identical to
-the one-tile grid ([validation](../../research/validation.md#campaign-v2-phase-v), "V2 Fix A").
+the one-tile grid ([v2-fix-a](../../research/artifacts/campaign-v2/v2-fix-a/README.md)).
 `programs` is a field of the tile config. The default 864 is one wave on
 A100 (108 SMs × 8 resident 8-warp programs); swept over {864, …, 13824},
 it was the best or within 1 % of the best at every batch size and pass
@@ -869,7 +869,7 @@ The scales stay `abs_max / 127.0`: eager PyTorch evaluates a division by a
 Python scalar as a multiply by fp32(1/127), and inductor emits the same multiply,
 so they already agree (a correctly rounded division would not).
 Measured in
-[validation](../../research/validation.md#campaign-v2-phase-v), *V-GRAPH-IDS*.
+[v-graph-ids](../../research/artifacts/campaign-v2/v-graph-ids/README.md).
 
 ### [`quantize_oporp_1bit`](../../retrieve/src/retrieve/indexing/quantize.py) (`retrieve.indexing`)
 
@@ -1182,7 +1182,7 @@ whose ties exceed k, so it is not used.
 Meta's `LICENSE` and headers and one "Modified by the retrieve authors" line per changed file,
 under Meta's own names (distribution and package `silvertorch`, ops `torch.ops.st.*`, C++
 namespace `st::ops`). `CHANGES.md` lists every change; each has its gate row in
-[validation](../../research/validation.md#meta-fork-backendofficial-fork), measured when the
+[validation](../../research/validation.md#adapted-silvertorch-gates), measured when the
 member was `official-fork/` (package `silvertorch_fork`, ops `torch.ops.stfork.*`) and loaded
 beside Meta's published package for the parity gates; the published code left the workspace at
 RENAME and the member took Meta's names back ([Deleted backends](#deleted-backends)).
@@ -1293,9 +1293,7 @@ index (or a clause-mask kernel for `"exact"`) producing 1-bit-per-item
 masks, then a masked `__dp4a` scorer — and were bit-identical to the
 Triton kernels on scores.
 
-Their measurements (raw outputs:
-[artifacts/cute-dsl-scorer/](../../research/artifacts/cute-dsl-scorer/README.md)) are
-superseded results, not cited.
+Their measurements are superseded results, not cited.
 
 **Meta's code as published** (`SilverTorch(backend="official")`: the pinned `meta-recsys/silvertorch`
 build at `21aa35e`, the `official` extra, the published forward in `silvertorch.py` and the
@@ -1317,7 +1315,7 @@ the adapted official backend's review and parity gates were green; the tag
 [decisions](../../research/decisions.md#goal-and-scheduling) has the ruling (the study runs LiNR
 with the exact filter only; the bloom in the study is Meta's, inside SilverTorch). Their
 measurements are superseded results in
-[validation](../../research/validation.md#superseded-results-not-for-the-paper) and are not
+[validation](../../research/validation.md#superseded-results) and are not
 cited.
 
 ## Adding an op

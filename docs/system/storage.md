@@ -47,7 +47,7 @@ export UV_PROJECT_ENVIRONMENT=/venvs/retrieve         # optional: one shared ven
 inductor's on-disk FX cache does not invalidate when a `@triton_op` host
 wrapper's Python source changes, so a shared `/tmp/torchinductor_root`
 silently serves stale kernels
-([reproduction-deviations](../../research/paper/reproduction-deviations.md) D-7).
+([testing](testing.md#running)).
 For the same reason it must change with the library tree: a job directory
 reused after a library edit replays the old body in every `graph`-mode cell
 ([validation](../../research/validation.md#library-gates), V1-FUSE), so it is

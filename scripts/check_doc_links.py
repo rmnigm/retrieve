@@ -1,5 +1,5 @@
 """Report relative markdown links whose target does not exist; in the wiki (AGENTS.md,
-README.md, docs/, research/ minus paper/, artifacts/ and log.md) also backticked repo paths
+README.md, docs/, research/ minus artifacts/) also backticked repo paths
 that do not exist and `bench` / `eval-data` / `train` subcommands the click groups do not
 define; and `docs/... § Heading` citations in tracked files whose heading is gone (SCHEMA:
 cited headings are stable). The command table is read from the CLI sources with ast:
@@ -82,13 +82,9 @@ def commands(package: Path) -> set[str]:
 
 
 def in_wiki(rel: str) -> bool:
-    if rel == "research/log.md":  # append-only history: it names what was removed
-        return False
     if rel in ("AGENTS.md", "README.md"):
         return True
-    return rel.startswith(("docs/", "research/")) and not rel.startswith(
-        ("research/paper/", "research/artifacts/")
-    )
+    return rel.startswith(("docs/", "research/")) and not rel.startswith("research/artifacts/")
 
 
 def _plain(text: str) -> str:
@@ -105,7 +101,7 @@ def section_citations() -> int:
         ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
     ).stdout.split()
     for rel in files:
-        if rel == "research/log.md" or rel.startswith("research/artifacts/"):
+        if rel.startswith("research/artifacts/"):
             continue
         try:
             text = (ROOT / rel).read_text()

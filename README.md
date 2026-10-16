@@ -54,7 +54,7 @@ uv run --directory evaluation bench campaign --suite filter --resume
 
 `cd`-ing into a member works too — uv finds the workspace root automatically.
 
-The lockfile lives at the root (`uv.lock`); the per-member lockfiles are obsolete.
+The one lockfile lives at the root (`uv.lock`).
 
 ## Docs
 
@@ -64,13 +64,12 @@ Two trees, one set of conventions ([`research/SCHEMA.md`](research/SCHEMA.md)):
   harness work, kept in sync with the code. [`docs/index.md`](docs/index.md)
   lists every page.
 - **Research wiki** ([`research/`](research/index.md)): the agentic working
-  wiki behind the paper — the work queue ([`roadmap.md`](research/roadmap.md)),
+  wiki behind the study — the work queue ([`roadmap.md`](research/roadmap.md)),
   standing decisions ([`decisions.md`](research/decisions.md)), what is
   validated and measured ([`validation.md`](research/validation.md)), the
-  process contracts, the paper drafts ([`research/paper/`](research/paper/))
-  and the raw scripts behind every number
-  ([`research/artifacts/`](research/artifacts/)). Agents start at
-  [`AGENTS.md`](AGENTS.md).
+  process contracts and the raw scripts behind every number
+  ([`research/artifacts/`](research/artifacts/)). The paper is kept outside
+  this repository. Agents start at [`AGENTS.md`](AGENTS.md).
 
 **System design** ([`docs/system/`](docs/system/)) — how the thing works, kept in
 sync with the code:

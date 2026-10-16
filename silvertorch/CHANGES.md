@@ -2,7 +2,7 @@
 
 This directory is a fork of [meta-recsys/silvertorch](https://github.com/meta-recsys/silvertorch) at commit
 `21aa35e28b6dd9a91e9ee35efb0857715e86bda7`, vendored unmodified by `git archive` (repository commit 94d8f69), synced to
-upstream `main` at `22c2007ed5d28ec8304de081cc2393778708ad12` (the "upstream sync" row), and changed by the retrieve authors to remove the bottlenecks measured in `research/paper/reproduction-deviations.md`.
+upstream `main` at `22c2007ed5d28ec8304de081cc2393778708ad12` (the "upstream sync" row), and changed by the retrieve authors to remove the bottlenecks measured in Meta's code as published (the reproducibility paper, kept outside this repository).
 
 **Licence.** Apache License 2.0, as upstream: [`LICENSE`](LICENSE) is upstream's, verbatim; every file keeps upstream's
 copyright and licence header; every file we changed carries a "Modified by the retrieve authors" line under it (§4(b)).

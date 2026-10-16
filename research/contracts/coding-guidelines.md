@@ -111,6 +111,6 @@ conflicts with one of them, the priority wins.
 
 The study's baseline is generic torch (a dense matmul, top-K, then a
 postfilter: [decisions](../decisions.md#harness)). Faiss, HNSW,
-cuBLAS, cuVS and filtered-graph baselines are out of the study
-([backlog](../backlog.md#baselines-outside-the-study)); none is added
+cuVS and filtered-graph baselines are out of the study
+([decisions](../decisions.md#goal-and-scheduling)); none is added
 unscheduled.
