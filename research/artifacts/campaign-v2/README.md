@@ -18,7 +18,7 @@ planning numbers read from records whose gates are not green.
 | `pivot.csv` | dataset × inputs × algo × backend × code_version × subtree: records, `unstable`, not-ok |
 | `pass_rates.csv` | the exact oracle's mean pass rate per (dataset, inputs, sweep), and whether the sweep is kept |
 | `wall_time.csv` | per-cell wall time by dataset, suite, algo, backend, filter kind |
-| `reuse.csv` | the record reuse rule per record ([decisions](../../decisions.md#campaign-v2-user-2026-10-08)) |
+| `reuse.csv` | the record reuse rule per record ([decisions](../../decisions.md#campaign-design)) |
 
 ```bash
 python -I research/artifacts/campaign-v2/inventory.py /scratch/cv2-inventory /scratch/cv2-inventory-out

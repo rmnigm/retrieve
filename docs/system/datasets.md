@@ -223,7 +223,7 @@ the catalog parquets:
 
 ```
 item_attrs_narrow.pt        [N, 5, 4] int64   (genre, lang, format, year, author)
-item_attrs_wide.pt          [N, 1, 32] int64  (shelves; built, never read: [backlog](../../research/backlog.md#unused-dataset-artifacts))
+item_attrs_wide.pt          [N, 1, 32] int64  (shelves; built, never read)
 clause_is_reverse_narrow.pt [5] bool = [F, T, F, F, F]
 lang_vocab.json / format_vocab.json / author_vocab.json / wide_shelf_vocab.json
 wide_shelf_global_freq.pt   [V_wide] int64
@@ -524,8 +524,7 @@ code stays. Nothing is on the Hub (its repo, which held the trainer inputs, was 
 its flags are in [its command.sh](../../research/artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)).
 d128 does not fit. The one filter cell recorded ran on the deleted gSASRec `gsasrec-d128-shared`
 checkpoint and is not reproducible.
-Nothing below is citable. The staging scripts and the gSASRec run's config and metrics are in
-[artifacts/e4-kuairand/](../../research/artifacts/e4-kuairand/).
+Nothing below is citable.
 
 `uv run eval-data kuairand all --output-dir data/kuairand`, or the four
 subcommands in turn. Sources, both CC BY 4.0 on Zenodo and md5-checked by
@@ -659,7 +658,7 @@ data/kuairand/
 ### openalex
 
 **Status: built at 10 M, `bench check` clean, one filter cell run; not on the Hub; dropped from the
-study (user, 2026-10-08; [backlog](../../research/backlog.md#datasets-not-in-the-study)).** The OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's.
+study (user, 2026-10-08; [decisions](../../research/decisions.md#datasets)).** The OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's.
 `convert --sample-rate 0.35 --workers 64` streamed all 2,040 files of release 2026-09-23
 (297.1 GB read in 572 s, 0 failures); a 15 M catalog was prepped and encoded
 (`encode_text` 15,663 s on the A100, 958 docs/s), did not fit the harness (below), and was
@@ -825,7 +824,7 @@ The measured sizes, rates and wall times of the 10 M build are in the artifact's
 
 **Status: built, `bench check` ok; not on the Hub, so a pod that needs it rebuilds it with the
 steps below (Re-LAION may be shared as vectors only, and the user decides whether:
-[release](../../research/paper/release-and-licenses.md)).** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
+[roadmap](../../research/roadmap.md#needs-the-user)).** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
 ([decisions](../../research/decisions.md#datasets)). Nothing here is citable. The first dataset staged
 through the [generic ingest](#the-generic-ingest-eval-data-ingest).
 
@@ -1083,7 +1082,8 @@ EVAL_REPOS = {
 code; a fetch of them fails.
 
 What may be
-published from each repo: [release and licenses](../../research/paper/release-and-licenses.md).
+published from each repo is a release decision for the user
+([roadmap](../../research/roadmap.md#needs-the-user)).
 
 `pinkmeme/eval-pubmed` (private, revision `10d48d05`, 17.2 GB) holds the dot-product 10 M slice
 (`pubmed-medcpt-dot`, [pubmed](#pubmed)): `content_d768/`, attrs, `eval_split.parquet`, `heldout.parquet`,

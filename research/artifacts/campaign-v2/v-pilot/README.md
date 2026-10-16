@@ -6,7 +6,7 @@ d 128, E1c), every arm the suite lists for it, seeds {0, 1, 2}, code_version `40
 Records: Hub `campaign-v2/goodreads-synth-synth`; logs, the 1 Hz clock trace, the gate output and
 the `bench report` output: Hub `artifacts/v-pilot` ([hub-index](../../hub-index.md)). Not
 citable until D1-G. The gate verdict and the headline numbers are in
-[validation](../../../validation.md#campaign-v2-phase-v).
+[validation](../../../validation.md#superseded-results).
 
 | file | what |
 |---|---|

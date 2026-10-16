@@ -1,7 +1,7 @@
 ---
 title: schema
 created: 2026-09-26
-updated: 2026-10-11
+updated: 2026-10-17
 type: summary
 tags: [process]
 sources: [CLAUDE.md]
@@ -13,7 +13,7 @@ The repository's documentation is two trees under one set of conventions:
 
 - **`research/`** (this directory) is the agentic research wiki: the work
   queue, the standing decisions, what was measured and validated, the
-  process contracts, the paper drafts and the raw scripts behind numbers.
+  process contracts and the raw scripts behind numbers.
 - **[`docs/`](../docs/index.md)** is the released project's documentation:
   how the library and the harness work (`docs/system/`), for a user or
   contributor of the release. It may link into `research/` for a rationale
@@ -39,9 +39,8 @@ two process contracts.
 Out of scope: the library user guide, which ships in the sdist and lives in
 [`retrieve/docs/`](../retrieve/docs/) (written for someone without a
 clone; it names `docs/system/` but does not link it); the papers we
-reproduce, frozen in `articles/` (gitignored); the reproducibility
-paper's own sections in [`paper/`](paper/), which cite this wiki but are
-drafts rather than wiki pages.
+reproduce, frozen in `articles/` (gitignored); the reproducibility paper,
+which is kept outside this repository.
 
 ## Layout
 
@@ -52,15 +51,12 @@ docs/                the released project's documentation
 research/            the research wiki
 ├── SCHEMA.md        this file (both trees)
 ├── index.md         catalog, one line per page
-├── log.md           one line per structural change to either tree
-├── roadmap.md       the open work queue: steps, gates, estimates, dependencies
-├── backlog.md       known work that is not queued
+├── roadmap.md       the open work queue: steps, gates, dependencies, what waits on the user
 ├── decisions.md     standing decisions and constraints in force
 ├── validation.md    what is validated now: every gate's state, and the measured results that stand
 ├── contracts/       process contracts: agent orchestration, coding guidelines
 ├── environment/     the GPU pods: disks, budget, persistence
-├── artifacts/       raw scripts behind measured numbers, per plan (outputs on the Hub)
-└── paper/           reproducibility-paper sections (not wiki pages)
+└── artifacts/       raw scripts behind measured numbers, per plan (outputs on the Hub)
 ```
 
 `docs/system/` keeps its path and its page names because code comments cite
@@ -92,8 +88,8 @@ is gone.
 
 ## Frontmatter
 
-Every page under `docs/` and `research/` (except `research/paper/` and
-`research/artifacts/`) starts with:
+Every page under `docs/` and `research/` (except `research/artifacts/`)
+starts with:
 
 ```yaml
 ---
@@ -110,7 +106,7 @@ contested: true                   # optional; see the contradiction policy
 
 Types used here: `entity` for a package, a dataset family or the box;
 `concept` for a mechanism (filtering, the measurement protocol); `summary`
-for the roadmap, the backlog, the decisions and the contracts.
+for the roadmap, the decisions and the contracts.
 
 ## Tag taxonomy
 

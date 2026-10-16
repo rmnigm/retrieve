@@ -28,7 +28,7 @@ with the current trainer's E1c checkpoints (gSASRec body, sampled softmax
 with logQ, L2-normalized; [decisions](../../research/decisions.md#sequential-encoder)).
 Metrics: [validation](../../research/validation.md#final-models-the-e1c-recipe) (not
 yet validated, not citable). Which older records this invalidates:
-[validation](../../research/validation.md#encoder-switch-evals-to-redo).
+[validation](../../research/validation.md#superseded-results).
 
 | dataset config | ckpt-id | D | where it is |
 |---|---|---|---|

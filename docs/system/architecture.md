@@ -76,7 +76,7 @@ for `SilverTorch`; every constructor validates its own):
 |---|---|---|
 | `"triton"` | fused Triton kernels. The default. | every module but `SilverTorch` |
 | `"torch"` | pure-torch eager equivalent, same semantics, larger intermediates | every module but `SilverTorch` |
-| `"cuda"` | Meta's SilverTorch code, adapted ([`silvertorch/`](../../silvertorch/CHANGES.md), package `silvertorch`, `torch.ops.st.*`) for phases 2+3 through the adapter; `SilverTorch`'s only backend; CUDA-graph capturable and compilable ([validation](../../research/validation.md#meta-fork-backendofficial-fork)) | **`SilverTorch` only** |
+| `"cuda"` | Meta's SilverTorch code, adapted ([`silvertorch/`](../../silvertorch/CHANGES.md), package `silvertorch`, `torch.ops.st.*`) for phases 2+3 through the adapter; `SilverTorch`'s only backend; CUDA-graph capturable and compilable ([validation](../../research/validation.md#adapted-silvertorch-gates)) | **`SilverTorch` only** |
 
 `"cuda"` needs the `silvertorch` workspace member, a dependency of `torchretrieve` that builds a
 CUDA extension and registers sixteen `torch.ops.st.*` ops. The adapter is the
