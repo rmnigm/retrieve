@@ -9,12 +9,12 @@ sources: [official-fork/, research/validation.md, research/artifacts/hub-index.m
 
 # Meta's SilverTorch: as published vs adapted
 
-> **Numbers superseded by the FULL-RERUN, not for the paper.** The figures on this page come from the NUMBERS legs and the final pass at earlier tags; the paper's tables are regenerated from the FULL-RERUN's `results.parquet` ([roadmap](../roadmap.md) step 7, [validation](../validation.md#full-rerun)). The structure and the rulings stand.
-
-> **Status: citable.** The adapted code passed its review (ACCEPT at
-> `1f6fed8`, tag `campaign-fork`, [validation](../validation.md#meta-fork-backendofficial-fork)),
-> and its NUMBERS gate is green
-> ([validation](../validation.md#numbers-adapted-silvertorch-over-the-study-grid)).
+> **Status (user ruling 2026-10-16): final, citable.** The adapted code passed its review
+> (ACCEPT at `1f6fed8`, tag `campaign-fork`,
+> [validation](../validation.md#meta-fork-backendofficial-fork)); the parity, sync, capture,
+> compile and gate-grid speed numbers on this page were not remeasured by the FULL-RERUN and
+> stand with their Hub subtrees as source. Any NUMBERS-leg figure quoted here is superseded;
+> the full rerun regenerates it.
 >
 > **What this page is.** The study's SilverTorch arm is Meta's official
 > SilverTorch code, adapted by us ([decisions](../decisions.md#goal-and-scheduling)).

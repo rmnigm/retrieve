@@ -9,7 +9,7 @@ sources: [research/paper/outline.md, research/paper/results.md, research/paper/c
 
 # Material C3: results, verdicts, deviations that move them
 
-> **Numbers superseded by the FULL-RERUN, not for the paper.** The figures on this page come from the NUMBERS legs and the final pass at earlier tags; the paper's tables are regenerated from the FULL-RERUN's `results.parquet` ([roadmap](../../roadmap.md) step 7, [validation](../../validation.md#full-rerun)). The structure and the rulings stand.
+> **Superseded; the full rerun regenerates it** (user ruling 2026-10-16). Every figure on this page comes from the NUMBERS legs and the final pass at earlier tags, which the FULL-RERUN remeasured; the paper's tables are regenerated from the FR tables ([results](../results.md), [validation](../../validation.md#full-rerun)). The structure and the rulings stand.
 
 Collected facts for the [outline](../outline.md)'s §2 (T1 verdict column),
 §4 (C1-C6), §5 (F3, T2), §6 (T3 numbers) and §7 (deviations that move a
@@ -27,10 +27,8 @@ with every number here (the six wording fixes of the c3 rulings are in
 both, commit `fc70420`), except the C4 attribution in
 [§4 C4](#c4-bloom-fpr--0067-at-1024-bits-memory-s-8s-10-s-14).
 
-**Citability.** The NUMBERS legs, the final pass (D1-G) and the META-FORK
-gates are green ([validation](../../validation.md#numbers-adapted-silvertorch-over-the-study-grid)),
-so their numbers are **citable**, with these exclusions, each listed and
-never quoted as measured:
+**Citability.** Superseded (above); the full rerun regenerates every number here. The
+exclusions it keeps, each listed and never quoted as measured:
 - LiNR V2 at bs 256 on PubMed `all5`: a TIMEOUT;
 - the cells unstable in every run, kept and flagged.
 
@@ -156,8 +154,8 @@ suite `c3-real`: 9 real filters):
 | `torch.compile` max-autotune, synthetic | 0.50-0.96, median 0.84 | 1.49-2.20 |
 | `torch.compile` max-autotune, real | 0.56-1.05, median 0.96 | 1.96-2.71, median 2.21 |
 
-**Mechanism** ([validation](../../validation.md#library-gates) V1-FUSE row,
-citable through D1-G): `torch.compile(max-autotune)` V1's bs 1 win comes
+**Mechanism** ([validation](../../validation.md#library-gates) V1-FUSE row; the
+mechanism stands, its numbers are superseded): `torch.compile(max-autotune)` V1's bs 1 win comes
 partly from another reduction order and fp16 top-k keys; its ids differ
 from Triton V1 in 36 / 36 V-PILOT cells at bs 1 and are equal in 36 / 36
 at bs 16. The eager-in-graph row shows that most of eager's bs 16 penalty

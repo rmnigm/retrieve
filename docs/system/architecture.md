@@ -17,7 +17,7 @@ shapes, autotune keys, numerics) see [kernels.md](kernels.md).
 **What ships** ([decisions](../../research/decisions.md#goal-and-scheduling)): the
 release carries LiNR V1-V3 with their filters and kernels, and `SilverTorch` on Meta's official
 SilverTorch code, adapted (`backend="official-fork"`, the default; the `official-fork/` workspace
-member, renamed at roadmap RENAME). `backend="official"` (Meta's code as published) stays as the
+member, to be renamed). `backend="official"` (Meta's code as published) stays as the
 parity reference. Our earlier Triton reimplementation of SilverTorch and its eager reference are
 deleted ([kernels](kernels.md#deleted-backends)).
 
@@ -579,4 +579,3 @@ update in the same commit.
 | where the harness keeps data, its environment variables | [storage.md](storage.md) |
 | standing decisions and constraints (why, not what) | [decisions.md](../../research/decisions.md) |
 | what gates pass and the measured results that stand | [validation.md](../../research/validation.md) |
-| the open work queue | [roadmap.md](../../research/roadmap.md) |

@@ -223,7 +223,7 @@ the catalog parquets:
 
 ```
 item_attrs_narrow.pt        [N, 5, 4] int64   (genre, lang, format, year, author)
-item_attrs_wide.pt          [N, 1, 32] int64  (shelves — see "dead artifacts")
+item_attrs_wide.pt          [N, 1, 32] int64  (shelves; built, never read: [backlog](../../research/backlog.md#unused-dataset-artifacts))
 clause_is_reverse_narrow.pt [5] bool = [F, T, F, F, F]
 lang_vocab.json / format_vocab.json / author_vocab.json / wide_shelf_vocab.json
 wide_shelf_global_freq.pt   [V_wide] int64
@@ -314,12 +314,9 @@ normalised**, scored by dot product as MedCPT is trained (`normalize: false` in
 `eval_split.parquet`, `heldout.parquet`, `queries.parquet`, vocabularies and article parquets are
 copies of the canonical `pubmed-medcpt` (vocab order below), its `item_id_map.json` is byte-equal to
 it, and only `content_d768/` was rebuilt. The older `pubmed-medcpt` holds the same vectors
-L2-normalised (cosine); the PubMed numbers measured on it so far stay until the final run.
-`bench check` passes. A rebuild from
-source on a fresh pod (63 min, CPU) gives D1's slice, embeddings included
-(an exact V1 cell bit-equal to `d1/pubmed`'s);
-state in [validation](../../research/validation.md#datasets). The dataset is not on
-the Hub. Nothing below is citable.
+L2-normalised (cosine). `bench check` passes. A rebuild from source on a fresh pod gives
+the same slice, embeddings included; state in [validation](../../research/validation.md#datasets).
+The dataset is not on the Hub.
 
 `plan` → `download --what pmids` → `convert --fetch --delete-raw` →
 `medline --stream` → `attrs` → `queries` → `encode_queries`. Source is the
@@ -356,7 +353,7 @@ file, listed in the `filter` suite at 768.
 
 The raw mirror (163.7 GB) plus the fp16 item matrix (55.2 GB) plus the
 MEDLINE baseline (53.9 GB) is 273 GB — more than the 300 GB overlay can
-give one dataset next to the campaign's. So `convert` never holds the
+give one dataset next to the others. So `convert` never holds the
 mirror:
 
 1. **PMID lists first** (0.42 GB, `download --what pmids` or `--fetch`).
@@ -439,7 +436,7 @@ rows (`Counter.most_common`); journal and language by count descending, **ties b
 name** (`group_by` returns groups in a thread-dependent order, so a count-only sort
 gave tied journals different ids, and a different top-5k cut, on every build). Two
 builds of the same inputs are byte-identical (`test_attrs_two_builds_are_byte_identical`).
-The staged `/data/pubmed-medcpt` (pod b) predates the tie rule: its journal / language ids are
+The staged `pubmed-medcpt` predates the tie rule: its journal / language ids are
 one draw of the old order and stay canonical (controller, 2026-10-10), pinned by sha256
 (`item_attrs_narrow.pt` `8a3bce0f…`, `eval_split.parquet` `3a83c6f9…`); the dot-product build
 `pubmed-medcpt-dot` copies these files, and `pinkmeme/eval-pubmed@10d48d05` holds them. Pods that need the old one copy it; a rebuild with this code is **not byte-equal** to it.
@@ -791,7 +788,7 @@ flags and target from `item_id_map.json`, `papers.parquet` and the staged `refs`
 
 `clause_is_reverse_narrow.pt` is `[F, F, F, T, F]`; C3 is bloom-incompatible and
 excluded from the bloom sweeps of [`config/openalex.yaml`](../../evaluation/config/openalex.yaml).
-The roadmap's predicate "year < query year, same field" is the `field_era` sweep, C0 ∧ C1.
+The study's predicate "year < query year, same field" is the `field_era` sweep, C0 ∧ C1.
 
 **Why eras.** Clauses are equality-only
 ([filtering](filtering.md#linr-paper-31--fixed-clause-schema-no-dsl)), so an order
@@ -821,48 +818,8 @@ the main thread costs ~6 %. `flash_attn` is not installed.
 
 #### Budget
 
-As measured; `plan` from its
-[report](https://huggingface.co/datasets/pinkmeme/eval-results/blob/main/artifacts/e3-openalex/plan-2026-09-23.json):
-
-| | 10 M catalog |
-|---|---|
-| read over S3 | **297.1 GB** of projected columns (all files; the slice is a hash, not a prefix) |
-| `convert` wall time | **572 s** at `--workers 64`, 526 MB/s average (the 20 s probes of [`stream_probe.py`](../../research/artifacts/e3-openalex/stream_probe.py) saw 176–230 MB/s; `plan`'s threaded rate, 20 MB/s, is GIL-bound) |
-| sample rate | 0.35 → 29.9 M staged; any rate that stages N × (1 + margin) gives the same catalog |
-| staging parquet | 16 GB (`_raw/openalex/staging`, deletable once no smaller catalog is wanted) |
-| `prep` | 374 s; `papers.parquet` 6.3 GB, `item_id_map.json` 209 MB |
-| fp16 item shards | 15 GB (10 × 1 M) |
-| attrs | 1.5 GB (`[10 M, 5, 4]` int64) |
-| encode | a fresh encode is ~2.9 A100-hours at 958 docs/s (the 15 M one took 15,663 s); this catalog was `reshard`ed from it in 34 s |
-| on the device | items fp32 30.7 GB; the cell (run before the item-chunked oracle) reserved 64 GB |
-
-**What fits the harness.** `load_inputs` holds items fp32 on the device: N × D × 4 B plus
-attrs and workspace. When the 15 M catalog was built, the then one-shot oracle added a
-transposed fp32 copy, which capped 768-d at ~11–12 M items on the 80 GB A100, so E3 was cut
-to 10 M (`prep --keep-items 10000000`, then `reshard --from-dir` the 15 M vectors). The
-item-chunked oracle has no such copy ([evaluation](evaluation.md#oracle-blob-v4)). The
-loader itself once peaked at three copies (fp16 + `.float()` + `F.normalize`, 107 GB at
-15 M); `layout.load_text_items` normalises a sharded matrix shard by shard into one fp32
-buffer (`load_sharded(..., normalize=True)`, `torch.equal` to the old path on 3 M real
-rows), so a large catalog is written sharded.
-
-```
-data/openalex/
-├── item_id_map.json            {"W<id>": item_id}
-├── papers.parquet              item-id order: work_id, year, field, subfield, source, is_oa, type, title, abstract, refs
-├── heldout.parquet             target item_id + the query's own attributes and relevance counts
-├── queries.parquet             query_work_id, title, abstract (heldout row order)
-├── qrels.parquet               query_row, item_id, passes_field_era
-├── content_d768/
-│   ├── text_emb_shard_NNN.pt + shard_index.json + text_emb.meta.json
-│   ├── query_emb.pt + query_emb.meta.json
-│   └── encode_params.json
-├── item_attrs_narrow.pt        [N, 5, 4] int64
-├── clause_is_reverse_narrow.pt [5] bool = [F, F, F, T, F]
-├── {field,subfield,source,era}_vocab.json
-├── eval_split.parquet          target_id, query_attrs_narrow [5]
-└── prep_log.json
-```
+The measured sizes, rates and wall times of the 10 M build are in the artifact's
+[README](../../research/artifacts/e3-openalex/README.md#budget).
 
 ### laion30m
 
@@ -940,7 +897,8 @@ over the 768 output dims, keep the first 256, L2-normalise, store fp16. Prefixes
 without the `layer_norm`, so the two datasets' vectors are not built the same way.
 `encode_text` writes `_raw/relaion/laion30m/items_NNN.npy` (1 M rows each), resumable per
 shard and pinned by `encode_params.json`; `encode_queries` writes `queries.npy`. The ingest
-re-normalises them in fp32 into the staged fp16 shards. Measured on GPU 1 of pod d (A100): 10.1 k captions/s, 2,957 s for the 30 M; the ingest (with the targets on the GPU) 118 s; query↔target cosine median 0.80. Targets: the ingest's default, each
+re-normalises them in fp32 into the staged fp16 shards (the measured rates are in
+[validation](../../research/validation.md#datasets)). Targets: the ingest's default, each
 query's exact unfiltered top-1 item (a caption query has no relevant item of its own). The
 headline is `recall_oracle`, as everywhere.
 
@@ -1102,16 +1060,6 @@ Filter sweeps additionally need:
 plus, for a `-synth` config, the four `synth-filter` files, or for
 `arxiv-corr-synth` the three `--correlated` ones ([above](#synthetic-selectivity-attrs)).
 
-### Dead artifacts
-
-`item_attrs_wide.pt`, `wide_shelf_vocab.json`,
-`wide_shelf_global_freq.pt`, and the `query_attrs_wide_1shelf` /
-`_2shelf` columns of `eval_split.parquet` are **built but never read**:
-`bench.inputs.load_inputs` does not load them and `layout.load_query_attrs`
-reads only the `query_attrs_narrow` column. They exist for a wide-bloom
-sweep that no suite runs. Keep or drop them as a unit — they are only meaningful
-together.
-
 ## HuggingFace I/O
 
 [`hub.py`](../../evaluation/eval_datasets/hub.py) holds the repo
@@ -1132,7 +1080,7 @@ EVAL_REPOS = {
 ```
 
 `yambda-5b` and `kuairand` name repos the user deleted (2026-10-15); their keys stay in the
-code until the roadmap's deletion step.
+code; a fetch of them fails.
 
 What may be
 published from each repo: [release and licenses](../../research/paper/release-and-licenses.md).

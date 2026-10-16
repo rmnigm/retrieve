@@ -25,11 +25,10 @@ appears, compare the lists and update this page.
 - *State* is one of three values. **answered**: the work and its evidence
   exist. **partly**: exists, but incomplete or not yet citable. **gap**:
   nothing answers it yet.
-- Every number of ours cited here is **NOT CITABLE** until D1-G
-  (CLAUDE.md rule 2). Under the user's claims-first rule (2026-10-10), the
-  runs now only decide C1-C7 and the new takes. The citable numbers come from
-  F-REPRO's final pass. So "answered" means *the question has its answer
-  and its evidence*, not that the numbers are final.
+- Every measured number of ours cited here comes from the FULL-RERUN and is
+  **not citable until its gate is green** (CLAUDE.md rule 2); the META-FORK
+  gate numbers are final (user ruling 2026-10-16). So "answered" means *the
+  question has its answer and its evidence*, not that the numbers are final.
 - *Paper section* names the section of the planned 12-page paper. The
   section list is a proposal for F5:
   - §1 introduction;
@@ -105,6 +104,6 @@ Every "partly" or "gap" above, by the step that closes it:
 |---|---|
 | **F4** | code and data at review time, permanent repository, sdist license, Hub cards, anonymous mirror |
 | **META-FORK → NUMBERS** | the study's SilverTorch arm (adapted official code) on every SilverTorch cell, per-filter probe curves, SilverTorch vs LiNR interleaved ([roadmap](../roadmap.md)) |
-| **FULL-RERUN (D1-G), the last step** | citable verdicts, one parquet at the last repo version, one-command reproduction, multi-seed CIs |
+| **FULL-RERUN** (run at `final-freeze`; gate open) | the verdicts, the merged tables, pooled seed variance on every SilverTorch cell |
 | **F5** | the model-based-retrieval framing (scope) and the ANN-library exclusion it implies; parameter table; motivation and venue impact; deviations rewritten against C1-C7 |
 | **Needs the user** | REL-LIC decisions 1-6 ([release §5](release-and-licenses.md#5-decisions-for-the-user)); author contact and upstream issues |

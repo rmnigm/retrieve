@@ -1,11 +1,10 @@
 ---
 title: decisions
 created: 2026-09-26
-updated: 2026-10-13
+updated: 2026-10-16
 type: summary
 tags: [decisions]
 sources: [pyproject.toml, evaluation/config/suites.yaml, retrieve/src/retrieve/, evaluation/bench/, evaluation/training/]
-contested: true
 ---
 
 # Standing decisions and constraints
@@ -38,24 +37,30 @@ decisions.
     no public code). Its kernels stay, whatever they are written in.
 
   The comparison of the two is the paper.
-- **Our Triton SilverTorch reimplementation is out of the paper and out of
-  the released code** (user, 2026-10-11): `SilverTorch(backend="triton")`
-  and `backend="torch"` (our Algorithm 1 kernels and their eager
-  reference) are neither a result nor a shipped backend. Its deletion is
-  authorised (user, 2026-10-13, with LiNR's bloom filter and YFCC) behind
-  the tag `triton-silvertorch-final`; the files the final run imports
-  stay byte-identical until the final run has finished (next item), so the
-  code leaves the library after it
-  ([roadmap](roadmap.md#6-triton-st-delete-delete-what-the-release-cleanup-had-to-leave)).
-  Its records stay on the Hub, never deleted, never cited. No new Triton
-  SilverTorch kernel work.
+- **Our Triton SilverTorch reimplementation is out of the paper and
+  deleted from the code** (user, 2026-10-11; deletion 2026-10-13, with our
+  LiNR bloom filter and YFCC): `SilverTorch(backend="triton")` and
+  `backend="torch"` (our Algorithm 1 kernels and their eager reference) are
+  neither a result nor a shipped backend. The tag `triton-silvertorch-final`
+  holds the code; its records stay on the Hub, never deleted, never cited.
+  `backend="official-fork"` is the default `SilverTorch` backend.
 - **The final run is final** (user, 2026-10-13): the FULL-RERUN at tag
   `final-freeze` is the paper's one result set. No code change triggers a
   rerun or a new tag of its legs; a leg is rerun only when it crashed or
-  failed its own checks, at the same tag. Until it has finished, a code
-  change is a deletion of code the final run does not import, or docs: every
-  file a final-run leg imports stays byte-identical to `final-freeze`
-  (gate: [release-cleanup](artifacts/release-cleanup/README.md)).
+  failed its own checks, at the same tag. While it ran, every file a
+  final-run leg imports stayed byte-identical to `final-freeze` (gate:
+  [release-cleanup](artifacts/release-cleanup/README.md)); the one leg added
+  after it, SYNTH-MID (below), runs at the same tag.
+- **The paper's numbers are the full rerun's; what it did not remeasure
+  stands as final** (user, 2026-10-11 and 2026-10-16): where the FULL-RERUN
+  reran a measurement (every LiNR, adapted-SilverTorch, bloom-width,
+  Yambda and head-to-head cell of the study grid), the earlier number
+  (NUMBERS legs, `campaign-final`, D1, campaign v2) is superseded and the
+  rerun regenerates it; where it did not (the adapted code's parity gates
+  and the META-FORK gate-grid timings, the data facts, the literature
+  facts), the existing number is final and citable with its source named.
+  The lists are the docs pass's report (`.chains/export-prep/`, 2026-10-16)
+  and the marks on the pages themselves.
 - **Meta's code as published (`backend="official"`, pinned `21aa35e`,
   built `-O3`) is the parity reference, not an arm.** The adapted code is
   gated bit-exact against it, and the paper's "Meta as published vs
@@ -81,11 +86,14 @@ decisions.
   the code as an option, off in the study; the library default changes at
   RENAME. Reverse (NOT) clauses have no bloom form, so those filters are
   LiNR-exact only.
-- **LiNR with a bloom filter is not in the study** (user, 2026-10-13): LiNR
-  has no bloom in its paper, and our bloom for it (the library's
-  `BloomFilter`) is not reported, compared or mentioned in the paper.
-  The bloom legs time SilverTorch's bloom against LiNR V1 / V2 with the
-  exact filter only. The library keeps the code; nothing here measures it.
+- **LiNR with a bloom filter is not in the study, and our LiNR bloom is
+  deleted** (user, 2026-10-13 and 2026-10-15): LiNR has no bloom in its
+  paper. The bloom legs time SilverTorch's bloom against LiNR V1 / V2 with
+  the exact filter only. The library's `BloomFilter`, its ops and the
+  harness's `bloom_fp_rate` (our hash's false-positive rate, not
+  SilverTorch's) are gone; every reader drops the field and the LiNR /
+  postfilter bloom records of older trees (`records.retired`). The paper's
+  bloom false-positive numbers come from Meta's bloom, counted untimed.
 - **False-positive claims only on SilverTorch's own bloom** (user,
   2026-10-13): measured on the adapted code's bloom index with no recheck,
   untimed; a recheck exists only in grading.
@@ -103,17 +111,35 @@ decisions.
   labels) with a protocol not published in enough detail to rebuild, so no
   LiNR recall claim is called reproduced or not; our numbers are stated
   under our metric (share of the exact filtered top-k returned), with the
-  Goodreads correlation to end-task recall beside them. The adapted SilverTorch numbers of the NUMBERS legs
-  are citable ([validation](validation.md#numbers-adapted-silvertorch-over-the-study-grid)).
-- **Paper numbers, and the full rerun last** (user, 2026-10-11): the paper
-  is written on measurement legs first: SilverTorch on the adapted backend
-  over the study grid
-  ([NUMBERS](validation.md#numbers-adapted-silvertorch-over-the-study-grid)),
-  LiNR from `campaign-final`. The full rerun of everything (LiNR, the
-  adapted SilverTorch, the grid), pinned to the last repo version, into one
-  parquet with its recipe, D1-G, T1 and T3, is the very last step
-  ([FULL-RERUN](roadmap.md#7-full-rerun-everything-pinned-to-one-frozen-tag));
-  the paper's final tables are regenerated from it.
+  Goodreads correlation to end-task recall beside them.
+- **One pod, one venv; pooled seed variance** (user, 2026-10-15): every
+  result is treated as coming from one pod and one venv. Tables, figures
+  and the text do not split or label results by machine, pod or venv, and
+  `bench merge` accepts records regardless of `env_host`. SilverTorch's
+  measured seed spread (time as a proportion of the median, recall as an
+  absolute spread) is pooled per dataset and applied as the error bar to
+  every SilverTorch number on that dataset, cells without seeds 1-2
+  included; a dataset with no seeded cell uses the pool over all datasets;
+  LiNR keeps what it has. Every such caveat (machine, seeds) is one short
+  note at the end of the text, plain words, at most one range.
+- **SYNTH-MID, the one post-freeze leg** (user, 2026-10-15): SilverTorch
+  and LiNR V1-V3 at 20 / 30 / 50 % synthetic pass rate on LAION 10 M and
+  30 M (curves, then timed and interleaved at the picks), plus a timed
+  `n_probe` sweep on laion30m-synth (4096 and 16384 lists, 24 up to half
+  the lists) to show a fixed `n_probe` is suboptimal; at tag
+  `final-freeze`, seed 0, pod e, bloom recheck off, no LiNR bloom; the FR
+  picks and records stay unchanged.
+- **The export** (user, 2026-10-15/16): the exported repository carries the
+  code, the human docs (`README.md`, `docs/`, `retrieve/docs/`) and an
+  AGENTS.md that points at nothing that is gone; no papers (`articles/`),
+  no `.chains/`, none of this wiki (`research/`). It provides the means to
+  run evaluations and get the numbers (`bench run` / `campaign` / `merge` /
+  `report`) and reproduces no paper table or figure: the results scripts
+  and the page builder stay on `staging`. The export is its own branch, cut
+  after the merges.
+- **The private Hub stays as it is** (user, 2026-10-16): `pinkmeme/eval-results`
+  keeps its superseded subtrees and the LiNR-bloom rows; a clean public
+  repository, without them, may come at F4.
 - **No dates.** Every roadmap step is done, in order; nothing is optional
   or conditional on a deadline. The GPU is the bottleneck, so GPU steps
   are ordered first and CPU steps run beside them.
@@ -198,10 +224,9 @@ now on; the [roadmap](roadmap.md) holds the steps.
   campaign records). Not allowed during the campaign: feature or
   optimization work. A correctness bug found mid-campaign stops all runs;
   it is fixed, re-tagged, only the arms its own gates prove changed are
-  rerun, and the manifest logs it.
-  *Contested:* the later *Exploration first* (user, 2026-10-09, above)
-  lets legs run at each new tag while the library improves, with a redo
-  ledger instead of a freeze.
+  rerun, and the manifest logs it. In force: the final run's one tag,
+  `final-freeze` (Goal and scheduling); exploration legs ran at each tag
+  before it and are superseded.
 - **Record reuse rule.** An existing record enters the paper only if all
   three hold: its inputs match the final ones (the E1c encoder for
   goodreads, the license-fixed arXiv attrs); its arm's kernels are proven
@@ -210,17 +235,16 @@ now on; the [roadmap](roadmap.md) holds the steps.
   of windows below the device's maximum SM clock (`env.sm_max_mhz`;
   the record's `env.frac_windows_below_max`). Quality and timing are
   judged separately (quality is largely reusable). Otherwise it is rerun
-  or dropped from the exhibit. The manifest names, per (dataset, suite,
-  algo, backend), the accepted code_version and Hub subtree for quality and
-  for perf; `bench report` reads the manifest, not "the latest record".
+  or dropped from the exhibit. In force: the final run reran every cell at
+  one tag, so no record is reused across code versions; `bench merge`'s
+  manifest names, per (dataset, suite, algo, backend), the subtrees the
+  accepted records come from.
 - **Datasets**: goodreads (E1c, 0.8M, d128), arXiv (3M, d128),
-  PubMed (10M, d768); YFCC-10M left the study on 2026-10-13
-  ([Datasets](#datasets)). **OpenAlex is dropped** (same
-  N, width and domain family as PubMed; the leg was E5;
-  [backlog](backlog.md#datasets-not-in-the-study)). No point above 10M
-  before submission; the chunked oracle is still built.
-  *Contested:* LAION 30 M joins as a fifth, `filter`-only dataset (user,
-  2026-10-10, [Datasets](#datasets)).
+  PubMed (10M, d768), LAION at 1 / 3 / 10 / 30 M (d256, `filter` only; the
+  user's 2026-10-10 addition, [Datasets](#datasets)) and Yambda-500m
+  (unfiltered); YFCC-10M left the study on 2026-10-13 and **OpenAlex is
+  dropped** (same N, width and domain family as PubMed;
+  [backlog](backlog.md#datasets-not-in-the-study)).
 - **Three kept sweeps per dataset** in the headline grid (one high pass
   rate, one low, one conjunctive or reverse): goodreads `c0_genre`,
   `c1_lang_reverse`, `all4`; arXiv `c3_nversions` (0.444), `c0_maincat`
@@ -228,30 +252,25 @@ now on; the [roadmap](roadmap.md) holds the steps.
   `c3_journal_reverse` (0.9993), `all5` (0.018). arXiv
   records already run on the other sweeps are kept, not extended.
 - **A synthetic selectivity suite** (`synth`): one nested, per-item uniform
-  pass flag (`u_i < p`, generator seed 20261008) at
-  p ∈ {0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0} on goodreads and arXiv,
-  on the real embeddings,
-  as sibling dataset configs that never touch the real attrs. It is IVF's
-  worst case (the filter is independent of the embedding), and p = 1.0 is
-  the unfiltered point. *Contested:* the roadmap's SYNTH-TRIM (user,
-  2026-10-10) sets ten rates and a smaller grid (arXiv {0.001, 0.01, 0.05,
-  0.1, 0.2, 0.5, 1.0}, seed 0 with seeds
-  0-2 at p 0.01 and 0.2, clause `n_probe` {24, 64, 256, 1024}).
-  A cluster-correlated variant (arXiv, 3 points) runs
-  only if arXiv's uniform sweep shows the IVF recall collapse at low p.
+  pass flag (`u_i < p`, generator seed 20261008) at the ten rates of
+  `layout.SYNTH_RATES` (0.001 to 1; user, 2026-10-10) on the real
+  embeddings, as sibling dataset configs that never touch the real attrs,
+  with seeded draws as a seed axis. It is IVF's worst case (the filter is
+  independent of the embedding), and p = 1.0 is the unfiltered point. The
+  cluster-correlated variant (`arxiv-corr-synth`) is IVF's best case. The
+  20 / 30 / 50 % points on LAION 10 M and 30 M are SYNTH-MID's (Goal and
+  scheduling).
 - **Grid**: batch sizes {1, 16} (bs 8 dropped), k {100, 1000} (500 dropped;
   1000 is the closest to LiNR's 2000), no `n_probe` 4 or 256 as fixed grid
   points (a dataset's tuned n95 may be 256: arXiv).
-  **3 seeds {0, 1, 2} everywhere** (user): every suite, every dataset, every
-  sweep; the deterministic arms (V1, V2, postfilter) compute quality once
-  and reuse it across seeds, perf repeats per seed. Postfilter α ∈ {1, 8}.
-  *Contested:* during exploration the extra seeds are deferred to the
-  final pass (user, 2026-10-10; roadmap V-SEEDS, SYNTH-TRIM).
-  *Final pass* (controller decision 2026-10-13 on the user's final-pass
-  directive of 2026-10-10): seed 0 everywhere, seeds {0, 1, 2} only where a
-  T2 confidence interval rests on them (`filter`); every SilverTorch cell at
-  `n_probe` ≤ `n_lists` / 4; n_lists / n_probe from the tune
-  ([evaluation](../docs/system/evaluation.md#ivf-tuning)).
+  **Seeds** (in force, the final run's plan): seed 0 everywhere; seeds
+  1-2 on the timed bloom legs, where a build, a pool or a synthetic draw is
+  random, with the pooled-variance ruling (Goal and scheduling) carrying
+  the spread to every SilverTorch cell; the deterministic arms (V1, V2,
+  postfilter) compute quality once and reuse it across seeds, perf repeats
+  per seed. Postfilter α ∈ {1, 8}. Every SilverTorch cell scans at most a
+  quarter of the lists (`n_probe` ≤ `n_lists` / 4); `n_lists` / `n_probe`
+  from the tune ([evaluation](../docs/system/evaluation.md#ivf-tuning)).
 - **SilverTorch is reported at its tuned point per dataset size** (user,
   2026-10-11): the matched-recall point from the IVF tune (below), with the
   recall each filter and k actually reaches, read off per-filter probe
@@ -319,9 +338,8 @@ now on; the [roadmap](roadmap.md) holds the steps.
   the kernel-opt head-to-head and H2H-FINAL (official vs our Triton) are
   history: not in the paper.
 - **Execution**: code and GPU testing run on the 1×A100 development pod;
-  the long evaluations run on pods the user creates, one sequential
-  timed driver on GPU 0, quality-only work on GPU 1, and timed work on a
-  second GPU only if M1 passes.
+  the long evaluations ran on pods the user created, one sequential timed
+  driver per GPU; the results are read as one pod's (Goal and scheduling).
 
 ## Library
 

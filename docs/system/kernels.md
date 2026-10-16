@@ -213,12 +213,11 @@ Not widened: query rows (`B·D`, `B·W`, `B·C`) and tile-count rows (`B·N/BLOC
 stay far below 2³¹ at any launchable `B`, and gathered item ids, which are loaded as
 int64 already.
 
-**Why a constexpr, not int64 everywhere.** Always-int64 was built first and measured
-([artifacts](../../research/artifacts/kernel-opt/predictions.md)): `fused_masked_knn_topk` +7 %, since
-its 1.5M 32-lane programs pay for a full 64-bit multiply per row base; the compaction kernels up
-to +13 % from the registers the int64 bases cost; `clause_compact` at B = 1 +3 %, from the
-shifted-pointer formulation itself. With the constexpr, launches below 2³¹ time within noise
-of the int32 kernels, and only launches past 2³¹ pay.
+**Why a constexpr, not int64 everywhere.** Always-int64 was built first and measured slower
+([artifacts](../../research/artifacts/kernel-opt/predictions.md)): the scorer's 32-lane programs
+pay a full 64-bit multiply per row base and the compaction kernels pay the registers the int64
+bases cost. With the constexpr, launches below 2³¹ time within noise of the int32 kernels, and
+only launches past 2³¹ pay.
 
 **Bounds that remain.** `N`, `P` and every per-row count stay below 2³¹: the compaction
 scratch holds ids as int32, and `tile_id · BLOCK` is int32. The batch-first grids cap `B`
@@ -256,7 +255,7 @@ Why a zero lane changes nothing, per kernel:
 
 **At a power-of-two width the code is the same.** With `D == D_PAD` the mask is an all-true
 constant, which Triton folds, so the power-of-two build is the pre-padding kernel: every kernel of
-this section, compiled at the power-of-two widths the campaign runs, is SASS-identical to the tree
+this section, compiled at the power-of-two widths the study runs, is SASS-identical to the tree
 before padding ([script](../../research/artifacts/l4-pow2-pad/ptx_identity.py)).
 
 ## Shared kernel helpers (`ops/triton/common.py`)
@@ -285,13 +284,11 @@ its own tile shape, launch grid, or masking policy:
   (`if q_c != -1`, one value per program) skips its loads and compares.
   Unrolled over every clause, the predicate paid `C · A_MAX` loads per item
   and batch row however few clauses the query used. The 10-clause synth
-  tables (SYNTH-TRIM, from 7) made the V1 / V2 clause cells slower by the
-  width, flat in p and growing with the batch, and `clause_compact` went
-  from 56 registers (C 4, A_MAX 4) to 121 (C 10, A_MAX 1); with the branch
-  it is 48. **Known cost:** with every clause active the branch skips
-  nothing, and goodreads `all4` V2 at bs 1 in graph mode is 1.095× (+26 µs
-  of 0.27 ms). Masked loads (1.04×, but 255 registers with spills at
-  A_MAX 4) and 4 warps (1.14×) were measured and are not used
+  tables made the V1 / V2 clause cells slower by the width, flat in p and
+  growing with the batch, and cost `clause_compact` registers; with the
+  branch it is back to its narrow-table count. **Known cost:** with every
+  clause active the branch skips nothing and the kernel is a little slower
+  than without it. Masked loads and 4 warps were measured and are not used
   ([CLAUSE-SKIP](../../research/artifacts/campaign-v2.6/clause-skip/README.md)). Used by `clause_mask` / `clause_compact`
   (`ids=n_offsets`, `load_mask=n_valid`).
   `is_reverse_ptr` must point at int8 storage (host preps do
@@ -331,14 +328,12 @@ to the inlined predicate with a
   |Δ| ≈ 3e-5), so the CUDA path keeps `out_dtype=`. Higher is
   better. `-inf` marks masked-out / padded positions. An fp16 *score*
   would round runs of near-tied items to one value: on YFCC-10M the
-  top-1000 spans about fifteen fp16 quanta (2⁻¹¹ near 0.8), and fp16
-  scores cost the exact algorithms `recall_oracle@1000` 0.956; fp32
-  scores over the same fp16 table give 0.993, and the remaining 0.007 is
-  the fp16 *storage* rounding (an fp32 table gives 1.0 at twice the
-  memory; [decisions](../../research/decisions.md#library),
+  top-1000 spans about fifteen fp16 quanta (2⁻¹¹ near 0.8), so fp16 scores
+  cost the exact algorithms recall at k 1000 that fp32 scores over the same
+  fp16 table recover, up to the fp16 *storage* rounding
+  ([decisions](../../research/decisions.md#library),
   [artifact](../../research/artifacts/l1-l2/README.md)). The cuBLAS path's
-  tensor-core accumulator truncates: measured ≤ 1.1e-6 from an fp64 dot
-  of the same fp16 inputs at D=128, against a plain fp32 sum's ~1e-7;
+  tensor-core accumulator truncates more than a plain fp32 sum; the bound is
   gated in [`test_accumulation.py`](../../retrieve/tests/parity/test_accumulation.py).
 - 1-bit Sign-OPORP (V3): `D - 2 * popcount(query_bits ^ item_bits)`, fp32.
   `D = 64 * W`. This is the standard Hamming-to-dot-product relation for
@@ -386,14 +381,14 @@ exception is a single query on the triton backend, below.
 ### `gemv_scores` — the single-query GEMV ([file](../../retrieve/src/retrieve/ops/triton/gemv_scores.py))
 
 At B = 1 cuBLAS picks its kernel by shape. At D 128 / 256 (0.8–3 M items)
-that is `gemv2N`, a CUDA-core kernel at about half the memory bandwidth:
-1.04 ms of a 1.3 ms LiNR V1 forward on arXiv 3 M d128. At D 768 / 10 M
+that is `gemv2N`, a CUDA-core kernel at about half the memory bandwidth,
+most of a LiNR V1 forward at 3 M d128. At D 768 / 10 M
 and some other shapes it is a cutlass tensor-core GEMM. Its fp32
 accumulation is one FMA per k, k = 0 … D−1 in order (found by trying
 split, interleaved, FMA / mul-add orders against it; `order_probe.py` in
 the [artifact](../../research/artifacts/campaign-v2.10/v1-bs1/README.md)).
 `gemv_scores` runs that order with one item per lane and `BLOCK_N` = 1024
-items a program. That gives `torch.equal` scores at 2.0–2.2× the speed
+items a program. That gives `torch.equal` scores at about twice the speed
 (goodreads 287 → 137 µs, arXiv d128 1041 → 478, d256 1886 → 937).
 
 Because the kernel choice depends on (B, N, D), `register_index` checks
@@ -438,8 +433,8 @@ is exact and `tl.sum` reduces in fp32 (the compiled PTX: `add.f32` /
 `fma.rn.f32`, no `f16` arithmetic). This has to be explicit: Triton's
 `tl.sum` reduces in its *operand* dtype (`_pick_sum_dtype` promotes only
 sub-32-bit ints). Reduced in fp16, on goodreads d128 (`|score|` up to 31,
-partial sums of the same order) the error against an fp64 dot is 0.028,
-enough to swap one boundary pair on 6.3 % of `c0_genre` rows against the
+partial sums of the same order) the error against an fp64 dot is large
+enough to swap boundary pairs on a few percent of rows against the
 `torch` backend. In fp32 it is ~1e-5; the `torch` side returns fp32 too
 (§ Score conventions), so the two backends differ only in reduction order
 ([validation](../../research/validation.md#library-gates)). The
@@ -469,17 +464,17 @@ one `BLOCK_N`-lane tile per iteration
 
 The grid is sized by the config, not by `P`. The compact family returns
 full-width `[B, N]` candidates, so a grid of `cdiv(P, BLOCK_N)` one-tile
-programs launched ~400k 8-warp programs at goodreads N, bs 16, nearly all
-only storing `-inf`: 913 µs, bound by program count, not bytes
+programs launched hundreds of thousands of 8-warp programs at goodreads N,
+bs 16, nearly all only storing `-inf`: bound by program count, not bytes
 ([v2-prof](../../research/artifacts/campaign-v2/v2-prof/README.md)). The stride
 does not change which program reduces a lane or how: each lane is still
 one `tl.sum` over D in the same layout, so scores are bit-identical to
 the one-tile grid ([validation](../../research/validation.md#campaign-v2-phase-v), "V2 Fix A").
 `programs` is a field of the tile config. The default 864 is one wave on
 A100 (108 SMs × 8 resident 8-warp programs); swept over {864, …, 13824},
-it was the best or within 1 % of the best at bs {1, 16}, p {0.001, 0.01, 1},
-and at bs 16, p 1 fewer programs gather faster (864: 1.39 ms with top-k, 1728: 1.61,
-13824: 2.45; [v2-fix-a](../../research/artifacts/campaign-v2/v2-fix-a/README.md)).
+it was the best or within 1 % of the best at every batch size and pass
+rate measured, and at bs 16, p 1 fewer programs gather faster
+([v2-fix-a](../../research/artifacts/campaign-v2/v2-fix-a/README.md)).
 
 **Per-cell scoring is elementwise**, not `tl.dot`. Different `(b, p)` cells
 gather different rows, so a true GEMM would re-load each row across the
@@ -511,11 +506,10 @@ grid size does not matter). Past 256 the scoring loop therefore reloads
 the query per tile (an L1 hit). `WIDE_CONFIG` (`block_n` 8, `num_warps` 4,
 `programs` 3456) then holds no spill and needs no register cap. The larger `programs`
 covers skewed batches: PubMed `all5` puts most candidates in one or two
-rows of a bs-16 batch (median 142 a row, p90 1.2 M), and at 864 programs
-(54 a row) such a row ran 1.21× v2.2's time; at 3,456 it runs 0.45×,
-for 0.69× instead of 0.47× on a uniform p 1 batch. A `maxnreg` cap also worked eagerly, but
-inductor's launcher drops it, so it was rejected. Against v2.2's kernel at
-10 M d768: 0.16-0.72 across p 0.0002-1
+rows of a bs-16 batch, and at 864 programs (54 a row) such a row ran slower
+than the one-loop body; at 3,456 it runs well under it, at a small cost on
+a uniform p 1 batch. A `maxnreg` cap also worked eagerly, but inductor's
+launcher drops it, so it was rejected
 ([V2-HIGHP](../../research/artifacts/campaign-v2/v2-highp/README.md)). Each lane's
 score is the same `tl.sum` over D, so scores are bit-identical to the
 one-loop body.
@@ -586,8 +580,8 @@ axis=W) → hamming`, then `score = D_TOTAL - 2 * hamming`.
 
 **Popcount** is the hardware `POPC`
 ([`common.popcount_int64`](../../retrieve/src/retrieve/ops/triton/common.py),
-`libdevice.popc`). It replaced a five-step SWAR bit-twiddle: −12.5 % on the
-indirect op at B=16, P=3M and −2.1 % on the full scan, where top-k(5000)
+`libdevice.popc`). It replaced a five-step SWAR bit-twiddle, a clear win on
+the indirect op and a small one on the full scan, where the top-k
 dominates ([artifacts](../../research/artifacts/kernel-opt/predictions.md)). The torch
 reference [`popcount_int64`](../../retrieve/src/retrieve/functional.py) is
 still SWAR, because this torch has no `bitwise_count`. Popcount is exact, so torch and Triton
@@ -701,15 +695,13 @@ scatter launch (b, tile), same grid:            common.compact_scatter_kernel
 Why this shape and not the two alternatives (re-evaluate the predicate in
 the second launch, or a packed bitmask): both were built and measured
 ([artifacts](../../research/artifacts/deterministic-compaction/)).
-Re-evaluation costs a full second pass of the predicate (1.9–3.1× on the
-kernel, +43–58% on a V2/V3 forward). The bitmask — and even a bare
-count-only epilogue — makes the *predicate* launch 1.7–1.8× slower at
-`B = 1`, where the grid is under one wave and per-program latency is the
-kernel time; the `cumsum` + masked-store epilogue keeps it at the one-pass
-speed (1.10× at B=1, 1.03× at B=16, full pipeline). The scratch traffic is
-the survivors only (4 B in, 8 B out per id), and so is the output's: with
-no tail store the scatter writes nothing for a rejected item (−11.7 % on
-`clause_compact` at B=16, 3M items, 1.8 % pass rate, against a `-1` tail store; [artifact](../../research/artifacts/l1-l2/README.md#timing)). Its allocation is
+Re-evaluation costs a full second pass of the predicate. The bitmask — and
+even a bare count-only epilogue — makes the *predicate* launch far slower
+at `B = 1`, where the grid is under one wave and per-program latency is the
+kernel time; the `cumsum` + masked-store epilogue keeps it near the one-pass
+speed. The scratch traffic is the survivors only (4 B in, 8 B out per id),
+and so is the output's: with no tail store the scatter writes nothing for a
+rejected item ([artifact](../../research/artifacts/l1-l2/README.md#timing)). Its allocation is
 `4 · B · T · BLOCK_N` bytes, half the `[B, N]` int64 result. `counts` is a
 fresh tensor, not a view into the scan: inductor asserts custom-op outputs
 are 16-byte aligned, and at `B = 1` the scan's last column is a contiguous
@@ -733,8 +725,8 @@ reproduces itself launch after launch and process after process
 The order is fixed on purpose ([decisions](../../research/decisions.md#library)): a
 row base claimed with `tl.atomic_add` orders a row by tile completion,
 which `PrefilterKNN`'s top-k and `OneBitKNN`'s heavily tied Hamming
-ranking turn into run-to-run quality noise (2e-6 / 7e-5 on `linr_v2` /
-`linr_v3`). The price is the scan, the stash round trip and two extra
+ranking turn into run-to-run quality noise. The price is the scan, the
+stash round trip and two extra
 launches, measured in the
 [artifacts](../../research/artifacts/deterministic-compaction/).
 
@@ -748,7 +740,7 @@ and names the regression test.
 
 **Tile config.** `ClauseCompactConfig(block_n, num_warps, num_stages)`
 — shipped as `DEFAULT_CONFIG` on the kernel module (not tuned for the
-two-phase shape; the retune is roadmap TF-3); tests/tuner
+two-phase shape, not retuned); tests/tuner
 override via `_clause_compact_impl(..., config=)`. Re-tune on a new arch via
 `uv run tune-kernels clause-compact`.
 
@@ -763,7 +755,7 @@ and stores `score` or `-inf` into a new fp32 buffer, instead of the bool. `LiNRV
 `[B, N]` bool → `torch.where` chain is one pass, the bool never reaches memory, and `topk` gets
 the bit-identical tensor (ids and scores `torch.equal` to the mask + `where` path). It is
 functional, not in place: under `torch.compile` inductor has no mutation to turn into a copy of
-the score matrix (V-PROF3 measured that copy in V1's graph). The score matrix stays cuBLAS's,
+the score matrix (a profile of V1's graph showed that copy). The score matrix stays cuBLAS's,
 because any other fp32 reduction re-orders the D products and flips k-th-place ties
 ([validation](../../research/validation.md#library-gates), V1-FUSE).
 
@@ -898,8 +890,8 @@ one-shot chain held about seven full-corpus fp32/int64 temporaries, about
 200 GiB at pubmed's 10M × 768 for a 0.9 GiB output, which is why
 `LiNRV3` could not build there; the transient is now about eight projected
 chunks (`[65,536, k_bits]` fp32, 192 MiB at 768 bits). The bits are
-`torch.equal` to the one-shot projection (`test_quantize.py`, and at
-the D1 tables, [artifact](../../research/artifacts/pubmed-fixes/README.md#fix-2-chunked-1-bit-build)).
+`torch.equal` to the one-shot projection (`test_quantize.py`, and on the
+PubMed tables, [artifact](../../research/artifacts/pubmed-fixes/README.md#fix-2-chunked-1-bit-build)).
 The query side (`project_*_query`) stays one-shot: `B` rows.
 
 ### KMeans centroid update
@@ -917,7 +909,7 @@ float32 and cannot be demoted to TF32 by a caller's
 `torch.set_float32_matmul_precision("high")` (which would cost 13 mantissa bits); it costs
 8 % more time on the A100, where DMMA runs at the float32 SIMT rate. The extra matmul per
 Lloyd iteration has the FLOPs of the `cdist` assignment step, so `fit` takes at most ~2x the
-`index_add_` version's time (measured 1.3x at N = 200k, D = 128, `n_lists` = 1024). The panel
+`index_add_` version's time (measured well under that). The panel
 width is capped so the one-hot buffer stays at 64 MiB whatever `n_lists` is.
 
 ### Compile on the V3 torch reference
@@ -935,7 +927,7 @@ into its cudagraph capture cleanly:
 - **`project_oporp_1bit_query`** ([`quantize.py`](../../retrieve/src/retrieve/indexing/quantize.py)).
   Per-query OPORP projection: `multiply → index_select → sign-pack`
   (~5 small kernels in eager). Under the outer cudagraph_trees the
-  launch tax collapses — measured ~2.5× speedup at B=8 and B=64.
+  launch tax collapses, a measured multiple at small batches.
 - **`_hamming_scores`** ([`ops/reference/oporp_1bit_match_topk.py`](../../retrieve/src/retrieve/ops/reference/oporp_1bit_match_topk.py)).
   `xor → popcount → reduce` over the full corpus. The win here is
   *fusion*, not launch elision: eager materializes the `[B, N, W]` xor
@@ -1007,9 +999,9 @@ top-k, and ids differ only within the group tied at the k-th score. Rows with fe
 items fill with `-inf` / `-1` as before.
 
 `masked_topk` routes every torch-side top-k through it, so LiNR V1 takes it over its unpadded
-`[B, N]` scores: 0.55–0.63 of the plain top-k on arXiv / goodreads `all4` and single-clause cells
-at bs 16 / 64, 0.67 at k 1000, 0.81–0.98 on PubMed ([validation](../../research/validation.md),
-V1-TOPK). Below the thresholds it is plain `torch.topk`. The adapted SilverTorch code has the same
+`[B, N]` scores, well under the plain top-k's time on the small datasets and a little under it
+on PubMed ([validation](../../research/validation.md), V1-TOPK). Below the thresholds it is plain
+`torch.topk`. The adapted SilverTorch code has the same
 two-level cut and its own radix select inside `search`
 ([official-fork](#official-fork--our-fork-of-metas-ops)).
 
@@ -1210,7 +1202,7 @@ path is inside Meta's op:
 So a whole-forward CUDA-graph capture fails on every path, and the arm stays
 eager (OF-3). Meta's released `setup.py` compiles the host side of its `.cu`
 files at gcc `-O0` (OF-11). The same sources at `-O3` are bit-identical and
-0.77-0.98× as fast ([OFFICIAL-REWORK](../../research/artifacts/official-rework/README.md)).
+no slower ([OFFICIAL-REWORK](../../research/artifacts/official-rework/README.md)).
 
 ### `official-fork` — our fork of Meta's ops
 
@@ -1330,13 +1322,9 @@ index (or a clause-mask kernel for `"exact"`) producing 1-bit-per-item
 masks, then a masked `__dp4a` scorer — and were bit-identical to the
 Triton kernels on scores.
 
-Their measurements stand (raw outputs:
-[artifacts/cute-dsl-scorer/](../../research/artifacts/cute-dsl-scorer/README.md)): the
-transposed index reads ~40× fewer filter bytes than the row-wise Triton
-form and is 2.1–2.5× faster kernel-only (1.3× wall) once the scorer has
-memory-level parallelism; a DSL port is kernel-for-kernel within noise of
-the C++ backend, its cost being host launch overhead; and every backend
-collapses to one latency under CUDA-graph replay.
+Their measurements (raw outputs:
+[artifacts/cute-dsl-scorer/](../../research/artifacts/cute-dsl-scorer/README.md)) are
+superseded results, not cited.
 
 **The Triton SilverTorch** (`SilverTorch(backend="triton")`, its `backend="torch"` reference and
 `bloom_path="full"`: the `codesigned_probe_score*` and `bloom_full_mask` ops, their reference
