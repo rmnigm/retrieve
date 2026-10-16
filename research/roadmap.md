@@ -139,136 +139,21 @@ one pod.
 
 ## The queue
 
-The full rerun at `final-freeze` is done bar its gate and the one post-freeze leg (7b SYNTH-MID). The export
-preparation (1b, 6, the merged tables, the comment cleanup and review; user, 2026-10-15) is done on branches and
-merges into `staging` only after 7's gate and 7b (user): `dev/export-lib` → `dev/export-harness` (holds lib) →
-`dev/docs-pass` (holds both). Then 5 RENAME and 9 EXPORT.
+The full rerun at `final-freeze` is done and its gate is green; SYNTH-MID is in; the export preparation, the docs pass
+and RENAME (backend `cuda`, package `silvertorch`, ops `torch.ops.st`; Meta's code as published left the workspace, tag
+`meta-published-parity-final`) are merged into `staging` ([validation](validation.md)). Open: 4 PAPER, 9 EXPORT, 8 F4.
 
-### 1b. DOCS-SPLIT: the project pages carry no research residue
+### 4. PAPER: drafted by agents, decided by the user
 
-**Done on `dev/docs-pass` 4be8b7a3** (with the docs audit and the user's 2026-10-16 rulings; link checker 0);
-merges after 7's gate, after `dev/export-harness`.
-
-Needs 1 merged (`dev/meta-fork` edits the same pages); CPU, docs only,
-beside 2; before 5 and 6, which edit the same pages. `docs/system/` is the
-released project's documentation ([SCHEMA](SCHEMA.md#domain-and-scope)),
-but `kernels.md`, `evaluation.md` and `datasets.md` still carry research
-narrative: measured asides and their numbers (`kernels.md` "Deleted
-backends", 30 links into `artifacts/`), campaign and study scoping
-(`evaluation.md`'s "the campaign (roadmap D1)", which datasets and LiNR
-variants the study runs), per-dataset ETL rates and sizes and "Dead
-artifacts" (`datasets.md`). Move each fact to its research home
-(validation, decisions, an artifact README) and leave a link; what the code
-does stays. Headings cited by code (`§`) keep their names.
-
-*Gate*: `python3 scripts/check_doc_links.py` 0 (bar `articles/`), every
-moved number present once in `research/`, no `docs/system` page naming a
-branch, pod or step's progress.
-
-### 4. PAPER: the user writes it
-
-The NUMBERS legs, their results draft and the META-FORK accept (tag
-`campaign-fork`) are done ([validation](validation.md)). The user writes the paper (ECIR 2027 reproducibility format, 12
-pages LNCS) on RESULTS' numbers, against the
-[ECIR criteria](paper/ecir-criteria.md); agents support with tables,
-figures and the `research/paper/` sections on request (F2: the
-[Meta as published vs adapted](paper/meta-published-vs-adapted.md) section
-from T3 and the META-FORK gates, with CIs and paired tests). The final
-tables are regenerated from FULL-RERUN's parquet (step 7).
-
-### 5. RENAME: the adapted backend becomes SilverTorch's default
-
-Needs FULL-RERUN finished and 6 (beside 4, on its own branch). `backend="official-fork"` becomes
-the default `SilverTorch` backend under a name decided in this step; the
-package, distribution and op-namespace names (`silvertorch_fork`,
-`silvertorch-fork`, `stfork`) likewise. Records keep the names they were
-written with; the report maps them. Every copy of the old names in
-`AGENTS.md`, `README.md`, `docs/`, `research/` and `retrieve/docs/` follows (rule 4).
-The user guide's SilverTorch examples (`retrieve/README.md`,
-`getting-started.md`, `filtering-and-quantization.md`, `modules.md`), which
-today run the default `backend="triton"`, then run the adapted backend.
-
-*Gate*: library and harness suites green, Meta's suite on the renamed
-package, the compile gate, outputs `torch.equal` before / after on the
-gate grid's int32 cells (a rename changes no behaviour).
-
-### 6. TRITON-ST-DELETE: delete what the release cleanup had to leave
-
-**Done on `dev/export-lib` 75256824 (library) and `dev/export-harness` fdf56f60 (harness, holds lib)**, plus our
-LiNR bloom entirely and `bloom_fp_rate` (user, 2026-10-16) and the merged-tables command; CPU gates green.
-Left: the GPU gates (library suite, `test_official.py` adapted vs published, compile tests, the harness's GPU tests,
-the export-prep quality subset byte-identical to the FR records), after 7b frees the GPU; then merge.
-
-Needs FULL-RERUN finished (the user's rule: until then every file a final-run leg imports stays byte-identical to
-`final-freeze`, [decisions](decisions.md#goal-and-scheduling)). The user authorised the deletions (2026-10-13: our Triton
-SilverTorch, LiNR's bloom filter, YFCC); the tag `triton-silvertorch-final` is on `staging`, and the release cleanup did
-what touches no final-run file ([release-cleanup](artifacts/release-cleanup/README.md): YFCC's ETL and configs, the
-one-off artifact plans, the wiki). Left, all in files the final run imports:
-
-- **Triton SilverTorch**: `SilverTorch`'s `backend="triton"` / `"torch"` paths (the triton `bloom_path`, the
-  `bloom_transposed` / `bloom_bit_freq` / `hash_seeds` / `clause_salt` buffers, `PreparedFilter.query_bits` / `sparse`,
-  the default backend), `interfaces.SilverTorchBackend` and `DISPATCH["SilverTorch"]`'s two entries; the
-  `codesigned_probe_score*` and `bloom_full_mask` kernels and their `ops/reference` twins, the `_host` / `common` helpers
-  only they use, `bloom_hash.build_transposed_sigs` / `build_query_bit_positions`, `selectivity.bloom_bit_freq`; the
-  harness's triton `bloom_path` in `algos.official_config` / `build` and `measure`'s `_codesigned_probe_score` scope
-  pattern; then their tests (`test_codesigned_probe_score*`, `test_bloom_full_mask`, the triton / torch cases of
-  `test_silvertorch.py`, `test_silvertorch_compile.py`, the official parity tests re-pointed at adapted vs published),
-  the `tune-kernels` entries and their docs (`kernels.md`'s SilverTorch kernels section, `architecture.md`,
-  `filtering.md`, `testing.md`, `evaluation.md`, `retrieve/docs/`).
-- **LiNR's bloom filter**: the fused LiNR paths `bloom_compact` and `bloom_match_scores` (triton and reference),
-  `BloomFilter.evaluate_indices` / `mask_scores` / `evaluate_subset`, `functional.bloom_subset_match`, the harness's
-  `linr_* / postfilter` bloom cells in `algos.PATHS`, and their tests. `BloomFilter` with `bloom_match` stays while the
-  harness computes `bloom_fp_rate` with it on every SilverTorch bloom cell (that field measures our hash, not
-  SilverTorch's: the user decides whether it stays in the records).
-- **YFCC**: the `yfcc` / `yfcc-check-gt` entries of `eval_datasets/cli.py`'s ETL table (their modules are gone, so the
-  two subcommands fail on import), `hub.py`'s `yfcc10m` repo, `report.py`'s labels and `REAL` entry, the YFCC-only
-  `exact_gate` (`run.exact_gate`, the `config.py` key), `ingest.py`'s docstring, `test_report.py`'s fixtures.
-
-What SilverTorch's other backends share stays: phase 1 (`KMeans`, `quantize_int8*`, `csr_layout`, probe selection),
-the clause kernels (`clause_mask_packed` feeds the official exact path), `two_level_topk` (LiNR V1). LiNR's kernels stay.
-
-*Gate*: library and harness suites green, `interfaces.DISPATCH` without the deleted backends, `ruff`, links 0.
-
-### 7. FULL-RERUN: everything, pinned to one frozen tag
-
-Needs the freeze (tag `final-freeze` on `staging`, library + harness + suites; user's after-legs plan, controller C1
-2026-10-13): it runs **before** 5 RENAME and 6 TRITON-ST-DELETE, so its records carry `backend="official-fork"` and the
-report maps the name; every fix after the freeze is a new tag and a rerun of what it touches. Rerun everything at the tag:
-LiNR, the adapted SilverTorch and the grid of NUMBERS,
-into one `results.parquet` with its recipe ([full-rerun](artifacts/full-rerun/README.md): two stages, curves then picks
-then timed, legs per pod, the untimed steps, the sizing and the trims) and a manifest that
-names, per (dataset, suite, algo, backend), the accepted subtree. Then
-D1-G's checks (eager-vs-graph ids, a byte-identical quality subset per
-leg, batch scaling, `bench report --manifest`), T1 with C1-C7, T3 as Meta
-as published vs adapted (its scorer column from `kernel_scopes`: H-SCOPE's
-one GPU test on a real call is left). The paper's tables are regenerated
-from this parquet; a number that moves against RESULTS' is reported, not
-smoothed.
-
-User rulings it carries (2026-10-12/13, [decisions](decisions.md)): YFCC is out of the study; PubMed is rerun on the
-dot-product build (MedCPT as trained) with the query's own document excluded (self-match), and gains a synthetic-filter leg;
-SilverTorch runs its bloom filter with no recheck in timed code, fp16 score path (Meta's default); LiNR runs the exact filter only.
-
-Seeds and error bars (user, 2026-10-11) are part of this run: 0-2 where a build, a pool or a synthetic draw is random, one
-for exact LiNR; LiNR V2 at bs 256 on PubMed stays out (controller C2). Profile full, seed-major (user GO, 2026-10-13);
-the credit covers about half of the seed-0 pass ([full-rerun § Sizing](artifacts/full-rerun/README.md#sizing)).
-
-*Gate*: every planned cell `ok`, D1-G's four checks, 0 manifest gaps.
-*Estimate*: [full-rerun § Sizing](artifacts/full-rerun/README.md#sizing): about 244 GPU-h for the full profile (the user's
-GO, 2026-10-13), 114 for its seed-0 pass; run seed-major, so a stop leaves a complete set at fewer seeds.
-
-### 7b. SYNTH-MID: 20 / 30 / 50 % synthetic, and a timed n_probe sweep (post-freeze)
-
-Running on pod e (user, 2026-10-15; brief `.chains/control/2026-10-15-193000000-synth-mid-leg-brief.md`, trimmed GO):
-`final-freeze`, seed 0; stage 3 the timed `n_probe` sweep on laion30m-synth (all seven filters, 4096 / 16384 lists,
-bs 16, LiNR V1 anchors), stage 1 bloom k 100 curves at p02 / p03 / p05 on laion10m- / laion30m-synth (4096 / 16384),
-stage 2 SilverTorch at the picks interleaved with LiNR V1 / V2 / V3, bs 1 / 16 / 64. To `fr/synth-mid-*-pode-s0`.
-Then the results page: SYNTH-MID folded in, the one-pod / pooled seed variance presentation and its end note
-(user, 2026-10-15, decisions).
+ECIR 2027 replicability track, 12 pp LNCS + references, double-blind, due 2026-10-19
+([venue](paper/venue.md)); LaTeX skeleton and bibliography in [`paper/tex/`](paper/tex/README.md),
+[submission checklist](paper/submission-checklist.md). The style survey, the writing guide and the first full text
+draft (text + figures, no formatting) exist on pod e only, on local branches that are not pushed (user, 2026-10-16).
+Open: the user's answers to the draft's open questions, the cut to 12 pages, typesetting into `paper/tex/`.
 
 ### 8. F4: package the artifacts
 
-Needs 7. The results public, the PubMed slice or its build recipe with
+Needs 9. The results public, the PubMed slice or its build recipe with
 checksums, a tagged `torchretrieve` release (LiNR plus the adapted
 SilverTorch; the adapted code keeps Meta's Apache-2.0 licence and
 headers), a Zenodo DOI including the adapted source and Meta's pinned
@@ -279,7 +164,7 @@ accounts and the release decisions.
 
 ### 9. EXPORT: the released repository
 
-Needs 6 / 1b merged and 5. A branch cut from `staging` holding the code, the human docs (`README.md`, `docs/`,
+A branch cut from `staging` holding the code, the human docs (`README.md`, `docs/`,
 `retrieve/docs/`) and the agent docs (AGENTS.md / CLAUDE.md, pointing at nothing removed); without `articles/`,
 `.chains/` and `research/` (user, 2026-10-16, [decisions](decisions.md)). *Gate*: suites green on the branch, link
 checker 0 on it, no file under the dropped trees.
@@ -287,7 +172,7 @@ checker 0 on it, no file under the dropped trees.
 ## Dependencies
 
 ```
-7 FULL-RERUN gate + 7b SYNTH-MID ─> merge 6 + 1b (branches done) ─> 5 RENAME ─> 9 EXPORT ─> 8 F4
-                                 └─> 4 PAPER tables (user)
+4 PAPER (user decisions, cut, typeset)
+9 EXPORT ─> 8 F4
 Needs the user: release decisions before F4
 ```
