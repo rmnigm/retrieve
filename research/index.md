@@ -1,7 +1,7 @@
 ---
 title: index
 created: 2026-09-26
-updated: 2026-10-11
+updated: 2026-10-16
 type: summary
 tags: [process]
 sources: [research/]
@@ -55,7 +55,10 @@ and tags for both trees: [SCHEMA.md](SCHEMA.md). Structural changes:
   [results draft](paper/results.md),
   [abstract (submitted)](paper/abstract.md),
   [ECIR criteria](paper/ecir-criteria.md),
-  [release and licenses](paper/release-and-licenses.md);
+  [release and licenses](paper/release-and-licenses.md),
+  [venue](paper/venue.md) (the ECIR 2027 call's rules),
+  [submission checklist](paper/submission-checklist.md),
+  [LaTeX sources](paper/tex/README.md);
   material: [data, intro, literature](paper/material/data-intro-literature.md),
   [method](paper/material/method.md),
   [results](paper/material/results.md),
