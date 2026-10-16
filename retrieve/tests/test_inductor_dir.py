@@ -1,4 +1,4 @@
-"""H-INDCACHE: the conftest gives every pytest run its own inductor cache (no CUDA needed)."""
+"""The conftest gives every pytest run its own inductor cache (no CUDA needed)."""
 
 import os
 import tempfile

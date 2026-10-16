@@ -2,7 +2,7 @@
 
 ``ExactAttributeFilter.evaluate_indices`` already routes to ``clause_compact`` on CUDA,
 so we call the kernel directly to keep this a true kernel-vs-pure-torch parity
-check. Rows are compared in order: the kernel's contract is ascending item order (plan L3),
+check. Rows are compared in order: the kernel's contract is ascending item order,
 the same order ``compact_mask`` emits.
 """
 

@@ -129,8 +129,8 @@ def _fused_masked_knn_topk_kernel(
         out_row = row_base(out_scores_ptr, bid, stride_sb, WIDE)
         d_offsets = tl.arange(0, D_PAD)
         d_in = d_offsets < D
-        # Widen before the multiply: tl.sum reduces in its operand dtype (fp16 in production, plan
-        # L4 §6.1), and fp16 × fp16 is exact in fp32.
+        # Widen before the multiply: tl.sum reduces in its operand dtype (fp16 in production),
+        # and fp16 × fp16 is exact in fp32.
         q = tl.load(query_ptr + bid * stride_qb + d_offsets * stride_qd, mask=d_in, other=0.0).to(
             tl.float32
         )

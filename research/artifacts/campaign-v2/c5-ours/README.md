@@ -38,7 +38,7 @@ The harness accepts `bloom_path` on `silvertorch / bloom / triton` too. The `cod
   | `full` vs `partial` | every row | scores `torch.equal`, ids equal up to ties |
   | triton `full` vs torch-backend `partial` | 200 k | same as above |
 - **Library suite:** **814 passed** on a fresh inductor dir. It includes
-  [`test_bloom_full_mask.py`](../../../../retrieve/tests/parity/test_bloom_full_mask.py) (the op against its torch twin
+  `test_bloom_full_mask.py` (deleted with the Triton SilverTorch at TRITON-ST-DELETE; tag `triton-silvertorch-final`) (the op against its torch twin
   and the row-wise subset test, and the layer `full` = `partial` on triton and torch at D 64 / 768). It also includes the
   compile test's `bloom-full` cases: `reduce-overhead` replay = eager, 0 cudagraph skips, 0 graph breaks.
 - **Harness suite:** 475 passed (CPU).

@@ -13,7 +13,7 @@ from retrieve.functional import compact_mask
 LinrBackend = Literal["torch", "triton"]
 OfficialBackend = Literal["official", "official-fork"]
 OFFICIAL_BACKENDS: tuple[str, ...] = get_args(OfficialBackend)
-SilverTorchBackend = Literal["torch", "triton", OfficialBackend]
+SilverTorchBackend = OfficialBackend
 
 
 def check_backend(backend: str, allowed: object) -> None:
@@ -23,35 +23,30 @@ def check_backend(backend: str, allowed: object) -> None:
         raise ValueError(f"unknown backend {backend!r}; expected one of {expected}")
 
 
-_OPS_NAMESPACE = {
-    "triton": "retrieve.ops.triton",
-    "torch": "retrieve.ops.reference",
-    "official": "retrieve.ops.official",
-    "official-fork": "retrieve.ops.official",
-}
+_OPS_NAMESPACE = {"triton": "retrieve.ops.triton", "torch": "retrieve.ops.reference"}
 _OPS_LOADED: dict[str, ModuleType] = {}
 
 
 def ops_for(backend: str) -> ModuleType:
-    """The op namespace a backend scores with (``retrieve.ops.triton`` / ``.reference`` /
-    ``.official``), imported on first use so ``import retrieve`` registers no kernels. Modules
-    call it once in ``__init__`` (the import, and its errors, happen at construction) and again
-    in ``forward`` (a dict hit; not stored on the instance, which must stay deep-copyable)."""
+    """The op namespace a ``LinrBackend`` scores with (``retrieve.ops.triton`` / ``.reference``),
+    imported on first use so ``import retrieve`` registers no kernels. Modules call it once in
+    ``__init__`` (the import, and its errors, happen at construction) and again in ``forward``
+    (a dict hit; not stored on the instance, which must stay deep-copyable)."""
     if backend in _OPS_LOADED:
         return _OPS_LOADED[backend]
     _OPS_LOADED[backend] = importlib.import_module(_OPS_NAMESPACE[backend])
     return _OPS_LOADED[backend]
 
 
-# The code path each backend runs per module: ``"cublas"`` where the flag is a
-# no-op, ``None`` where the constructor raises. Keyed by class name so the table is plain data
-# with no import of ``retrieve.modules``; the harness derives its ``PATHS`` from it
-# (docs/system/architecture.md § Backend dispatch).
+# The code path each backend runs per module: ``"cublas"`` where the flag is a no-op, ``None``
+# where the constructor raises. Keyed by class name so the table is plain data with no import of
+# ``retrieve.modules``; the harness derives its ``PATHS`` from it (docs/system/architecture.md §
+# Backend dispatch).
 _NO_OFFICIAL: dict[str, str | None] = {"official": None, "official-fork": None}
 DISPATCH: dict[str, dict[str, str | None]] = {
     "SilverTorch": {
-        "triton": "triton",
-        "torch": "torch",
+        "triton": None,
+        "torch": None,
         "official": "official",
         "official-fork": "official-fork",
     },
@@ -63,7 +58,6 @@ DISPATCH: dict[str, dict[str, str | None]] = {
     "OneBitKNN": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
     "SimHashKNN": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
     "ExactAttributeFilter": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
-    "BloomFilter": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
 }
 
 
@@ -79,15 +73,10 @@ def load_prebuilt(module: nn.Module, state_dict: dict[str, Tensor]) -> None:
 
 
 class RetrievalModule(nn.Module, abc.ABC):
-    """A top-K retriever over a registered item index.
-
-    Contract: construct with k (+ knobs) → register_index(item_embs, ...)
-    exactly once → forward(query, ...) → (ids [B, k] int64, scores [B, k]).
-    -1 / -inf are the "no item" sentinels. Re-registration is unsupported.
-
-    This ABC constrains only the lifecycle. Forward signatures deliberately vary
-    by family (mask vs candidates vs fused-filter).
-    """
+    """A top-K retriever over a registered item index: construct with ``k`` (+ knobs) →
+    ``register_index(item_embs, ...)`` exactly once → ``forward(query, ...)`` → ``(ids [B, k]
+    int64, scores [B, k])``, ``-1`` / ``-inf`` the "no item" sentinels. Forward signatures vary
+    by family (mask vs candidates vs prepared filter)."""
 
     k: int
 
@@ -98,8 +87,8 @@ class RetrievalModule(nn.Module, abc.ABC):
 class FilterModule(nn.Module, abc.ABC):
     """Boolean predicate over a registered item index; ``forward`` aliases ``evaluate_mask``.
 
-    A batch's query attrs are encoded once by ``prepare_queries(query_clause_attrs)`` (the bloom
-    query signatures; the int64 attrs for the exact filter), outside any timed call, and every
+    A batch's query attrs are encoded once by ``prepare_queries(query_clause_attrs)`` (the int64
+    attrs for the exact filter), outside any timed call, and every
     eval path takes that encoding ``q``: ``evaluate_mask(q, start=0, end=None) -> [B, end -
     start] bool`` (dense, over items ``[start, end)``), ``evaluate_indices(q) -> ([B, P] int64,
     [B] int64)`` (compact candidates), ``evaluate_subset(q, candidate_ids) -> [B, P] bool``

@@ -1,4 +1,4 @@
-"""The 0.2 public surface (plan L §4.1) and the laziness of ``import retrieve``: the two
+"""The public surface and the laziness of ``import retrieve``: the two
 ``__all__`` lists are pinned, and importing the package registers no kernel — the Triton and
 reference op namespaces are imported by a module's constructor, not by the package."""
 
@@ -13,7 +13,6 @@ import retrieve
 import retrieve.modules
 
 MODULES = [
-    "BloomFilter",
     "ExactAttributeFilter",
     "FullScanKNN",
     "LiNRBuilder",
@@ -37,7 +36,7 @@ pytestmark = pytest.mark.cpu
 def test_all_lists():
     assert retrieve.modules.__all__ == MODULES
     assert retrieve.__all__ == sorted(MODULES + INTERFACES)
-    assert len(retrieve.__all__) == 19
+    assert len(retrieve.__all__) == 18
     for name in retrieve.__all__:
         assert getattr(retrieve, name) is not None
 

@@ -1,10 +1,10 @@
 # Copyright (c) the retrieve authors. Licensed under the Apache License, Version 2.0, as the
-# rest of this package (official-fork/LICENSE); added in the fork (official-fork/CHANGES.md, C4, C5).
+# rest of this package (official-fork/LICENSE); added in the fork (official-fork/CHANGES.md).
 
 """Shape functions of every ``stfork`` op, so ``torch.compile`` traces a forward whole (the
 harness ``graph`` mode) and ``torch.library.opcheck`` passes on each (the compile gate). The
-forward's ops have outputs whose shapes follow from the input shapes and int arguments alone
-(what C3 / C4 made true); the build / parse / upstream-shaped search ops, outside any compiled
+forward's ops have outputs whose shapes follow from the input shapes and int arguments alone;
+the build / parse / upstream-shaped search ops, outside any compiled
 forward, give their data-dependent sizes as unbacked sizes (``new_dynamic_size``)."""
 
 import torch

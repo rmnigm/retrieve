@@ -1,14 +1,6 @@
-"""Index-build-time math: clustering, the IVF layouts, quantizers and bloom hashing. Reached
-as ``retrieve.indexing.<name>``; the modules consume it through their constructor arguments."""
+"""Index-build-time math: clustering, the IVF layout and the quantizers. Reached as
+``retrieve.indexing.<name>``; the modules consume it through their constructor arguments."""
 
-from retrieve.indexing.bloom_hash import (
-    build_query_bit_positions,
-    build_query_signatures,
-    build_signatures,
-    build_transposed_sigs,
-    generate_clause_salt,
-    generate_seeds,
-)
 from retrieve.indexing.ivf import csr_layout, probe_width
 from retrieve.indexing.kmeans import KMeans
 from retrieve.indexing.quantize import (
@@ -22,13 +14,7 @@ from retrieve.indexing.quantize import (
 
 __all__ = [
     "KMeans",
-    "build_query_bit_positions",
-    "build_query_signatures",
-    "build_signatures",
-    "build_transposed_sigs",
     "csr_layout",
-    "generate_clause_salt",
-    "generate_seeds",
     "probe_width",
     "project_oporp_1bit_query",
     "project_simhash_1bit_query",

@@ -24,18 +24,19 @@ toolchain, so there are no prebuilt CUDA wheels to match. You need:
 > from retrieve import SilverTorch, OneBitKNN
 > ```
 
-Modules that ship a pure-PyTorch path accept `backend="torch"` and run without Triton (still on
-GPU). The default is `backend="triton"`. `SilverTorch` is the exception in the release: it runs
-Meta's official SilverTorch code, adapted (the `official` extra), and its Triton and torch
-backends in this source tree are not released ([modules](modules.md#silvertorch)).
+The LiNR modules and the filters accept `backend="torch"` and run without Triton (still on GPU);
+their default is `backend="triton"`. `SilverTorch` runs Meta's official SilverTorch code, adapted
+(`backend="official-fork"`, the default) or as published (`backend="official"`), and needs the
+`official` extra: `pip install torchretrieve[official]` builds Meta's extension and ours against
+your CUDA toolkit ([modules](modules.md#silvertorch)).
 
 The package has two public layers and two helper namespaces:
 
 | namespace | what it holds |
 | --- | --- |
-| `retrieve` / `retrieve.modules` | the `nn.Module`s: `SilverTorch`, the LiNR paper variants `LiNRV1`–`LiNRV3`, the primitives they compose, the two filters; the two builders and `OfficialConfig`; `retrieve.modules.official` for Meta's own modules |
+| `retrieve` / `retrieve.modules` | the `nn.Module`s: `SilverTorch`, the LiNR paper variants `LiNRV1`–`LiNRV3`, the primitives they compose, the exact filter; the two builders and `OfficialConfig`; `retrieve.modules.official` for Meta's own modules |
 | `retrieve.ops.triton` / `.reference` / `.official` | the kernels behind them, one namespace per backend with the same op names and signatures (`import retrieve.ops.triton` registers `torch.ops.retrieve.*`) |
-| `retrieve.indexing` | index-build math: `KMeans`, the IVF layouts, the quantizers, the bloom hash builders |
+| `retrieve.indexing` | index-build math: `KMeans`, the IVF layout, the quantizers |
 | `retrieve.functional` | query-time glue: `masked_topk`, `compact_mask`, `combine_masks` / `combine_indices`, `post_filter_topk` |
 
 `import retrieve` imports no kernel; a module resolves its backend's op namespace when it is
@@ -62,8 +63,8 @@ smaller than `k`), trailing slots are padded with `id = -1` and `score = -inf`.
 
 ## Example: SilverTorch (IVF + INT8 ANN)
 
-`SilverTorch` is the scalable default — an IVF index over INT8-quantized embeddings, scored by a
-fused probe+score kernel. Good for large `N`.
+`SilverTorch` is the scalable default: an IVF index over INT8-quantized embeddings, scored by
+Meta's fused probe+score op. Good for large `N`. Needs the `official` extra.
 
 ```python
 import torch
@@ -141,8 +142,8 @@ The primitives the variants compose (`OneBitKNN`, `PrefilterKNN`, …) are publi
 - [`modules.md`](modules.md) — which module to pick, and the per-module API reference.
 - [`adding-a-dataset.md`](adding-a-dataset.md) — benchmarking the modules on your own vectors and attributes with the repository's harness.
 - [`filtering-and-quantization.md`](filtering-and-quantization.md) — attribute-filtered retrieval.
-- [`indexing-and-ops.md`](indexing-and-ops.md) — `retrieve.indexing` (k-means, the IVF layouts,
-  the quantizers, the bloom hash), `retrieve.functional` and the three op namespaces.
+- [`indexing-and-ops.md`](indexing-and-ops.md) — `retrieve.indexing` (k-means, the IVF layout,
+  the quantizers), `retrieve.functional` and the three op namespaces.
 
 For internals (Triton kernel design, the benchmark harness, the test suite) see the repo-level
 `docs/system/` directory.

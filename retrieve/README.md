@@ -2,7 +2,7 @@
 
 GPU retrieval for recommender systems — PyTorch `nn.Module`s backed by fused Triton kernels.
 
-A library for the candidate-generation / ANN stage of a recsys stack: full-scan KNN, 1-bit Hamming KNN, INT8 IVF (SilverTorch), prefilter / postfilter compositions, and a Bloom / exact attribute-filter family that fuses into the scoring kernels. Every module follows the same `register_index → forward` shape and runs on a single GPU.
+A library for the candidate-generation / ANN stage of a recsys stack: full-scan KNN, 1-bit Hamming KNN, INT8 IVF (SilverTorch, on Meta's official code adapted), prefilter / postfilter compositions, and an exact attribute filter. Every module follows the same `register_index → forward` shape and runs on a single GPU.
 
 ## Install
 
@@ -10,7 +10,7 @@ A library for the candidate-generation / ANN stage of a recsys stack: full-scan 
 pip install torchretrieve
 ```
 
-Source-only distribution. Triton kernels JIT-compile on first call against your local toolchain — no prebuilt CUDA wheels to match. You need a CUDA-capable GPU and a working `torch` + `triton` install (declared as dependencies). Modules that ship a pure-PyTorch fallback accept `backend="torch"`; `SilverTorch` additionally offers `backend="official"`, Meta's own `meta-recsys/silvertorch` kernels behind the same layer (the `official` extra, built from source against your CUDA toolkit; eager-only).
+Source-only distribution. Triton kernels JIT-compile on first call against your local toolchain — no prebuilt CUDA wheels to match. You need a CUDA-capable GPU and a working `torch` + `triton` install (declared as dependencies). The LiNR modules and the filters accept `backend="torch"` for a pure-PyTorch path. `SilverTorch` needs the `official` extra (`pip install torchretrieve[official]`, built from source against your CUDA toolkit): it runs Meta's official SilverTorch code, adapted (`backend="official-fork"`, the default), or Meta's code as published (`backend="official"`, eager-only).
 
 > **Note.** Install pulls in `torch>=2.10` and `triton>=3.6`, the validated versions: validated on an A100-SXM4-80GB (sm_80) with torch 2.10.0+cu128, triton 3.6.0, Python 3.11. The import name is `retrieve`, not `torchretrieve`.
 
@@ -31,7 +31,7 @@ queries = torch.randn(4, D, device="cuda")
 topk_ids, topk_scores = ann(queries)        # ([4, 10], [4, 10])
 ```
 
-For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` / `k_hash`) or `filter_mode="exact"` and pass `query_clause_attrs` to `forward`. The filter is fused into the same probe+score kernel — no `[B, P, D]` intermediates touch HBM.
+For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` / `k_hash`) or `filter_mode="exact"` and pass `ann.prepare_queries(query_clause_attrs)` to `forward`. The filter is evaluated inside Meta's search op over the probed clusters only.
 
 ## What's in the box
 
@@ -43,18 +43,17 @@ For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` /
 | `PostfilterKNN` | KNN then attribute filter. |
 | `PrefilterKNN` | Attribute filter then KNN over the candidate set. |
 | `LiNRV1`–`LiNRV3` | The LiNR paper's variants, composed from the above with an optional filter submodule; `LiNRBuilder` builds one. |
-| `SilverTorch` | IVF + INT8 ANN with optional fused bloom / exact filter (paper Algorithm 1); `SilverTorchBuilder` builds or loads one. |
-| `BloomFilter`, `ExactAttributeFilter` | Standalone `FilterModule`s; compose via `retrieve.functional.combine_masks` / `combine_indices`. |
+| `SilverTorch` | IVF + INT8 ANN with an optional bloom / exact filter (paper Algorithm 1) on Meta's official code, adapted; `SilverTorchBuilder` builds or loads one. Needs the `official` extra. |
+| `ExactAttributeFilter` | The standalone `FilterModule`; compose via `retrieve.functional.combine_masks` / `combine_indices`. |
 | `retrieve.indexing.KMeans` | Index-build helper (clusters for IVF); `init="random"` or `"kmeans++"`. |
 | `retrieve.indexing.quantize_int8`, `quantize_oporp_1bit`, `quantize_simhash_1bit` | Quantization utilities used by the modules above. |
 | `retrieve.ops.triton` / `retrieve.ops.reference` / `retrieve.ops.official` | The kernels behind the modules, one namespace per backend, same op names and signatures. |
 
-Triton is the default backend; modules that have a pure-PyTorch path accept
-`backend="torch"` for `torch.compile` / Inductor users. In the release,
-`SilverTorch` runs Meta's official SilverTorch code, adapted (improvements
-listed in its CHANGES file; the `official` extra); `backend="official"` is
-Meta's code as published (eager-only), kept as the reference. The Triton and
-torch SilverTorch backends in this source tree are not part of the release. The package is two
+Triton is the default backend of the LiNR modules and the filters; they accept
+`backend="torch"` for a pure-PyTorch path. `SilverTorch` runs Meta's official SilverTorch code,
+adapted (improvements listed in its CHANGES file; `backend="official-fork"`, the default, the
+`official` extra); `backend="official"` is Meta's code as published (eager-only), kept as the
+reference. The package is two
 public layers — `retrieve.modules` (re-exported at the top level) and
 `retrieve.ops` — plus `retrieve.indexing` (index-build math) and
 `retrieve.functional` (query-time glue).

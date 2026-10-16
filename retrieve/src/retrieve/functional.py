@@ -1,10 +1,10 @@
-"""Query-time torch glue that is not a kernel: the masked top-K epilogue, mask compaction and
-composition, the post-filter, the torch popcount and the two subset predicates shared by the
-filter modules and ``retrieve.ops.reference``.
+"""Query-time torch glue that is not a kernel: the masked top-K epilogue and its two-level
+top-k, mask compaction and composition, the post-filter, the torch popcount and the exact
+subset predicate shared by ``ExactAttributeFilter`` and ``retrieve.ops.reference``.
 
 Everything here is pure tensor flow (no ``.item()``, no data-dependent Python branch beyond
-``min(k, P)`` over static shapes) and traces cleanly under ``torch.compile(dynamic=True,
-mode="reduce-overhead")`` — except ``combine_indices``, which syncs per cascade stage and says so.
+``min(k, P)`` over static shapes) and traces under ``torch.compile(dynamic=True,
+mode="reduce-overhead")``, except ``combine_indices``, which syncs per cascade stage.
 """
 
 from __future__ import annotations
@@ -19,9 +19,9 @@ if TYPE_CHECKING:
     from retrieve.interfaces import FilterModule
 
 
-# The two-level top-k (docs/system/kernels.md § SilverTorch kernels, "Top-k"): from TOPK_MIN_SLOTS
-# slots of [B, P], where a row has at least TOPK_MIN_RATIO whole TOPK_BLOCK-slot blocks per top-k
-# slot, the top-k runs on the items of its k best blocks (and the ragged tail).
+# The two-level top-k (docs/system/kernels.md § Top-k): from TOPK_MIN_SLOTS slots of [B, P],
+# where a row has at least TOPK_MIN_RATIO whole TOPK_BLOCK-slot blocks per top-k slot, the top-k
+# runs on the items of its k best blocks (and the ragged tail).
 TOPK_BLOCK = 256
 TOPK_MIN_SLOTS = 1 << 23
 TOPK_MIN_RATIO = 8
@@ -63,17 +63,15 @@ def masked_topk(
     pad_to_k: bool = True,  # rows with P < k or few survivors pad -1/-inf
     masked: bool = False,  # scores already carry -inf at invalid lanes (a fused mask)
 ) -> tuple[Tensor, Tensor]:
-    """Mask invalid scores to -inf → topk → map local→global ids → replace
-    non-finite winners with -1 → optionally pad to k. Returns (ids, scores).
+    """Mask invalid scores to -inf → topk → map local→global ids → replace non-finite winners
+    with -1 → optionally pad to k. Returns (ids, scores).
 
     The -1 sentinel is applied whenever ``valid`` is given or ``masked`` (or P < k): winners
-    with a non-finite score — masked lanes *and* genuine -inf scores alike —
-    get id -1. With ``valid=None`` and P >= k no sentinel pass runs, matching
-    the dense call sites that had no -inf handling. ``pad_to_k=False`` with
-    P < k returns min(k, P) columns."""
+    with a non-finite score (masked lanes and genuine -inf scores alike) get id -1. With
+    ``valid=None`` and P >= k no sentinel pass runs. ``pad_to_k=False`` with P < k returns
+    min(k, P) columns."""
     b, p = scores.shape
     if valid is not None:
-        # One pass; masked_fill(~valid) clones the scores and inverts the mask first.
         scores = torch.where(valid, scores, float("-inf"))
     actual_k = min(k, p)
     topk_scores, topk_local = two_level_topk(scores, actual_k)
@@ -88,22 +86,18 @@ def masked_topk(
 
 
 def compact_mask(mask: Tensor) -> tuple[Tensor, Tensor]:
-    """Compact a [B, N] bool mask to (positive_indices [B, N], counts [B]).
-
-    Same contract as the triton ``bloom_compact``/``clause_compact`` kernels, so torch and
-    triton paths stay interchangeable: all three return full-width ``[B, N]`` indices with
-    only the first ``counts[b]`` entries of each row meaningful. The tails differ — arbitrary
-    ids (argsort tail) here, unwritten memory in the kernels — so consumers must bound reads
-    by ``counts`` either way."""
+    """A [B, N] bool mask → (positive_indices [B, N], counts [B]): the same full-width contract
+    as the ``clause_compact`` kernel, so torch and triton paths stay interchangeable, with only
+    the first ``counts[b]`` entries of each row meaningful. The tails differ (arbitrary ids from
+    the argsort here, unwritten memory in the kernel), so consumers bound reads by ``counts``."""
     counts = mask.sum(dim=1)
     sorted_idx = mask.float().argsort(dim=1, descending=True, stable=True)
     return sorted_idx, counts
 
 
 def combine_masks(*masks: Tensor | None) -> Tensor | None:
-    """Element-wise AND of N optional ``[B, N]`` masks.
-
-    ``None`` inputs are ignored. Returns ``None`` if every input is ``None``."""
+    """Element-wise AND of N optional ``[B, N]`` masks; ``None`` inputs are ignored, all-``None``
+    returns ``None``."""
     out: Tensor | None = None
     for m in masks:
         if m is None:
@@ -119,9 +113,8 @@ def combine_indices(
     """Sparse cascade across filters: the first produces ``(ids, counts)`` via its compact path,
     then each subsequent filter is applied to those ids via ``evaluate_subset`` and survivors
     re-compacted (no ``[B, N]`` materialized by the cascade). Order filters most-selective first.
-
-    Each cascade stage does a host sync (``new_counts.max().item()``) to size the next id
-    tensor — don't put this in a cudagraph-captured path; it's meant for offline composition."""
+    Each stage syncs (``new_counts.max().item()``) to size the next id tensor, so this is for
+    offline composition, not a captured path."""
     if len(filters) == 0:
         raise ValueError("combine_indices requires at least one filter")
     if len(filters) != len(query_clause_attrs):
@@ -137,8 +130,7 @@ def combine_indices(
         if p == 0:
             return ids, counts
         valid = counts_to_valid(counts, p)
-        # ids past counts[b] are unwritten (Triton) or argsort leftovers (torch); gather as 0, then
-        # sub_mask & valid zeroes them out.
+        # ids past counts[b] are unwritten or argsort leftovers: gather as 0, then mask them out.
         safe_ids = torch.where(valid, ids, ids.new_zeros(()))
         sub_mask = f.evaluate_subset(f.prepare_queries(q), safe_ids)  # [B, P] bool
         sub_mask = sub_mask & valid
@@ -155,10 +147,8 @@ def post_filter_topk(
     topk_ids: Tensor,
     post_mask: Tensor,
 ) -> tuple[Tensor, Tensor]:
-    """Apply a post-filter to pre-computed top-K results.
-
-    Returns ``(ids, counts)`` where filtered positions carry ``id = -1`` and *counts* is the
-    number of surviving items per query."""
+    """A post-filter over pre-computed top-K ids: ``(ids, counts)`` with filtered positions at
+    ``-1`` and the number of surviving items per query."""
     keep = post_mask.gather(1, topk_ids)
     topk_ids = topk_ids.masked_fill(~keep, -1)
     counts = keep.sum(dim=1)
@@ -166,10 +156,8 @@ def post_filter_topk(
 
 
 def popcount_int64(x: Tensor) -> Tensor:
-    """Hamming weight (popcount) over an int64 tensor of any shape.
-
-    Bit-twiddle algorithm — matches the Triton-side ``retrieve.ops.triton.common.popcount_int64``
-    so torch reference and Triton kernel agree bit-exact."""
+    """Popcount over an int64 tensor of any shape, as int32. SWAR bit-twiddling (this torch has no
+    ``bitwise_count``); exact, so it equals the Triton side's hardware ``POPC`` bit for bit."""
     if x.dtype != torch.int64:
         raise TypeError(f"popcount_int64 expects int64, got {x.dtype}")
     M1 = 0x5555555555555555
@@ -187,9 +175,8 @@ def clause_subset_match(
     query_attrs: Tensor,
     clause_is_reverse: Tensor,
 ) -> Tensor:
-    """``[B, P, C, A]`` attrs vs ``[B, C]`` query → ``[B, P]`` bool. Reverse-XOR and
-    ``q == -1`` inactive semantics — the single torch-side definition, shared by
-    ``ExactAttributeFilter.evaluate_subset`` and the reference exact scorer."""
+    """``[B, P, C, A]`` attrs vs ``[B, C]`` query → ``[B, P]`` bool, with the reverse-XOR and
+    ``q == -1`` inactive semantics: the one torch-side definition of the exact predicate."""
     q = query_attrs.unsqueeze(1).unsqueeze(-1)  # [B, 1, C, 1]
     clause_match = (gathered_attrs == q).any(dim=-1)  # [B, P, C]
     rev = clause_is_reverse.unsqueeze(0).unsqueeze(0)  # [1, 1, C]
@@ -198,18 +185,7 @@ def clause_subset_match(
     return (clause_match | inactive).all(dim=-1)  # [B, P]
 
 
-def bloom_subset_match(qb: Tensor, sigs: Tensor) -> Tensor:
-    """``[B, W]`` query sigs vs ``[B, P, W]`` gathered sigs → ``[B, P]`` bool.
-
-    Per-word subset test ``(qb & sig) == qb``, AND-reduced over words — the
-    single torch-side definition, shared by ``BloomFilter.evaluate_subset`` and
-    the reference bloom scorer."""
-    match = (qb.unsqueeze(1) & sigs) == qb.unsqueeze(1)  # [B, P, W]
-    return match.all(dim=-1)
-
-
 __all__ = [
-    "bloom_subset_match",
     "clause_subset_match",
     "combine_indices",
     "combine_masks",
@@ -218,4 +194,5 @@ __all__ = [
     "masked_topk",
     "popcount_int64",
     "post_filter_topk",
+    "two_level_topk",
 ]

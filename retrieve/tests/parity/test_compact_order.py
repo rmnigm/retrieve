@@ -1,11 +1,10 @@
-"""The compaction kernels' ordering contract (the retired deterministic-compaction plan; see
-docs/system/kernels.md § clause_compact for the current gates).
+"""The compaction kernel's ordering contract (docs/system/kernels.md § clause_compact).
 
-``clause_compact`` / ``bloom_compact`` return each row's surviving ids in ascending item order —
-``torch.equal`` to ``ops.reference`` on ids *and* counts — and the same call returns the same
-tensors ten launches running and in a fresh process. A row is defined on ``[:counts[b]]`` only
-(the reference's tail is the argsort's, the kernels' is unwritten memory), so rows are compared
-with both tails set to ``-1``; every consumer must give the same answer whatever the tail holds.
+``clause_compact`` returns each row's surviving ids in ascending item order, ``torch.equal`` to
+``ops.reference`` on ids *and* counts, and the same call returns the same tensors ten launches
+running and in a fresh process. A row is defined on ``[:counts[b]]`` only (the reference's tail is
+the argsort's, the kernel's is unwritten memory), so rows are compared with both tails set to
+``-1``; every consumer must give the same answer whatever the tail holds.
 """
 
 from __future__ import annotations
@@ -18,13 +17,12 @@ import pytest
 import torch
 
 from retrieve.ops import reference
-from retrieve.ops.triton.bloom_compact import BloomCompactConfig, _bloom_compact_impl, bloom_compact
 from retrieve.ops.triton.clause_compact import (
     ClauseCompactConfig,
     _clause_compact_impl,
     clause_compact,
 )
-from tests.parity.conftest import make_bloom, make_exact
+from tests.parity.conftest import make_exact
 
 _NS = [64, 4096, 100_003]  # one tile, many tiles, a ragged last tile
 
@@ -47,13 +45,6 @@ def test_clause_compact_order_matches_reference(n, reverse, c, a_max):
     assert_compact_equal(clause_compact(attrs, rev, q), reference.clause_compact(attrs, rev, q))
 
 
-@pytest.mark.parametrize("n", _NS)
-@pytest.mark.parametrize("m_bits", [256, 512, 1024])
-def test_bloom_compact_order_matches_reference(n, m_bits):
-    *_, sigs, qb = make_bloom(n, 8, m_bits=m_bits)
-    assert_compact_equal(bloom_compact(qb, sigs), reference.bloom_compact(qb, sigs))
-
-
 @pytest.mark.parametrize("block_n, num_warps", [(128, 2), (256, 8), (1024, 4)])
 def test_order_holds_under_every_tile_config(block_n, num_warps):
     attrs, rev, q = make_exact(20_011, 4, c=2, a_max=2, reverse="mixed")
@@ -61,39 +52,30 @@ def test_order_holds_under_every_tile_config(block_n, num_warps):
     assert_compact_equal(
         _clause_compact_impl(attrs, rev, q, config=cfg), reference.clause_compact(attrs, rev, q)
     )
-    *_, sigs, qb = make_bloom(20_011, 4, m_bits=1024)
-    cfg = BloomCompactConfig(block_n, num_warps)
-    assert_compact_equal(
-        _bloom_compact_impl(qb, sigs, config=cfg), reference.bloom_compact(qb, sigs)
-    )
 
 
 _INPUTS = """
-from tests.parity.conftest import make_bloom, make_exact
+from tests.parity.conftest import make_exact
 attrs, rev, q = make_exact(200_003, 8, c=4, a_max=4, reverse="mixed")
-*_, sigs, qb = make_bloom(200_003, 8, m_bits=1024)
 """
 
 _FRESH_PROCESS = f"""
 import sys, torch
-from retrieve.ops.triton.bloom_compact import bloom_compact
 from retrieve.ops.triton.clause_compact import clause_compact
 {_INPUTS}
-torch.save((clause_compact(attrs, rev, q), bloom_compact(qb, sigs)), sys.argv[1])
+torch.save(clause_compact(attrs, rev, q), sys.argv[1])
 """
 
 
 def test_launch_to_launch_identity(tmp_path):
-    """The check that would have caught the atomic-base ordering: ten launches in this process and
-    one in a fresh interpreter all return the same ids and counts."""
+    """Ten launches in this process and one in a fresh interpreter all return the same ids and
+    counts (the check that catches an atomic row base, which orders a row by tile completion)."""
     ns: dict = {}
     exec(_INPUTS, ns)
-    attrs, rev, q, sigs, qb = ns["attrs"], ns["rev"], ns["q"], ns["sigs"], ns["qb"]
-    first = (clause_compact(attrs, rev, q), bloom_compact(qb, sigs))
+    attrs, rev, q = ns["attrs"], ns["rev"], ns["q"]
+    first = clause_compact(attrs, rev, q)
     for _ in range(9):
-        again = (clause_compact(attrs, rev, q), bloom_compact(qb, sigs))
-        for a, b in zip(first, again, strict=True):
-            assert_compact_equal(a, b)
+        assert_compact_equal(first, clause_compact(attrs, rev, q))
 
     out = tmp_path / "fresh.pt"
     subprocess.run(
@@ -101,9 +83,7 @@ def test_launch_to_launch_identity(tmp_path):
         check=True,
         cwd=Path(__file__).resolve().parents[2],
     )
-    fresh = torch.load(out)
-    for a, b in zip(first, fresh, strict=True):
-        assert_compact_equal(a, b)
+    assert_compact_equal(first, torch.load(out))
 
 
 _TAIL_CONSUMERS = """
@@ -113,7 +93,7 @@ from functools import partial
 import torch
 
 from retrieve.functional import combine_indices, counts_to_valid
-from retrieve.modules import BloomFilter, ExactAttributeFilter
+from retrieve.modules import ExactAttributeFilter
 from retrieve.modules.linr import LiNRV2, LiNRV3
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs
 from tests.parity.conftest import _poisoned_empty
@@ -124,14 +104,13 @@ qa = make_query_attrs(b=b, c=2, n_vocab=6, inactive_rate=0.2, seed=6)
 embs, query = make_index(n, d), make_query(b, d)
 exact = ExactAttributeFilter(backend="triton")
 exact.register_index(attrs)
-bloom = BloomFilter(m_bits=256, k_hash=3, backend="triton")
-bloom.register_index(attrs)
+other = ExactAttributeFilter(backend="torch")
+other.register_index(make_attrs(n, c=2, a_max=2, n_vocab=6, pad_rate=0.2, seed=7))
 mods = [
     LiNRV2(k=k, filter=exact, backend="triton"),
     LiNRV2(k=k, filter=exact, backend="torch"),
-    LiNRV2(k=k, filter=bloom, backend="torch"),
     LiNRV3(k=k, candidate_pool=200, filter=exact, backend="triton"),
-    LiNRV3(k=k, candidate_pool=200, filter=bloom, backend="torch"),
+    LiNRV3(k=k, candidate_pool=200, filter=exact, backend="torch"),
 ]
 for m in mods:
     m.register_index(embs)
@@ -144,7 +123,7 @@ for tail in (-1, 2**40):
     ids, counts = exact.evaluate_indices(exact.prepare_queries(qa))
     assert hits and (counts < n).all() and (ids[~counts_to_valid(counts, n)] == tail).all()
     res = [m(query, m.prepare_queries(qa)) for m in mods]
-    c_ids, c_counts = combine_indices([exact, bloom], [qa, qa])
+    c_ids, c_counts = combine_indices([exact, other], [qa, qa])
     res.append((torch.where(counts_to_valid(c_counts, c_ids.shape[1]), c_ids, -1), c_counts))
     torch.empty = real_empty
     torch.cuda.synchronize()
@@ -154,12 +133,12 @@ torch.save(out, sys.argv[1])
 
 
 def test_consumers_ignore_the_tail_past_counts(tmp_path):
-    """The compaction ops write nothing past ``counts[b]``. Every consumer of their output —
-    ``LiNRV2`` (Triton and torch rescoring, clause and bloom), ``LiNRV3`` (Triton and torch),
-    ``combine_indices`` — returns the same tensors when the op's ``torch.empty`` holds ``-1``
-    (the old tail) and when it holds ``2**40``, an id past every table: a consumer that used a
-    tail id would change a result, one that gathered through it would fault. A fault poisons the
-    CUDA context, hence the subprocess."""
+    """The compaction op writes nothing past ``counts[b]``. Every consumer of its output,
+    ``LiNRV2`` (Triton and torch rescoring), ``LiNRV3`` (Triton and torch), ``combine_indices``,
+    returns the same tensors when the op's ``torch.empty`` holds ``-1`` and when it holds
+    ``2**40``, an id past every table: a consumer that used a tail id would change a result, one
+    that gathered through it would fault. A fault poisons the CUDA context, hence the
+    subprocess."""
     out = tmp_path / "tails.pt"
     subprocess.run(
         [sys.executable, "-c", _TAIL_CONSUMERS, str(out)],
@@ -167,6 +146,6 @@ def test_consumers_ignore_the_tail_past_counts(tmp_path):
         cwd=Path(__file__).resolve().parents[2],
     )
     res = torch.load(out)
-    assert len(res[-1]) == 6
+    assert len(res[-1]) == 5
     for clean, poisoned in zip(res[-1], res[2**40], strict=True):
         assert torch.equal(clean[0], poisoned[0]) and torch.equal(clean[1], poisoned[1])

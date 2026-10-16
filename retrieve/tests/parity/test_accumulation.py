@@ -1,11 +1,10 @@
-"""Every scoring kernel against an fp64 oracle of the same operation on the same inputs (plan L5).
+"""Every scoring kernel against an fp64 oracle of the same operation on the same inputs.
 
 The other parity files compare ``ops.triton`` against ``ops.reference`` at the *same* input dtype,
-so an accumulation-width defect on both sides cancels and passes; ``fused_masked_knn_topk``
-accumulated fp16 through every gate this way (L4 §6.1: 0.0276 max abs error). Each test here
-asks for every candidate (``k = P``), maps the returned ids back to the fp64 truth, and asserts a
-bound that fp32 accumulation meets and fp16 does not — the second half is asserted on the same
-inputs, so the bound's discriminating power is checked on every run, not claimed.
+so an accumulation-width defect on both sides cancels and passes. Each test here asks for every
+candidate (``k = P``), maps the returned ids back to the fp64 truth, and asserts a bound that fp32
+accumulation meets and fp16 does not; the second half is asserted on the same inputs, so the
+bound's discriminating power is checked on every run, not claimed.
 
 Inputs are goodreads-like on purpose: unnormalised, ``|score|`` up to ~10², partial sums two orders
 above the top scores.
@@ -13,17 +12,12 @@ above the top scores.
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 import torch
 import torch.nn.functional as F
 
 from retrieve.functional import compact_mask, popcount_int64
-from retrieve.indexing.quantize import quantize_int8, quantize_int8_global
 from retrieve.modules.knn import PostfilterKNN, PrefilterKNN
-from retrieve.ops.triton.codesigned_probe_score import codesigned_probe_score
-from retrieve.ops.triton.codesigned_probe_score_exact import codesigned_probe_score_exact
 from retrieve.ops.triton.fused_masked_knn_topk import fused_masked_knn_topk
 from retrieve.ops.triton.oporp_1bit_match_topk import oporp_1bit_match_topk_indirect
 from tests.conftest import (
@@ -33,10 +27,8 @@ from tests.conftest import (
     make_query,
     recall_at_k,
 )
-from tests.parity.conftest import make_exact, make_probe_family
 
 FP32_DOT_ABS = 1e-4  # measured: fp32 ≤ 1.4e-5 at D=256, |s| ≤ 140; the fp16 tree ≥ 6e-2
-INT8_DEQUANT_REL = 1e-6  # measured: 1.1e-7 (int32 dot exact; two fp32 multiplies)
 NEAR_TIE_DOT_ABS = 2e-6  # cuBLAS's tensor-core accumulator: 1.1e-6 at D=128; fp16 quantum 4.9e-4
 
 
@@ -68,51 +60,6 @@ def test_fused_masked_knn_topk_accumulates_fp32(d):
     err_fp16 = (_fp16_tree(rows * q).double() - truth).abs()[finite].max().item()
     assert err <= FP32_DOT_ABS, f"kernel vs fp64: {err:.3e}"
     assert err_fp16 > FP32_DOT_ABS, f"the bound does not discriminate fp16: {err_fp16:.3e}"
-
-
-def _int8_family(d, b=8):
-    """A probe with an identity ``sort_perm``, so a returned id is also its row of the
-    cluster-sorted ``codes`` the oracle reads."""
-    lay = make_probe_family(b, 64, 128, 8)
-    lay = replace(lay, sort_perm=torch.arange(lay.n, device="cuda"))
-    query = make_query(b, d)
-    codes, global_scale = quantize_int8_global(make_index(lay.n, d))
-    return query, lay, codes, global_scale
-
-
-def _assert_int8_dequant(query, codes, global_scale, ids, scores):
-    q_codes, q_scales = quantize_int8(query)
-    finite = torch.isfinite(scores)
-    rows = _rows(ids)
-    dot = (q_codes[rows].double() * codes[ids.clamp_min(0)].double()).sum(-1)
-    truth = dot * q_scales[rows].double() * global_scale
-    nonzero = finite & (dot != 0)
-
-    rel = ((scores.double() - truth).abs() / truth.abs())[nonzero].max().item()
-    rel_fp16 = ((dot.half().double() - dot).abs() / dot.abs())[nonzero].max().item()
-    assert rel <= INT8_DEQUANT_REL, f"kernel vs fp64: {rel:.3e}"
-    assert rel_fp16 > INT8_DEQUANT_REL, f"the bound does not discriminate fp16: {rel_fp16:.3e}"
-
-
-@pytest.mark.parametrize("d", [64, 128])
-def test_codesigned_probe_score_int32_dot_fp32_dequant(d):
-    query, lay, codes, global_scale = _int8_family(d)
-    ids, scores = codesigned_probe_score(
-        query, lay.probe_ids, lay.cluster_offsets, codes, lay.sort_perm, global_scale,
-        lay.width, lay.width,
-    )  # fmt: skip
-    _assert_int8_dequant(query, codes, global_scale, ids, scores)
-
-
-@pytest.mark.parametrize("d", [64, 128])
-def test_codesigned_probe_score_exact_int32_dot_fp32_dequant(d):
-    query, lay, codes, global_scale = _int8_family(d)
-    attrs, rev, q_attrs = make_exact(lay.n, query.shape[0])
-    ids, scores = codesigned_probe_score_exact(
-        query, lay.probe_ids, lay.cluster_offsets, codes, lay.sort_perm, attrs, rev, q_attrs,
-        global_scale, lay.width, lay.width,
-    )  # fmt: skip
-    _assert_int8_dequant(query, codes, global_scale, ids, scores)
 
 
 def test_oporp_1bit_match_topk_is_exact():

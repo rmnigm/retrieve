@@ -22,7 +22,7 @@ Two families, and the paper's variants of the first:
 | `LiNRV1` | fp16 inputs, fp32 dot | 1× (fp16) | Dense scan, filter as a mask. |
 | `LiNRV2` | fp16 inputs, fp32 dot | 1× (fp16) | Filter → candidates → exact rescoring; filter required. |
 | `LiNRV3` | Hamming, then fp16-input fp32 dot | ~1/16× + 1× | 1-bit top-`candidate_pool`, then exact rescoring. |
-| `SilverTorch` | INT8 ANN over IVF | 0.5× + centroids | Scales to large `N`; optional fused filter. |
+| `SilverTorch` | INT8 ANN over IVF | 0.5× + centroids | Scales to large `N`; optional bloom / exact filter. Needs the `official` extra. |
 | `FullScanKNN` | exact dot product | 1× (fp32) | Reference / small-N. |
 | `PostfilterKNN` | fp16 inputs, fp32 dot | 1× (fp16) | Dense scan + optional boolean mask. |
 | `PrefilterKNN` | fp16 inputs, fp32 dot | 1× (fp16) | Scores only a candidate set. |
@@ -38,43 +38,46 @@ from retrieve import (
     LiNRV1, LiNRV2, LiNRV3, LiNRBuilder,                              # LiNR paper variants
     PostfilterKNN, PrefilterKNN, FullScanKNN,                         # dense / sparse primitives
     OneBitKNN, SimHashKNN,                                            # 1-bit primitives
-    BloomFilter, ExactAttributeFilter,                                # filters
+        ExactAttributeFilter,                                             # the filter
 )
 import retrieve.modules.official   # Meta's BloomIndexSearchModule(+Builder), FilterQueryParserModule(+Builder)
 ```
 
 ### Backend
 
-Most modules accept `backend="triton"` (default) or `backend="torch"`. The Triton path runs fused
-kernels; the torch path is pure PyTorch (still GPU) and is `torch.compile`-friendly. Results are
-equivalent. `PostfilterKNN` accepts the flag for API symmetry but always runs
-the same code (cuBLAS already covers its case). `SilverTorch` alone also accepts
-`backend="official"` (and, in the release, runs Meta's code adapted; see
-[SilverTorch](#silvertorch)): Meta's own `meta-recsys/silvertorch` kernels (`torch.ops.st.*`, the
-`official` extra — built from source, needs a CUDA toolkit matching your torch) for the scoring
-and bloom phases, with our k-means and quantization in front; it is Meta's code as published,
-the reference the adapted code is checked against, eager-only (`torch.compile` raises), and its bloom mode is Meta's
-bloom index rather than ours (`m_bits` is optional; `official=OfficialConfig(...)` carries
-`b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path
-and the partial-vs-full bloom path; the expression parse runs in `prepare_queries`).
-`backend="official-fork"` runs the same path on Meta's official SilverTorch code, adapted (`torch.ops.stfork.*`,
-package `silvertorch-fork`, also in the `official` extra): ids and scores equal to Meta's, no host
-sync, so it captures and compiles; its bloom evaluates only the probed clusters
-(`OfficialConfig(bloom_path="full")` raises) and by default rechecks the bloom's survivors
-exactly, so it returns no false positives. Any other
-module given `"official"` / `"official-fork"` — or any string outside its
-backend literal — raises `ValueError` at construction.
+The LiNR modules and the filters accept `backend="triton"` (default) or `backend="torch"`. The
+Triton path runs fused kernels; the torch path is pure PyTorch (still GPU) and is
+`torch.compile`-friendly. Results are equivalent. `PostfilterKNN` accepts the flag for API
+symmetry but always runs the same code (cuBLAS already covers its case).
+
+`SilverTorch` takes `backend="official-fork"` (default) or `backend="official"`, both from the
+`official` extra (built from source, needs a CUDA toolkit matching your torch):
+
+- `"official-fork"`: Meta's official SilverTorch code, adapted (`torch.ops.stfork.*`, package
+  `silvertorch-fork`; the improvements are listed in its CHANGES file). Ids and scores equal to
+  Meta's at int32, no host sync, so it captures and compiles; its bloom is evaluated over the
+  probed clusters only (`OfficialConfig(bloom_path="full")` raises) and by default rechecks the
+  bloom's survivors exactly, so it returns no false positives.
+- `"official"`: Meta's code as published (`torch.ops.st.*`, `meta-recsys/silvertorch`), the
+  reference the adapted code is checked against: eager-only (`torch.compile` raises), its bloom
+  width Meta's own (`m_bits` is optional).
+
+Both run our k-means and quantization in front and take `official=OfficialConfig(...)`:
+`b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path, the
+partial-vs-full bloom path (`official` only), `bloom_width`, `recheck`. The expression parse runs
+in `prepare_queries`. Any module given a backend outside its literal (`"official"` on a LiNR
+module, `"triton"` on `SilverTorch`, a typo) raises `ValueError` at construction.
 
 ## LiNR variants
 
-Each holds its filter (a `BloomFilter` or `ExactAttributeFilter`, see the
+Each holds its filter (an `ExactAttributeFilter`, see the
 [filtering guide](filtering-and-quantization.md)) as the `filter` submodule, so `buffers()` and
 `state_dict()` cover index and filter (the filter's buffers under `filter.`). All three:
 
 - `register_index(item_embs, item_clause_attrs=None, clause_is_reverse=None)` — registers the
   index and, when attributes are given, the attached filter.
-- `prepare_queries(query_clause_attrs)` — the filter's query encoding for one batch (bloom
-  query signatures, or the attrs as int64). Do it once per batch, outside anything you time.
+- `prepare_queries(query_clause_attrs)` — the filter's query encoding for one batch (the attrs
+  as int64). Do it once per batch, outside anything you time.
 - `forward(query, prepared=None) -> (ids [B, k] int64, scores [B, k])`; without `prepared` the
   filter is skipped (V2 requires it: the filter is its candidate source).
 - `k` is settable after `register_index`; `capturable` is `True` (a class attribute).
@@ -148,50 +151,43 @@ inputs, fp32 accumulation). Ranking is what the layers promise; cast at the boun
 
 ## SilverTorch
 
-> **SilverTorch in the release.** The released package runs `SilverTorch` on Meta's official
-> SilverTorch code, adapted by us (improvements listed in its CHANGES file: no host syncs,
-> CUDA-graph capture, `m_bits` honoured, an exact recheck of bloom survivors), installed with the
-> `official` extra. This source tree still carries our Triton implementation of SilverTorch
-> (`backend="triton"`, today's default) and its `backend="torch"` reference; neither is part of
-> the release, and both will be removed. `backend="official"` (Meta's code as published) stays as
-> the reference the adapted code is checked against.
+> `SilverTorch` runs on Meta's official SilverTorch code, adapted by us (improvements listed in
+> its CHANGES file: no host syncs, CUDA-graph capture, `m_bits` honoured, an exact recheck of
+> bloom survivors), installed with the `official` extra. `backend="official"` (Meta's code as
+> published) is the reference the adapted code is checked against.
 
 ```python
 SilverTorch(k, n_lists, n_probe, filter_mode="none", m_bits=None, k_hash=None,
-            n_iter=10, seed=0, kmeans_init="random", backend="triton", official=None,
-            bloom_path="partial")
+            n_iter=10, seed=0, kmeans_init="random", backend="official-fork", official=None)
 ```
 
 - `register_index(item_embs, item_clause_attrs=None, clause_is_reverse=None)`
-- `prepare_queries(query_clause_attrs) -> PreparedFilter` — the batch's filter, prepared
-  outside `forward`: the bloom query bit positions (triton / torch), Meta's parsed plans
-  (official bloom), or the int64 attrs (exact). All host work lives here.
-- `forward(query, prepared=None, candidate_ids=None)` — `prepared` from `prepare_queries`, `None`
+- `prepare_queries(query_clause_attrs) -> PreparedFilter`: the batch's filter, prepared
+  outside `forward`: Meta's parsed plans (bloom) or the attrs (exact). All host work lives here.
+- `forward(query, prepared=None, candidate_ids=None)`: `prepared` from `prepare_queries`, `None`
   for plain ANN. `candidate_ids: [B, P]` (original ids, `-1` = padding) switches to a pure
   re-rank of those ids with no filter; pads are never scored or returned, a row with fewer than
   `min(k, P)` real candidates ends in `-1` / `-inf`, and passing `prepared` alongside raises.
 
 Parameters:
 
-- `n_lists` — number of IVF clusters (k-means runs `n_iter` iterations at register time;
-  `kmeans_init="kmeans++"` seeds it by D² sampling instead of random rows — opt-in, the
-  default is `"random"`).
-- `n_probe` — clusters scanned per query (≤ `n_lists`). Higher = more recall, more work.
+- `n_lists`: number of IVF clusters (k-means runs `n_iter` iterations at register time;
+  `kmeans_init="kmeans++"` seeds it by D² sampling instead of random rows, opt-in).
+- `n_probe`: clusters scanned per query (≤ `n_lists`). Higher = more recall, more work.
   `set_query_params(n_probe=...)` changes it after `register_index`, with the same validation.
-- `filter_mode` — `"none"`, `"bloom"`, or `"exact"`. `"bloom"` requires `m_bits` (power of 2,
-  multiple of 64) and `k_hash`. The filter is fused into the probe+score kernel — see the
+- `filter_mode`: `"none"`, `"bloom"`, or `"exact"`. `"bloom"` is Meta's bloom index and needs
+  `k_hash` (the search `k`, ≤ 10) and, on `official-fork`, `m_bits` (power of 2, multiple of 64;
+  the width per doc); `"exact"` is the clause test over the probed items. See the
   [filtering guide](filtering-and-quantization.md).
+- `backend` / `official`: see [Backend](#backend).
 
-Constraint: the `n_probe` largest clusters must hold at least `k` items together (the
-scorer's static probe width; raised at `register_index` and by `set_query_params`
-otherwise). `k` is a plain attribute, settable at any time.
+Constraint: the `n_probe` largest clusters must hold at least `k` items together (the scorer's
+static probe width; raised at `register_index` and by `set_query_params` otherwise). `k` is a
+plain attribute, settable at any time.
 
 After `register_index`, `build_timings` holds the seconds of the four build phases
 (`kmeans_s`, `assemble_s`, `quantize_s`, `filter_s`; `{}` before it and on a prebuilt module).
-`capturable` is `True` on `triton` / `torch` / `official-fork` and `False` on `official`
-(eager-only). `bloom_path="full"` (bloom over every item, not only the probed clusters) applies
-to `filter_mode="bloom"` on `triton` / `torch`; the official backends take
-`OfficialConfig(bloom_path=...)`.
+`capturable` is `True` on `official-fork` and `False` on `official` (eager-only).
 
 ### `SilverTorchBuilder(**kwargs)`
 
@@ -201,7 +197,7 @@ to `filter_mode="bloom"` on `triton` / `torch`; the official backends take
 ann = (SilverTorchBuilder(k=100, n_lists=1024, n_probe=24, filter_mode="bloom", m_bits=1024, k_hash=5)
        .set_item_embeddings(item_embs)
        .set_item_attributes(item_attrs, clause_is_reverse=None)
-       .set_backend("official", official=OfficialConfig(score_path="int32"))
+              .set_backend("official-fork", official=OfficialConfig(score_path="int32"))
        .set_device("cuda")
        .build())                                   # == construct + register_index + .to(device)
 

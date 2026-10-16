@@ -42,4 +42,4 @@ except ImportError as _e:
             "Please install silvertorch: pip install silvertorch"
         ) from _e
 
-importlib.import_module("silvertorch_fork.ops._fake")  # fork (C4): shape functions for torch.compile
+importlib.import_module("silvertorch_fork.ops._fake")  # shape functions, so torch.compile traces the ops
