@@ -11,7 +11,10 @@ Every number is read from those records:
   interleaved in one process with LiNR V1 / V2 (exact clause filter) and, at k 100, LiNR V3 at the smallest pool reaching
   0.90 / 0.95. LiNR has no bloom arm. Recall is exact filtered top-k recall (oracle); bloom false positives are counted
   untimed elsewhere.
-- Seed 0 everywhere; the timed bloom legs also at seeds 1-2, folded into `variance` (median and range over seeds per cell).
+- SYNTH-MID (`synth-mid-*`, seed 0, after the freeze at the same tag): its timed leg joins the head-to-head (20 / 30 / 50 %
+  synthetic pass rates on LAION 10M / 30M), its curve leg the probe curves, and its probe sweep is its own table.
+- Seed 0 everywhere; the timed bloom legs also at seeds 1-2, folded into `variance` (median and range over seeds per cell)
+  and pooled per dataset into `pooled_variance`, the error bar on every SilverTorch number (user ruling 2026-10-15).
 - LiNR's claims read the final-pass suites and the exact LiNR legs, SilverTorch's the curves and the bloom width leg.
 """
 
@@ -113,7 +116,7 @@ def load():
 
 
 def timed_bloom(df):
-    return df[df.leg.str.contains("timed-bloom") & df.perf_mode.notna()]
+    return df[df.leg.str.contains("timed-bloom|synth-mid-timed") & df.perf_mode.notna()]
 
 
 def head_to_head(tb, mode="graph"):
@@ -296,6 +299,54 @@ def variance(h, tn):
         .reset_index()
     )
     return a, b
+
+
+def pooled_variance(var_pt):
+    """SilverTorch's seed spread per dataset, averaged over its points with two or more seeds: time as a proportion of the
+    median ((max - min) / median), recall as an absolute range. The row `*` averages the datasets, for those without seeds."""
+    x = var_pt[var_pt.seeds >= 2].assign(
+        t_rel=lambda d: (d.st_ms_max - d.st_ms_min) / d.st_ms_med,
+        r_abs=lambda d: d.recall_max - d.recall_min,
+    )
+    p = x.groupby("dataset").agg(
+        points=("t_rel", "size"),
+        seeds=("seeds", "max"),
+        t_rel=("t_rel", "mean"),
+        r_abs=("r_abs", "mean"),
+    )
+    p.loc["*"] = [
+        int(p.points.sum()),
+        int(p.seeds.max()),
+        p.t_rel.mean(),
+        p.r_abs.mean(),
+    ]
+    return p.reset_index()
+
+
+def probesweep(df):
+    """SYNTH-MID stage 3: SilverTorch's whole n_probe range on LAION-synth 30M per filter (bs 16, k 100, graph), with the
+    LiNR V1 timed once per filter in the same run as the anchor. Unstable cells stay, flagged."""
+    x = df[df.leg.str.contains("synth-mid-probesweep") & (df.perf_mode == "graph")]
+    v1 = x[x.algo == "linr_v1_filter_mask"].set_index("sweep").perf_median_ms
+    st = x[x.algo == "silvertorch"]
+    return (
+        st.assign(st_ms=st.perf_median_ms, v1_ms=st.sweep.map(v1))[
+            [
+                "dataset",
+                "sweep",
+                "pass_rate",
+                "perf_bs",
+                "n_lists",
+                "n_probe",
+                "recall",
+                "st_ms",
+                "v1_ms",
+                "unstable",
+            ]
+        ]
+        .sort_values(["pass_rate", "n_lists", "n_probe"])
+        .reset_index(drop=True)
+    )
 
 
 def clause_vs_bloom(df):
@@ -644,6 +695,8 @@ def main():
         "h2h_eager": head_to_head(tb, "eager"),
         "variance_points": var_pt,
         "variance_tuned": var_tn,
+        "pooled_variance": pooled_variance(var_pt),
+        "probesweep": probesweep(df),
         "clause_vs_bloom": clause_vs_bloom(df),
         "c1_crossover": c1t,
         "c1_curves": c1c,

@@ -204,6 +204,7 @@ D["counts"] = dict(
     quarter_wins=int(
         ((reached.probe_frac <= 0.25) & (reached.winner_matched == "SilverTorch")).sum()
     ),
+    quarter_med=num(reached[reached.probe_frac <= 0.25].st_over_matched.median(), 2),
     beyond=int((reached.probe_frac > 0.25).sum()),
     beyond_wins=int(
         ((reached.probe_frac > 0.25) & (reached.winner_matched == "SilverTorch")).sum()
@@ -526,7 +527,7 @@ D["knobs"] = sorted(knobs, key=lambda r: (r["syn"], r["n"], r["key"], r["pass_ra
 rp = pd.read_parquet(OUT + "results.parquet")
 exact = (
     rp[
-        rp.leg.str.contains("timed-bloom")
+        rp.leg.str.contains("timed-bloom|synth-mid-timed")
         & (rp.seed == 0)
         & rp.algo.isin(["linr_v1_filter_mask", "linr_v2"])
         & (rp.perf_k == 100)
@@ -815,29 +816,6 @@ D["vflip"] = [
     f"{lab.get(r.dataset, r.dataset)} {r.sweep}, bs {int(r.perf_bs)}, k {int(r.perf_k)}, {r.target:.2f}: {r.fixed_min:.2f}–{r.fixed_max:.2f} at the seed-0 pick, {r.repick_min:.2f}–{r.repick_max:.2f} re-picked"
     for r in rp.itertuples()
 ]
-# machine effect: LiNR V1's time at seeds 1-2 over seed 0, same cell; V1 does not depend on the clustering
-hv = h[~h.dataset.str.contains("synth")].drop_duplicates(
-    ["pod", "seed"] + ["dataset", "sweep", "perf_bs", "perf_k"]
-)
-base = hv[hv.seed == 0].set_index(["pod", "dataset", "sweep", "perf_bs", "perf_k"]).V1
-mach = []
-for (pod, run, seed), g in hv[hv.seed > 0].groupby(["pod", "run_pod", "seed"]):
-    r = g.set_index(["pod", "dataset", "sweep", "perf_bs", "perf_k"]).V1 / base
-    r = r.dropna()
-    if len(r):
-        cells = ", ".join(sorted({lab[d] for d in g.dataset}, key=lambda x: x))
-        mach.append(
-            dict(
-                cells=cells,
-                other=bool(run != pod),
-                seed=int(seed),
-                n=int(len(r)),
-                med=num(r.median(), 3),
-                lo=num(r.min(), 3),
-                hi=num(r.max(), 3),
-            )
-        )
-D["machine"] = mach
 vs = D["vsum"]
 D["vtext"] = dict(
     t=rng(pd.Series([v["t_med"] for v in vs]), 1),
@@ -845,8 +823,70 @@ D["vtext"] = dict(
     fx=rng(pd.Series([v["fx_med"] for v in vs if v["fx_med"] is not None]), 1),
     cells=sum(v["cells"] for v in vs),
     flips=sum(v["flips"] for v in vs),
-    mach=f"{100 * max(max(1 - m['lo'], m['hi'] - 1) for m in mach):.1f}",
-    other=sum(m["other"] for m in mach),
+)
+# pooled seed spread: the error bar on every SilverTorch number (time as a proportion, recall absolute; `*` for datasets
+# without seeds)
+pv = pd.read_csv(OUT + "pooled_variance.csv")
+D["pv"] = {
+    ("*" if r.dataset == "*" else lab.get(r.dataset, r.dataset)): [
+        num(r.t_rel, 4),
+        num(r.r_abs, 4),
+    ]
+    for r in pv.itertuples()
+}
+vflips = {v["ds"]: v for v in vs}
+D["pvtab"] = [
+    dict(
+        ds=lab.get(r.dataset, r.dataset),
+        seeds=int(r.seeds),
+        points=int(r.points),
+        t=num(100 * r.t_rel, 1),
+        r=num(r.r_abs, 3),
+        cells=vflips.get(lab.get(r.dataset, r.dataset), {}).get("cells", 0),
+        flips=vflips.get(lab.get(r.dataset, r.dataset), {}).get("flips", 0),
+    )
+    for r in pv[pv.dataset != "*"].itertuples()
+]
+D["pvtext"] = dict(
+    t=rng(pv[pv.dataset != "*"].t_rel * 100, 1),
+    r=f"{pv[pv.dataset != '*'].r_abs.max():.3f}",
+    all_t=f"{100 * pv[pv.dataset == '*'].t_rel.iloc[0]:.1f}",
+)
+# probe sweep on LAION-synth 30M: time against recall per filter, with the tuned picks (bs 16, k 100) and V1's time
+ps = pd.read_csv(OUT + "probesweep.csv")
+pk = s0[
+    (s0.dataset == "laion30m-synth")
+    & (s0.perf_bs == 16)
+    & (s0.perf_k == 100)
+    & s0.st_ms.notna()
+]
+D["psweep"] = dict(
+    ds=lab["laion30m-synth"],
+    filters=[
+        dict(
+            label=flt("laion30m-synth", sw),
+            pass_rate=num(g.pass_rate.iloc[0], 4),
+            v1=num(g.v1_ms.iloc[0], 3),
+            pts={
+                int(nl): [
+                    [int(r.n_probe), num(r.recall), num(r.st_ms, 4), bool(r.unstable)]
+                    for r in c.sort_values("n_probe").itertuples()
+                ]
+                for nl, c in g.groupby("n_lists")
+            },
+            picks=[
+                [
+                    r.target,
+                    int(r.n_lists),
+                    int(r.n_probe),
+                    num(r.recall),
+                    num(r.st_ms, 4),
+                ]
+                for r in pk[pk.sweep == sw].itertuples()
+            ],
+        )
+        for sw, g in sorted(ps.groupby("sweep"), key=lambda x: x[1].pass_rate.iloc[0])
+    ],
 )
 # bloom against the exact filter, one row per filter, pooled over lists and batch sizes
 D["cbsum"] = [
