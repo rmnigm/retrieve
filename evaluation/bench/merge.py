@@ -26,9 +26,7 @@ META_ENV = ("host", "started", "code_version", "commit")  # lifted into named co
 
 def load(tree: Path) -> list[dict[str, Any]]:
     """Every record of ``tree`` with ``_subtree``, ``_file``, ``_line``, ``_cell`` and the
-    ``_samples`` list (one per-call vector per perf entry that ran, or ``None``). The retired
-    ``bloom_fp_rate`` field is dropped on read, and so is every bloom record of an algo other than
-    SilverTorch (LiNR's and the postfilter's)."""
+    ``_samples`` list (one per-call vector per perf entry that ran, or ``None``)."""
     files = records.record_files(tree)
     if not files:
         logger.info("{}: no <suite>/*.jsonl record files (an untimed or config subtree)", tree)
@@ -41,11 +39,10 @@ def load(tree: Path) -> list[dict[str, Any]]:
             rec["_line"] = i
             rec["_cell"] = hashlib.sha1(records.record_key(rec).encode()).hexdigest()[:16]
             rec["_samples"] = [None] * len(rec.get("perf") or [])
-            rec.pop("bloom_fp_rate", None)
         samples = records.samples_path(path)
         if samples.exists():
             _pair_samples(samples, records.read_records(samples), recs)
-        out += [r for r in recs if not (r["filter_kind"] == "bloom" and r["algo"] != "silvertorch")]
+        out += recs
     return out
 
 
@@ -110,7 +107,7 @@ def tags_at(commit: str | None) -> str | None:
 def _flat_env(env: dict[str, Any]) -> dict[str, Any]:
     out = {}
     for k, v in env.items():
-        if k in META_ENV or k in records.ENV_COLUMNS:
+        if k in META_ENV or k in records.ENV_COLUMNS or v is None:
             continue
         if isinstance(v, dict):
             out.update({f"env_{k}_{kk}": vv for kk, vv in v.items()})

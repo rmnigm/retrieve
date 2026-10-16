@@ -122,16 +122,26 @@ def append_record(path: Path, rec: dict[str, Any]) -> None:
         os.fsync(f.fileno())
 
 
+def retired(rec: dict[str, Any]) -> bool:
+    """A record (or sample line) of a bloom cell of an algo other than SilverTorch: LiNR's and
+    the postfilter's bloom cells left the study and every reader skips them. Also drops the
+    retired ``bloom_fp_rate`` field in place."""
+    rec.pop("bloom_fp_rate", None)
+    return rec.get("filter_kind") == "bloom" and rec.get("algo") not in (None, "silvertorch")
+
+
 def read_records(path: Path) -> list[dict[str, Any]]:
-    """Every record in ``path``; a torn last line (the cell in flight at a crash) is dropped, a
-    malformed line anywhere else raises."""
+    """Every record in ``path`` but the :func:`retired` ones; a torn last line (the cell in
+    flight at a crash) is dropped, a malformed line anywhere else raises."""
     out: list[dict[str, Any]] = []
     if not path.exists():
         return out
     lines = [ln for ln in path.read_text().splitlines() if ln.strip()]
     for i, line in enumerate(lines):
         try:
-            out.append(json.loads(line))
+            rec = json.loads(line)
+            if not retired(rec):
+                out.append(rec)
         except json.JSONDecodeError as exc:
             if i == len(lines) - 1:
                 logger.warning("{}: torn trailing line ignored ({})", path, exc)

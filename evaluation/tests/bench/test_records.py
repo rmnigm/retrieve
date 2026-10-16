@@ -8,7 +8,7 @@ from pathlib import Path
 
 import torch
 
-from bench import records, report
+from bench import records
 from bench.config import load_matrix
 
 CONFIG = Path(__file__).resolve().parents[2] / "config"
@@ -96,6 +96,23 @@ def test_aggregate_one_row_per_perf_entry_last_record_per_key(tmp_path):
     assert r1["perf_mode"] is None and r1["heldout_recall@100"] is None
 
 
+def test_retired_cells_and_fields_never_come_back_from_a_file(tmp_path):
+    """LiNR / postfilter bloom records and the ``bloom_fp_rate`` field left the study: every
+    reader drops them (records written before that stay on the Hub as they are)."""
+    p = tmp_path / "filter" / "goodreads-d128.jsonl"
+    keep = {**KEY, "status": "ok", "env": {"code_version": "c"}, "bloom_fp_rate": 0.1}
+    records.append_record(p, keep)
+    records.append_record(p, {**keep, "filter_kind": "bloom", "algo": "linr_v2"})
+    records.append_record(p, {**keep, "filter_kind": "bloom", "algo": "postfilter"})
+    records.append_record(p, {**keep, "filter_kind": "bloom"})  # silvertorch: stays
+    recs = records.read_records(p)
+    assert [(r["algo"], r["filter_kind"]) for r in recs] == [
+        ("silvertorch", "clause"), ("silvertorch", "bloom")
+    ]  # fmt: skip
+    assert all("bloom_fp_rate" not in r for r in recs)
+    assert len(records.read_table(records.aggregate(tmp_path))) == 2
+
+
 def test_a_pre_h2_text_record_keeps_the_key_a_run_computes_today():
     (job,) = load_matrix(
         CONFIG / "arxiv.yaml", CONFIG / "suites.yaml", "filter", dims=[128],
@@ -144,9 +161,8 @@ def test_a_pre_h7_empty_heldout_side_reads_as_null(tmp_path):
 
 
 def test_schema_4_columns_and_the_windows_agree_with_the_nested_record(tmp_path):
-    """The schema-4 body fields reach results.parquet, and the windows the report's bootstrap
-    resamples are the same in the table as in the record ``report._attach`` joins.
-    A schema-3 record reads every new column as null."""
+    """The schema-4 body fields reach results.parquet with the per-window medians as in the
+    nested entry; a schema-3 record reads every new column as null."""
     p = tmp_path / "filter" / "goodreads-d128.jsonl"
     entry = {"k": 100, "bs": 16, "mode": "graph", "median_ms": 1.0, "ids_sha256": "ab" * 32,
              "rounds": 3, "window_medians_ms": [0.9, 1.0, 1.1]}  # fmt: skip
@@ -170,6 +186,4 @@ def test_schema_4_columns_and_the_windows_agree_with_the_nested_record(tmp_path)
     for c in ("seed_scope", "quality_source_seed", "per_query", "interleave_group",
               "interleave_position", "env_frac_windows_below_max"):  # fmt: skip
         assert three[c] is None
-    report._attach(rows, records.latest(tmp_path))
-    for r in rows:
-        assert r["perf_window_medians_ms"] == r["_entry"]["window_medians_ms"]
+    assert all(r["perf_window_medians_ms"] == entry["window_medians_ms"] for r in rows)

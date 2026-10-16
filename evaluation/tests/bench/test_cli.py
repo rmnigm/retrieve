@@ -66,7 +66,7 @@ def test_cli_run_campaign_and_report(tiny_configs, tmp_path):
     assert r.exit_code == 0, r.output
     assert (out / "report" / "results.parquet").exists()
     assert "NOT CITABLE" in r.output  # three partial records veto --gate
-    assert "NOT CITABLE" in (out / "report" / "tables" / "tab-memory.tex").read_text()
+    assert "NOT CITABLE" in (out / "report" / "report.md").read_text()
 
 
 def test_campaign_records_a_timed_out_child(tiny_configs, tmp_path, monkeypatch):

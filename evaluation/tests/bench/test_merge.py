@@ -29,7 +29,7 @@ def _rec(status="ok", unstable=False, perf=True, **over):
     rec = {
         "schema_version": records.SCHEMA_VERSION, "status": status, **KEY, "path": "triton",
         "unstable": unstable, "quality": {"oracle": {"recall@100": 0.9}}, "env": env,
-        "bloom_fp_rate": 0.01,  # a retired field: dropped on read
+        "bloom_fp_rate": 0.01,  # a retired field: dropped on read (records.retired)
         "perf": [_entry(100, 1, 1.0), _entry(100, 16, 2.0),
                  {"k": 100, "bs": 1, "mode": "graph", "reason": "cuda_unavailable"}]
         if perf else None,
@@ -90,6 +90,7 @@ def test_accept_rule_tables_and_manifest(trees, tmp_path):
     recs = records.read_table(out / "records.parquet")
     assert len(recs) == 9 and list(recs[0])[:3] == ["subtree", "cell", "accepted"]
     assert "bloom_fp_rate" not in recs[0] and not any(r["filter_kind"] == "bloom" for r in recs)
+    assert "env_official_build_so_sha256" in recs[0] and "env_official_build" not in recs[0]
     by = {(r["subtree"], r["seed"], r["status"], r["line"]): r for r in recs}
     acc = {k: v["accepted"] for k, v in by.items()}
     assert acc == {
