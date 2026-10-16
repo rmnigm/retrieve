@@ -8,40 +8,22 @@ dependencies = [
     "retrieve-evaluation",
 ]
 
-[project.optional-dependencies]
-# Re-exports retrieve's extra so `uv sync --extra official` works from the
-# workspace root (the root is virtual; --extra resolves against it).
-official = [
-    "torchretrieve[official]",
-]
 
 [tool.uv]
 package = false
-# silvertorch's (and the fork's) build backend imports torch (setup.py picks CUDAExtension when
-# CUDA_HOME is set), so it must build against the torch already in this env
-# rather than an isolated one that would pull a different CUDA build.
-no-build-isolation-package = ["silvertorch", "silvertorch-fork"]
-
-# Static metadata for silvertorch, so `uv lock` never has to run its setup.py
-# (which imports torch and probes for nvcc). Matches setup.py at the pinned sha:
-# version="1.0.0", install_requires=["torch>=2.0"].
-[[tool.uv.dependency-metadata]]
-name = "silvertorch"
-version = "1.0.0"
-requires-dist = ["torch>=2.0"]
+# silvertorch's build backend imports torch (setup.py picks CUDAExtension when CUDA_HOME is
+# set), so it must build against the torch already in this env rather than an isolated one that
+# would pull a different CUDA build.
+no-build-isolation-package = ["silvertorch"]
 
 [tool.uv.workspace]
-members = ["retrieve", "evaluation", "official-fork"]
+members = ["retrieve", "evaluation", "silvertorch"]
 
 [tool.uv.sources]
 torchretrieve = { workspace = true }
 retrieve-evaluation = { workspace = true }
-# Our fork of it (official-fork/CHANGES.md): Apache-2.0, ops under torch.ops.stfork.*, loads beside it.
-silvertorch-fork = { workspace = true }
-# Meta's official SilverTorch, pinned to the full sha of `main` @ 21aa35e
-# (2026-07-23). Not on PyPI; no tags upstream. Bumping this is a deliberate PR
-# that reruns the official parity gate (research/decisions.md, Library).
-silvertorch = { git = "https://github.com/meta-recsys/silvertorch", rev = "21aa35e28b6dd9a91e9ee35efb0857715e86bda7" }
+# Meta's SilverTorch code, adapted (silvertorch/CHANGES.md): Apache-2.0, ops under torch.ops.st.*.
+silvertorch = { workspace = true }
 
 [dependency-groups]
 # Build tools for the no-build-isolation silvertorch extension, and the one pinned ruff;

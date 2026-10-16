@@ -30,9 +30,12 @@ decisions.
     survivors as an option that is off in the study, kernel tuning; each
     change with its gate). In prose it is
     "Meta's official SilverTorch code, adapted", never "a fork". In code it
-    is still the `official-fork/` workspace member, package
-    `silvertorch_fork`, `backend="official-fork"`, until roadmap
-    [RENAME](roadmap.md#5-rename-the-adapted-backend-becomes-silvertorchs-default).
+    is the `silvertorch/` workspace member under Meta's own names: package
+    `silvertorch`, ops `torch.ops.st.*`, `SilverTorch(backend="cuda")`, the
+    only backend (RENAME, user 2026-10-16: "our fork is cuda, pure torch if
+    it exists becomes torch, all others are not present"; "keep the original
+    [package] names"). Records keep the names they were written with
+    (`official-fork`, `official`); `bench merge` maps them.
   - **LiNR** is V1-V3, our implementation from the paper's text (LiNR has
     no public code). Its kernels stay, whatever they are written in.
 
@@ -43,7 +46,7 @@ decisions.
   `backend="torch"` (our Algorithm 1 kernels and their eager reference) are
   neither a result nor a shipped backend. The tag `triton-silvertorch-final`
   holds the code; its records stay on the Hub, never deleted, never cited.
-  `backend="official-fork"` is the default `SilverTorch` backend.
+  `backend="cuda"` (the adapted code) is the only `SilverTorch` backend.
 - **The final run is final** (user, 2026-10-13): the FULL-RERUN at tag
   `final-freeze` is the paper's one result set. No code change triggers a
   rerun or a new tag of its legs; a leg is rerun only when it crashed or
@@ -61,12 +64,15 @@ decisions.
   facts), the existing number is final and citable with its source named.
   The lists are the docs pass's report (`.chains/export-prep/`, 2026-10-16)
   and the marks on the pages themselves.
-- **Meta's code as published (`backend="official"`, pinned `21aa35e`,
-  built `-O3`) is the parity reference, not an arm.** The adapted code is
-  gated bit-exact against it, and the paper's "Meta as published vs
-  adapted" table ([paper](paper/meta-published-vs-adapted.md)) reports
-  what the adaptation changed. Meta's code as published is not a separate
-  arm of the study.
+- **Meta's code as published (pinned `21aa35e`, built `-O3`) is the parity
+  reference, not an arm, and is no longer in the workspace.** The adapted
+  code was gated bit-exact against it (`backend="official"` while it was
+  installed), and the paper's "Meta as published vs adapted" table
+  ([paper](paper/meta-published-vs-adapted.md)) reports what the adaptation
+  changed. At RENAME (user, 2026-10-16) the published package, its `official`
+  extra, the adapted-vs-published tests and the `official` backend left the
+  library; the last parity run stands behind the tag
+  `meta-published-parity-final`.
 - **The adapted arm's score path is Meta's default, fp16** (user,
   2026-10-13; the earlier "int32 score path" record, the controller's, is
   withdrawn): every study number of the adapted code (curves, timed legs,
@@ -344,17 +350,15 @@ now on; the [roadmap](roadmap.md) holds the steps.
 ## Library
 
 - **SilverTorch ships as Meta's official code, adapted** (Goal above):
-  the `official-fork/` uv workspace member (Apache-2.0, Meta's `LICENSE`
+  the `silvertorch/` uv workspace member (Apache-2.0, Meta's `LICENSE`
   and file headers kept, each changed file marked, every change a row of
-  its `CHANGES.md` with its gate in [validation](validation.md)), reached
-  through `SilverTorch(backend="official-fork")` and the `official` extra.
-  Our phase 1 (k-means, int8 codes, probe selection) stays ours, as for
-  `backend="official"`.
-- **Meta's `meta-recsys/silvertorch` as published is the parity
-  reference**, `backend="official"`, installed by the `official` extra and
-  pinned to one commit (`21aa35e`, see [pyproject.toml](../pyproject.toml)).
-  Bumping the pin is a deliberate change that reruns the official parity
-  gate.
+  its `CHANGES.md` with its gate in [validation](validation.md)), a
+  dependency of `torchretrieve` reached through `SilverTorch(backend="cuda")`.
+  Our phase 1 (k-means, int8 codes, probe selection) stays ours.
+- **Meta's `meta-recsys/silvertorch` as published was the parity
+  reference** at one commit (`21aa35e`), installed beside the adapted code
+  by the `official` extra until RENAME (Goal above); the adapted member is
+  vendored from that commit and synced to `22c2007`.
 - **Our kernel effort goes to LiNR and to the adapted SilverTorch code.**
   The hand-written CUDA C++ and CuTe DSL SilverTorch backends were deleted
   once the official backend's parity gate was green (tag
@@ -425,7 +429,7 @@ now on; the [roadmap](roadmap.md) holds the steps.
 - **`triton` is LiNR's campaign backend**, because it is the fastest arm
   on every LiNR algorithm measured (eager median torch/triton 4.16× on V1,
   7.27× on V2, 10.19× on V3). `silvertorch` runs the adapted backend
-  (`official-fork`), with `official` (Meta as published) beside it only
+  (`official-fork` in the records, `cuda` since RENAME), with `official` (Meta as published) beside it only
   where a cell feeds the parity gate or T3 (Goal above). The torch arms
   return only as the baselines of Campaign v2 above (V1/V2 torch on three
   synth pass rates), not as a backend matrix. The final pass's

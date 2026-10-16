@@ -18,14 +18,9 @@ resolution-markers = [
 members = [
     "retrieve-evaluation",
     "retrieve-workspace",
-    "silvertorch-fork",
+    "silvertorch",
     "torchretrieve",
 ]
-
-[[manifest.dependency-metadata]]
-name = "silvertorch"
-version = "1.0.0"
-requires-dist = ["torch>=2.0"]
 
 [[package]]
 name = "annotated-doc"
@@ -2205,11 +2200,6 @@ dependencies = [
     { name = "torchretrieve" },
 ]
 
-[package.optional-dependencies]
-official = [
-    { name = "torchretrieve", extra = ["official"] },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "ninja" },
@@ -2222,9 +2212,7 @@ dev = [
 requires-dist = [
     { name = "retrieve-evaluation", editable = "evaluation" },
     { name = "torchretrieve", editable = "retrieve" },
-    { name = "torchretrieve", extras = ["official"], marker = "extra == 'official'", editable = "retrieve" },
 ]
-provides-extras = ["official"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2603,15 +2591,7 @@ wheels = [
 [[package]]
 name = "silvertorch"
 version = "1.0.0"
-source = { git = "https://github.com/meta-recsys/silvertorch?rev=21aa35e28b6dd9a91e9ee35efb0857715e86bda7#21aa35e28b6dd9a91e9ee35efb0857715e86bda7" }
-dependencies = [
-    { name = "torch" },
-]
-
-[[package]]
-name = "silvertorch-fork"
-version = "1.0.0"
-source = { editable = "official-fork" }
+source = { editable = "silvertorch" }
 dependencies = [
     { name = "torch" },
 ]
@@ -2818,14 +2798,9 @@ version = "0.2.0"
 source = { editable = "retrieve" }
 dependencies = [
     { name = "click" },
+    { name = "silvertorch" },
     { name = "torch" },
     { name = "triton" },
-]
-
-[package.optional-dependencies]
-official = [
-    { name = "silvertorch" },
-    { name = "silvertorch-fork" },
 ]
 
 [package.dev-dependencies]
@@ -2838,12 +2813,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
-    { name = "silvertorch", marker = "extra == 'official'", git = "https://github.com/meta-recsys/silvertorch?rev=21aa35e28b6dd9a91e9ee35efb0857715e86bda7" },
-    { name = "silvertorch-fork", marker = "extra == 'official'", editable = "official-fork" },
+    { name = "silvertorch", editable = "silvertorch" },
     { name = "torch", specifier = ">=2.10,<3" },
     { name = "triton", specifier = ">=3.6" },
 ]
-provides-extras = ["official"]
 
 [package.metadata.requires-dev]
 dev = [

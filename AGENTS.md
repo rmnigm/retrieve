@@ -22,16 +22,20 @@ against **LiNR** (LinkedIn, `articles/linr.md`) V1–V3, which we implement
 from the paper's text. That comparison is the paper and the released code.
 
 Naming that must stay straight in code, docs and prose:
-- **The adapted official code** lives in the `official-fork/` workspace
-  member (package `silvertorch_fork`, `backend="official-fork"`, the
-  default `SilverTorch` backend, changes in its `CHANGES.md`). Those code
-  names stay until the roadmap's RENAME step; in the paper and user docs it
-  is "Meta's official SilverTorch code, adapted (improvements listed in
-  CHANGES)", never "a fork".
-- **Meta's code as published** is `backend="official"`, pinned `21aa35e`:
-  the bit-exact parity reference and the "as published" column of
+- **The adapted official code** lives in the `silvertorch/` workspace
+  member under Meta's own names (package `silvertorch`, ops `torch.ops.st.*`,
+  `SilverTorch(backend="cuda")`, its only backend; changes in its
+  `CHANGES.md`; RENAME, user ruling 2026-10-16). In the paper and user docs
+  it is "Meta's official SilverTorch code, adapted (improvements listed in
+  CHANGES)", never "a fork". `backend="torch"` is reserved for a pure-torch
+  SilverTorch path; none exists.
+- **Meta's code as published** (pinned `21aa35e`, `backend="official"` while
+  it was in the workspace) is the "as published" column of
   [Meta as published vs adapted](research/paper/meta-published-vs-adapted.md),
-  not an arm of the study.
+  not an arm of the study. It left the library and the workspace at RENAME;
+  its last bit-exact parity run against the adapted code stands behind the
+  tag `meta-published-parity-final`. Records keep the names they were
+  written with (`official-fork`, `official`); `bench merge` maps them.
 - **Our Triton SilverTorch reimplementation** (`SilverTorch(backend="triton")`
   and its `backend="torch"` reference: SilverTorch Algorithm 1
   reimplemented, called QuantizedIVF in the thesis; the already-delivered
@@ -155,9 +159,11 @@ In `docs/`:
 5. **Deletion is gated.** Never delete a kernel that still has no
    validated replacement. The model: the two hand-written SilverTorch
    backends went only after the official backend's parity gate was green
-   (tag `cuda-cute-backends-final` holds them), and the Triton SilverTorch
+   (tag `cuda-cute-backends-final` holds them), the Triton SilverTorch
    backend with our LiNR bloom filter went after the adapted backend's
-   review ACCEPT and the final run (tag `triton-silvertorch-final`).
+   review ACCEPT and the final run (tag `triton-silvertorch-final`), and
+   Meta's code as published went at RENAME, after the adapted code's last
+   parity run against it (tag `meta-published-parity-final`).
 6. **Commits and branches.** Commit only when the user asks. One branch per
    roadmap step (`dev/<step>`) off `staging`. Session scripts go under
    `research/artifacts/<plan>/`, not in the packages; raw outputs (records,
@@ -215,7 +221,7 @@ In `docs/`:
 ## Commands
 
 ```bash
-uv sync --extra official --all-packages          # whole workspace + Meta's ops; --all-packages keeps pytest (it is in the members' dev groups)
+uv sync --all-packages                           # whole workspace incl. the silvertorch extension; --all-packages keeps pytest (it is in the members' dev groups)
 uv run --directory retrieve pytest tests/ -x -q  # library suite — GPU only, skips itself without CUDA
 cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest tests/ -q  # the harness suite (bench / training / eval_datasets): CPU-only by construction, three tests assert it, so hide the GPU
 uv run --directory evaluation bench run --dataset arxiv --dim 128 --suite filter --algo silvertorch

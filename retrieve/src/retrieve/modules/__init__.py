@@ -1,5 +1,5 @@
-"""The ``nn.Module``s a user instantiates: ``SilverTorch`` (Algorithm 1 on Meta's ops, adapted or as
-published), the LiNR paper variants ``LiNRV1``–``LiNRV3``, the primitives they compose (dense,
+"""The ``nn.Module``s a user instantiates: ``SilverTorch`` (Algorithm 1 on Meta's SilverTorch code,
+adapted), the LiNR paper variants ``LiNRV1``–``LiNRV3``, the primitives they compose (dense,
 sparse and 1-bit KNNs) and the standalone exact filter, plus the two builders. Every module follows
 ``construct → register_index → forward``; ``retrieve.modules.official`` re-exports Meta's own."""
 

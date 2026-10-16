@@ -1,9 +1,8 @@
 """Registered kernels, one namespace per backend: ``retrieve.ops.triton`` (the Triton kernels,
 ``torch.ops.retrieve.*``), ``retrieve.ops.reference`` (the same signatures in pure torch — the
-``"torch"`` backend and the parity oracle) and ``retrieve.ops.official`` (Meta's
-``torch.ops.st.*`` and our fork's ``torch.ops.stfork.*`` behind the B1 adapter). Each is
-imported on first attribute access, so ``import retrieve.ops`` registers nothing;
-``retrieve.ops.tune`` is the offline autotuner."""
+``"torch"`` backend and the parity oracle) and ``retrieve.ops.official`` (Meta's SilverTorch ops,
+adapted: ``torch.ops.st.*`` behind the adapter). Each is imported on first attribute access, so
+``import retrieve.ops`` registers nothing; ``retrieve.ops.tune`` is the offline autotuner."""
 
 from __future__ import annotations
 
@@ -19,11 +18,10 @@ def __getattr__(name: str):
 
 
 def available_backends() -> tuple[str, ...]:
-    """``("triton", "torch")``, plus ``"official"`` / ``"official-fork"`` when Meta's package /
-    our fork of it loads here."""
-    from retrieve.ops.official import OFFICIAL_BACKENDS, is_available
+    """``("triton", "torch")``, plus ``"cuda"`` when the ``silvertorch`` extension loads here."""
+    from retrieve.ops.official import is_available
 
-    return ("triton", "torch", *(b for b in OFFICIAL_BACKENDS if is_available(b)))
+    return ("triton", "torch", *(("cuda",) if is_available() else ()))
 
 
 __all__ = ["available_backends"]

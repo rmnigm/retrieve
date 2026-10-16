@@ -103,7 +103,6 @@ def _op_args() -> dict[str, tuple]:
     scores = torch.randn(b, n, generator=g, device="cuda")
     return {
         "clause_mask": (attrs, rev, q_attrs),
-        "clause_mask_packed": (attrs, rev, q_attrs),
         "clause_mask_scores": (scores, attrs, rev, q_attrs),
         "clause_compact": (attrs, rev, q_attrs),
         "fused_masked_knn_topk": (query, embs, pos, counts, k),
@@ -115,7 +114,7 @@ def _op_args() -> dict[str, tuple]:
 
 def test_every_op_has_a_same_signature_reference_twin():
     schemas = _retrieve_schemas()
-    assert len(schemas) >= 8, sorted(schemas)
+    assert len(schemas) >= 7, sorted(schemas)
     assert sorted(schemas) == sorted(_op_args()), "an op has no input builder here"
     for name, schema in schemas.items():
         twin = inspect.signature(getattr(reference, name))
@@ -126,7 +125,7 @@ def test_every_op_has_a_same_signature_reference_twin():
 
 def test_no_op_declares_a_mutable_argument():
     schemas = _retrieve_schemas()
-    assert len(schemas) >= 8
+    assert len(schemas) >= 7
     for name, schema in schemas.items():
         assert schema.is_mutable is False, name
         assert all(a.alias_info is None for a in schema.arguments), name

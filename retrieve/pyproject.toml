@@ -6,18 +6,11 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.1",
+    # Meta's SilverTorch code, adapted (torch.ops.st.*; the workspace member silvertorch/, not on
+    # PyPI): SilverTorch's phases 2+3. Building it needs nvcc + ninja + setuptools.
+    "silvertorch",
     "torch>=2.10,<3",
     "triton>=3.6",
-]
-
-[project.optional-dependencies]
-# Meta's official SilverTorch ops (torch.ops.st.*), the reference backend for
-# Algorithm 1 phases 2+3. Pinned to a git sha in the workspace root's
-# [tool.uv.sources]; not on PyPI. Building it needs nvcc + ninja + setuptools.
-# silvertorch-fork is our fork of it (torch.ops.stfork.*), the workspace member official-fork/.
-official = [
-    "silvertorch",
-    "silvertorch-fork",
 ]
 
 [project.scripts]
@@ -52,7 +45,7 @@ known-first-party = ["retrieve"]
 combine-as-imports = true
 
 [tool.ruff.lint.per-file-ignores]
-# Deliberately lazy: `import retrieve` registers no kernel and never loads Meta's optional
+# Deliberately lazy: `import retrieve` registers no kernel and never loads the silvertorch
 # extension; these four load it (or report it) only when asked.
 "src/retrieve/modules/official.py" = ["PLC0415"]
 "src/retrieve/ops/__init__.py" = ["PLC0415"]

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Historical (the FULL-RERUN's published arm): Meta's code as published left the workspace at RENAME, so the
+# `official` extra and the git pin this script reads are gone; it documents how the -O3 reference build was made.
 # Build Meta's official extension (silvertorch at the pyproject pin) with host + nvcc -O3 into the venv
 # UV_PROJECT_ENVIRONMENT names, kernels unmodified (OF-11: Meta's setup.py passes no -O, so its host code builds at
 # gcc -O0), and write the flags beside the .so for the records' env.official_build. A plain `uv sync` would reuse

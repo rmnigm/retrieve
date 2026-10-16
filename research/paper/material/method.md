@@ -74,12 +74,12 @@ Naming: "Meta's official SilverTorch code, adapted (CHANGES)" = code name
 
 | item | value | source | cite |
 |---|---|---|---|
-| published commit | `meta-recsys/silvertorch` `21aa35e28b6dd9a91e9ee35efb0857715e86bda7` (1.0.0), vendored unmodified (repo commit 94d8f69) | [CHANGES](../../../official-fork/CHANGES.md), [provenance §2](../provenance-and-disclosure.md#2-software) | citable |
+| published commit | `meta-recsys/silvertorch` `21aa35e28b6dd9a91e9ee35efb0857715e86bda7` (1.0.0), vendored unmodified (repo commit 94d8f69) | [CHANGES](../../../silvertorch/CHANGES.md), [provenance §2](../provenance-and-disclosure.md#2-software) | citable |
 | upstream sync | `22c2007ed5d28ec8304de081cc2393778708ad12`, one upstream commit (CCCL 3 guards in `bloom_indexer_cuda.cu`); on CUDA 12.8 (CCCL 2.7) the old path compiles, same behaviour; upstream `HEAD` still `22c2007` on 2026-10-11 | CHANGES "upstream sync"; [validation META-FORK](../../validation.md#meta-fork-backendofficial-fork) | citable |
 | reference arm | `backend="official"` stays at `21aa35e` | same | citable |
 | adapted head | fork tree `46ff49e`, merged at `1f6fed8` (review ACCEPT), tag `campaign-fork` = merge `a236295` | validation META-FORK; `git rev-list -n1 campaign-fork` | citable |
 | NUMBERS legs ran at | FORK_HEAD `cc595da` (fork tree at `32c0d61`), library `eb600da1`; validation: N1 (switches removed, defaults hard-coded) leaves the default path identical to `32c0d61`, "so the head records stand" | [hub-index](../../artifacts/hub-index.md) `numbers/*` rows; validation META-FORK "library tests" | citable |
-| adapted build | `official-fork/setup.py`: C++ `-O3`; nvcc `-O3 -Xcompiler -O3 --expt-extended-lambda --expt-relaxed-constexpr` (F5) | `official-fork/setup.py:60-80` | citable |
+| adapted build | `silvertorch/setup.py` (`official-fork/setup.py` then): C++ `-O3`; nvcc `-O3 -Xcompiler -O3 --expt-extended-lambda --expt-relaxed-constexpr` (F5) | `official-fork/setup.py:60-80` | citable |
 | published build as we run it | Meta's `setup.py` passes no `-O` to nvcc (host code at gcc `-O0`, OF-11); our reference build adds `NVCC_APPEND_FLAGS='-O3 -Xcompiler -O3'`, bit-identical outputs, 0.77-0.98× the as-shipped forward | `scripts/build_official_o3.sh`; [deviations OF-11](../reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper) | 0.77-0.98: NOT CITABLE (OFFICIAL-REWORK M3 measurement, no gate) |
 | arch | `TORCH_CUDA_ARCH_LIST` "8.0;9.0" (pod image and the build script) | `infra/runpod/Dockerfile`, `scripts/build_official_o3.sh` | citable |
 | builds not byte-reproducible | each pod's `_C.so` differs (four sha256 in the final pass's recipe; pod b's rebuild differs from pod 1's) | `research/artifacts/campaign-final/recipe.yaml` `official_so_sha256`; validation NUMBERS "Provenance" | citable |
@@ -103,7 +103,7 @@ Naming: "Meta's official SilverTorch code, adapted (CHANGES)" = code name
 | top-k | C7 two-level top-k (k > 1024); K fixes 2, 5, 6, 7, 8, 9, 12, 13 (our radix select for k ≤ 1024, deterministic ties in index order as `torch.topk`, block-max prefilter for wide rows) | X (ids up to ties, `torch.equal` scores) |
 | full path | K fix 17: the bloom evaluated over the probed columns for both bloom paths; `bloom_path="full"` refused on the fork (`retrieve/src/retrieve/modules/silvertorch.py:179-183`); "the full-N ablation is `backend="official"`" | X (`test_c8` full and partial `torch.equal` to upstream) |
 
-Source: [CHANGES](../../../official-fork/CHANGES.md) (one home for files and mechanisms); [meta-published-vs-adapted §2](../meta-published-vs-adapted.md#2-what-the-adaptation-changed). Citable (design facts; their gates below).
+Source: [CHANGES](../../../silvertorch/CHANGES.md) (one home for files and mechanisms); [meta-published-vs-adapted §2](../meta-published-vs-adapted.md#2-what-the-adaptation-changed). Citable (design facts; their gates below).
 
 ### Q6. The parity gate
 

@@ -11,9 +11,8 @@ from torch import Tensor, nn
 from retrieve.functional import compact_mask
 
 LinrBackend = Literal["torch", "triton"]
-OfficialBackend = Literal["official", "official-fork"]
-OFFICIAL_BACKENDS: tuple[str, ...] = get_args(OfficialBackend)
-SilverTorchBackend = OfficialBackend
+SilverTorchBackend = Literal["cuda"]
+SILVERTORCH_BACKENDS: tuple[str, ...] = get_args(SilverTorchBackend)
 
 
 def check_backend(backend: str, allowed: object) -> None:
@@ -42,22 +41,17 @@ def ops_for(backend: str) -> ModuleType:
 # where the constructor raises. Keyed by class name so the table is plain data with no import of
 # ``retrieve.modules``; the harness derives its ``PATHS`` from it (docs/system/architecture.md §
 # Backend dispatch).
-_NO_OFFICIAL: dict[str, str | None] = {"official": None, "official-fork": None}
+_NO_CUDA: dict[str, str | None] = {"cuda": None}
 DISPATCH: dict[str, dict[str, str | None]] = {
-    "SilverTorch": {
-        "triton": None,
-        "torch": None,
-        "official": "official",
-        "official-fork": "official-fork",
-    },
-    "LiNRV1": {"triton": "cublas", "torch": "cublas", **_NO_OFFICIAL},
-    "LiNRV2": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
-    "LiNRV3": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
-    "PostfilterKNN": {"triton": "cublas", "torch": "cublas", **_NO_OFFICIAL},
-    "PrefilterKNN": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
-    "OneBitKNN": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
-    "SimHashKNN": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
-    "ExactAttributeFilter": {"triton": "triton", "torch": "torch", **_NO_OFFICIAL},
+    "SilverTorch": {"triton": None, "torch": None, "cuda": "cuda"},
+    "LiNRV1": {"triton": "cublas", "torch": "cublas", **_NO_CUDA},
+    "LiNRV2": {"triton": "triton", "torch": "torch", **_NO_CUDA},
+    "LiNRV3": {"triton": "triton", "torch": "torch", **_NO_CUDA},
+    "PostfilterKNN": {"triton": "cublas", "torch": "cublas", **_NO_CUDA},
+    "PrefilterKNN": {"triton": "triton", "torch": "torch", **_NO_CUDA},
+    "OneBitKNN": {"triton": "triton", "torch": "torch", **_NO_CUDA},
+    "SimHashKNN": {"triton": "triton", "torch": "torch", **_NO_CUDA},
+    "ExactAttributeFilter": {"triton": "triton", "torch": "torch", **_NO_CUDA},
 }
 
 

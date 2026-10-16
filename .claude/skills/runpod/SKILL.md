@@ -14,7 +14,7 @@ and `herdr` for remote attach. Every `runpodctl` command prints JSON.
 - Image `ghcr.io/rmnigm/retrieve-pod:<tag>`, the tag pinned as `IMAGE` in `pod.sh`
   (`infra/runpod/Dockerfile`): Ubuntu 22.04 with only nvcc + the CUDA 12.8 headers
   (`CUDA_HOME=/usr/local/cuda-12.8`, matching the torch 2.10.0+cu128 wheel), uv, Python 3.11, the workspace venv at `/venvs/retrieve` built from `uv.lock`
-  with `--all-packages --all-groups --extra official` (Meta's silvertorch compiled
+  with `--all-packages --all-groups` (the `silvertorch` extension, Meta's code adapted, compiled
   for sm_80 + sm_90, on `PATH`), gh, Claude Code, herdr, runpodctl, sshd, and pinned
   `ruff` 0.15.6 (the pre-commit version), `pre-commit` 4.6.2 and `pyrefly` 1.3.1.
 - `/workspace` is the pod volume (or a network volume). Boot

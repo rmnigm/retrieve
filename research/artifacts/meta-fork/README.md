@@ -1,8 +1,8 @@
 # META-FORK — our fork of Meta's SilverTorch: gate instruments and records
 
-Chain `meta-fork` (plan C0-C13): the fork lives in [`official-fork/`](../../../official-fork/CHANGES.md) and runs as
-`SilverTorch(backend="official-fork")`. Current state of every change: [validation](../../validation.md) section
-*META-FORK*; how the fork's ops work: [kernels](../../../docs/system/kernels.md#official-fork--our-fork-of-metas-ops). Raw
+Chain `meta-fork` (plan C0-C13): the fork lives in [`silvertorch/`](../../../silvertorch/CHANGES.md) (`official-fork/` when these gates ran) and runs as
+`SilverTorch(backend="cuda")` (`official-fork` then). Current state of every change: [validation](../../validation.md) section
+*META-FORK*; how the fork's ops work: [kernels](../../../docs/system/kernels.md#cuda--the-adapted-forward). Raw
 outputs go to the Hub under `artifacts/meta-fork/<change>/` ([hub-index](../hub-index.md)). Reference GPU:
 A100-SXM4-80GB, pod b GPU 0; SM clocks cannot be locked, every script samples them.
 
@@ -36,7 +36,7 @@ GPU blocks through `gpu.sh`, each under 15 min. The scripts are run from this di
 A=/scratch/wt/meta-fork/research/artifacts/meta-fork; PY=/venvs/meta-fork/bin/python; T=/scratch/wt/meta-fork-build
 $A/build.sh <commit> /scratch/meta-fork/logs
 $A/gpu.sh 0 /scratch/meta-fork/logs/c0_coexist.log $PY $A/c0_coexist.py
-$A/gpu.sh 0 /scratch/meta-fork/logs/pytest_fork.log $PY -m pytest $T/official-fork/silvertorch_fork -q -p no:cacheprovider
+$A/gpu.sh 0 /scratch/meta-fork/logs/pytest_fork.log $PY -m pytest $T/silvertorch/silvertorch -q -p no:cacheprovider
 $A/gpu.sh 0 /scratch/meta-fork/logs/pytest_official.log $PY -m pytest $T/retrieve/tests/parity/test_official.py -q -p no:cacheprovider
 $A/gpu.sh 0 /scratch/meta-fork/logs/syncs_fork.log $PY $A/syncs.py official-fork /scratch/meta-fork/logs/syncs_fork.json
 (cd $T/evaluation && $A/gpu.sh 1 /scratch/meta-fork/logs/gate.log $PY $A/gate_fork.py arxiv 128 bloom c0_maincat 2048 24,256 1,16,64 /scratch/meta-fork/logs/gate.json --graph)

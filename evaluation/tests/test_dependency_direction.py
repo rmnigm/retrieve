@@ -28,7 +28,7 @@ LIBRARY_NAMES = {
         "SilverTorch", "LiNRV1", "LiNRV2", "LiNRV3",
         "ExactAttributeFilter", "OfficialConfig", "OneBitKNN",
     },
-    "retrieve.interfaces": {"DISPATCH", "FilterModule", "OFFICIAL_BACKENDS"},
+    "retrieve.interfaces": {"DISPATCH", "FilterModule", "SILVERTORCH_BACKENDS"},
 }  # fmt: skip
 
 

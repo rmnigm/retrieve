@@ -16,10 +16,10 @@ shapes, autotune keys, numerics) see [kernels.md](kernels.md).
 
 **What ships** ([decisions](../../research/decisions.md#goal-and-scheduling)): the
 release carries LiNR V1-V3 with their filters and kernels, and `SilverTorch` on Meta's official
-SilverTorch code, adapted (`backend="official-fork"`, the default; the `official-fork/` workspace
-member, to be renamed). `backend="official"` (Meta's code as published) stays as the
-parity reference. Our earlier Triton reimplementation of SilverTorch and its eager reference are
-deleted ([kernels](kernels.md#deleted-backends)).
+SilverTorch code, adapted (`backend="cuda"`, its only backend; the `silvertorch/` workspace
+member, under Meta's own names). Meta's code as published and our earlier Triton reimplementation
+of SilverTorch are deleted ([kernels](kernels.md#deleted-backends)); the published code's last
+parity run stands behind the tag `meta-published-parity-final`.
 
 ## Package layout
 
@@ -36,26 +36,26 @@ retrieve/src/retrieve/
 ├── functional.py          two_level_topk, masked_topk, counts_to_valid, compact_mask, combine_masks,
 │                          combine_indices, post_filter_topk, popcount_int64, clause_subset_match
 ├── modules/
-│   ├── silvertorch.py     SilverTorch (Algorithm 1 on Meta's ops; official-fork | official), SilverTorchBuilder, OfficialConfig
+│   ├── silvertorch.py     SilverTorch (Algorithm 1 on Meta's ops, adapted; backend cuda), SilverTorchBuilder, OfficialConfig
 │   ├── linr.py            LiNRV1–LiNRV3 (the paper variants over the primitives + a filter), LiNRBuilder
 │   ├── knn.py             PostfilterKNN, PrefilterKNN, FullScanKNN
 │   ├── bit_knn.py         OneBitKNN, SimHashKNN (+ the _PackedBitsKNN base)
 │   ├── filters.py         ExactAttributeFilter
-│   └── official.py        Meta's silvertorch.modules.* re-exported lazily (OfficialMissing without the extra)
+│   └── official.py        Meta's silvertorch.modules.* re-exported lazily (OfficialMissing without the extension)
 ├── ops/
 │   ├── __init__.py        triton / reference / official as lazy submodules; available_backends()
 │   ├── triton/            __init__.py (imports every kernel file → registers retrieve::*), _host.py (shared
 │   │                      launch scaffold), common.py (@triton.jit helpers), one file per kernel
 │   ├── reference/         the same op names and signatures in pure torch: the "torch" backend + parity oracle
-│   ├── official/          __init__.py (loader per backend, OfficialConfig, constants, `st` / `stfork`), adapter.py (the adapter)
+│   ├── official/          __init__.py (loader, OfficialConfig, constants, `st`), adapter.py (the adapter)
 │   └── tune.py            the autotune CLI (`tune-kernels`)
 └── indexing/              kmeans.py (KMeans, init random | kmeans++), ivf.py (csr_layout, probe_width), quantize.py
 ```
 
 `import retrieve` imports no kernel: a module resolves its backend's op
 namespace through [`interfaces.ops_for`](../../retrieve/src/retrieve/interfaces.py)
-at construction (which is when `retrieve.ops.triton` registers the eight
-`torch.ops.retrieve.*` ops, or `retrieve.ops.official` loads Meta's
+at construction (which is when `retrieve.ops.triton` registers the seven
+`torch.ops.retrieve.*` ops, or `retrieve.ops.official` loads the `silvertorch`
 extension) and again in `forward` (a dict hit — the namespace is never
 stored on the instance, which keeps modules deep-copyable and picklable).
 `tests/test_public_api.py` pins `retrieve.__all__`, `retrieve.modules.__all__`
@@ -69,32 +69,27 @@ and selecting their compute path via a `backend=` flag on `__init__`
 (two literal aliases are exported from
 [`interfaces.py`](../../retrieve/src/retrieve/interfaces.py):
 `LinrBackend = Literal["torch", "triton"]` for the LiNR layers and the
-standalone filters, `SilverTorchBackend = OfficialBackend = Literal["official", "official-fork"]`
-(its tuple `OFFICIAL_BACKENDS`) for `SilverTorch`; every constructor validates its own):
+standalone filters, `SilverTorchBackend = Literal["cuda"]` (its tuple `SILVERTORCH_BACKENDS`)
+for `SilverTorch`; every constructor validates its own):
 
 | `backend=` | meaning | who accepts it |
 |---|---|---|
 | `"triton"` | fused Triton kernels. The default. | every module but `SilverTorch` |
 | `"torch"` | pure-torch eager equivalent, same semantics, larger intermediates | every module but `SilverTorch` |
-| `"official"` | Meta's own `meta-recsys/silvertorch` ops (`torch.ops.st.*`) for phases 2+3 — the reference backend; eager-only; needs the `official` extra | **`SilverTorch` only** |
-| `"official-fork"` | Meta's code adapted ([`official-fork/`](../../official-fork/CHANGES.md), package `silvertorch_fork`, `torch.ops.stfork.*`) through the same adapter; `SilverTorch`'s default; loads beside `"official"` in one process; CUDA-graph capturable and compilable ([validation](../../research/validation.md#meta-fork-backendofficial-fork)); needs the `official` extra | **`SilverTorch` only** |
+| `"cuda"` | Meta's SilverTorch code, adapted ([`silvertorch/`](../../silvertorch/CHANGES.md), package `silvertorch`, `torch.ops.st.*`) for phases 2+3 through the adapter; `SilverTorch`'s only backend; CUDA-graph capturable and compilable ([validation](../../research/validation.md#meta-fork-backendofficial-fork)) | **`SilverTorch` only** |
 
-The `"official"` backend needs an optional extra: `torchretrieve[official]`
-(`uv sync --extra official`) installs Meta's own `meta-recsys/silvertorch`,
-pinned by sha in the workspace root's `[tool.uv.sources]`, which builds a
-CUDA extension and registers nine `torch.ops.st.*` ops. The adapter is the
-`retrieve.ops.official` package; without the package,
-`SilverTorch(backend="official")` raises `OfficialMissing`. Installing it
-needs an nvcc that matches the torch wheel (`CUDA_HOME=/usr/local/cuda-12.8`
-for the cu128 wheel — upstream's README insists on the match), `ninja` and
-`setuptools`; see
+`"cuda"` needs the `silvertorch` workspace member, a dependency of `torchretrieve` that builds a
+CUDA extension and registers sixteen `torch.ops.st.*` ops. The adapter is the
+`retrieve.ops.official` package; without the package or a CUDA device,
+`SilverTorch(...)` raises `OfficialMissing`. Building it needs an nvcc that matches the torch
+wheel (`CUDA_HOME=/usr/local/cuda-12.8` for the cu128 wheel — upstream's README insists on the
+match), `ninja` and `setuptools`; see
 [../artifacts/official-silvertorch/README.md](../../research/artifacts/official-silvertorch/README.md)
-for the pin, the build record and the upstream-suite result.
+for the upstream pin and its build record.
 
-`"official"` / `"official-fork"` are not universal paths: they exist solely for
-`SilverTorch`, which takes nothing else. Every other class takes `LinrBackend` and raises
-`ValueError` on anything else, both official backends included, so there is no silent fallback. See
-[Backend dispatch](#backend-dispatch) below.
+`"cuda"` is not a universal path: it exists solely for `SilverTorch`, which takes nothing else.
+Every other class takes `LinrBackend` and raises `ValueError` on anything else, `"cuda"`
+included, so there is no silent fallback. See [Backend dispatch](#backend-dispatch) below.
 
 - **LiNR** ([`modules/knn.py`](../../retrieve/src/retrieve/modules/knn.py),
   [`modules/bit_knn.py`](../../retrieve/src/retrieve/modules/bit_knn.py)) — four
@@ -239,7 +234,7 @@ a buffer — `SilverTorch`'s two scalars and `OneBitKNN`'s `k_bits` sentinel
 
 The primitives all return `(ids[B, K], scores[B, K])`; `-1` / `-inf` are the
 "no item" sentinels for masked-out or short rows. Each module takes a
-`backend=` arg in `__init__` (`LinrBackend`: `"official"` is rejected here —
+`backend=` arg in `__init__` (`LinrBackend`: `"cuda"` is rejected here —
 see [Backend dispatch](#backend-dispatch)); `"triton"` is the default
 (the eval harness and the original paper experiments target Triton). The
 torch backend is eager — callers wanting Inductor fusion or cudagraph
@@ -301,39 +296,33 @@ utility, not per-class copies.
 ## SilverTorch
 
 [`SilverTorch`](../../retrieve/src/retrieve/modules/silvertorch.py) implements the SilverTorch
-paper's Algorithm 1 on Meta's ops: IVF clustering over INT8-quantized item codes (one global
-per-tensor scale, paper §3.2) with an inline attribute predicate. Two axes are chosen at
-construction: `filter_mode` picks the predicate, `backend` the ops.
+paper's Algorithm 1 on Meta's SilverTorch code, adapted: IVF clustering over INT8-quantized item
+codes (one global per-tensor scale, paper §3.2) with an inline attribute predicate. `filter_mode`
+picks the predicate at construction; `backend` is `"cuda"`, the one value.
 
 The predicate, `filter_mode ∈ {"none", "bloom", "exact"}`:
 
 - `"none"`: plain IVF + INT8 ANN, no attribute filter.
 - `"bloom"`: Meta's bloom index (their murmur3 hash over `(clause, value)` features, bundles of
   2048 docs) queried through Meta's expression DSL; `k_hash` is the search `k` (≤ 10), `m_bits`
-  the width per doc on the adapted code (optional and ignored on `official`, whose width is
-  `OfficialConfig.b_multiplier`'s). The adapted code rechecks the bloom's survivors exactly by
-  default (`OfficialConfig.recheck`), so it returns no false positive.
+  the width per doc (optional with `OfficialConfig(bloom_width="upstream")`, Meta's own width
+  from `b_multiplier`). The bloom's survivors are rechecked exactly by default
+  (`OfficialConfig.recheck`), so it returns no false positive.
 - `"exact"`: the AND-of-OR clause predicate over the `[N, C, A_max]` narrow attrs, reverse
-  clauses supported: tested inside the adapted search op, or packed by our `clause_mask_packed`
-  into the published scorer's bit mask.
+  clauses supported, tested inside the search op over the probed docs.
 
-The ops, `backend ∈ {"official-fork", "official"}` ([kernels](kernels.md#silvertorch-on-metas-ops)):
+The ops ([kernels](kernels.md#silvertorch-on-metas-ops)): `backend="cuda"`, Meta's code adapted
+(`torch.ops.st.*`, the `silvertorch/` workspace member, its changes in
+[CHANGES](../../silvertorch/CHANGES.md)): one `search` op after phase 1, bloom plans prepared once
+on the device, no host sync in the forward, so it captures and compiles. Meta's code as published
+(`backend="official"`) left at RENAME ([kernels](kernels.md#deleted-backends)).
 
-- `"official-fork"` (default): Meta's code adapted (`torch.ops.stfork.*`, the `official-fork/`
-  workspace member, its changes in [CHANGES](../../official-fork/CHANGES.md)): one `search` op
-  after phase 1, bloom plans prepared once on the device, no host sync in the forward, so it
-  captures and compiles.
-- `"official"`: Meta's code as published (`torch.ops.st.*`, pinned at `21aa35e`), the parity
-  reference: eager-only, `torch.compile` of it raises. Its `OfficialConfig(bloom_path=...)` picks
-  the partial-mask co-design or the full-`N` mask ablation; the adapted code has the partial path
-  only and refuses `"full"`.
-
-Both take `official=OfficialConfig(...)`: `score_path` `"fp16"` (default, the shipped int8
-serving path) or `"int32"` (the bit-exact parity path), `bloom_path`, `b_multiplier`,
-`n_stored_hashes`, `bloom_width`, `recheck`, … (the dataclass's docstring).
+`official=OfficialConfig(...)`: `score_path` `"fp16"` (default, the shipped int8 serving path) or
+`"int32"` (the bit-exact parity path), `b_multiplier`, `n_stored_hashes`, `bloom_width`,
+`recheck`, … (the dataclass's docstring).
 
 Constructed directly (`SilverTorch(k, n_lists, n_probe, filter_mode="none", m_bits=None,
-k_hash=None, n_iter=10, seed=0, kmeans_init="random", backend="official-fork", official=None)`;
+k_hash=None, n_iter=10, seed=0, kmeans_init="random", backend="cuda", official=None)`;
 `kmeans_init="kmeans++"` opts into D² seeding, the default stays random because every recorded
 number was taken on it, [decisions](../../research/decisions.md#library)) or through
 `SilverTorchBuilder(**those)` → `.set_item_embeddings(x)` [+ `.set_item_attributes(attrs,
@@ -344,12 +333,11 @@ k-means) → `.to(device)`. After `register_index`, `build_timings` is `{"kmeans
 registration and on a prebuilt module) and `set_query_params(n_probe=…)` changes the probe width
 with the two `register_index` validations re-run (`n_probe <= n_lists`, a probe width of at least
 `k`: the sum of the `n_probe` largest clusters, [kernels](kernels.md#silvertorch-on-metas-ops));
-`k` is a plain attribute. `capturable` is a property: `True` on `official-fork`, `False` on
-`official`.
+`k` is a plain attribute. `capturable` is the class attribute `True`.
 
 Forward takes `(query, prepared=None, candidate_ids=None)`, `prepared` from
-`prepare_queries(query_clause_attrs)` (a `PreparedFilter`: Meta's parsed plans, uploaded once on
-the adapted code, or the attrs; the query side of the filter, done outside the timed call); there
+`prepare_queries(query_clause_attrs)` (a `PreparedFilter`: Meta's parsed plans, uploaded once,
+or the int32 attrs; the query side of the filter, done outside the timed call); there
 is no mask parameter. `prepared=None` is a documented fast path that skips the predicate; passing
 `prepared` together with `candidate_ids` raises `ValueError` (the candidates path scores the
 given candidates *without* the filter, so accepting both would silently drop the predicate). On
@@ -367,14 +355,13 @@ buffer-registration order (state-dict key order): `centroids`, `item_codes`
 cluster-sorted order:
 
 - `"bloom"`: Meta's index, `bloom_index[W]` int64 and `bundle_b_offsets[n_bundles+1]` from
-  `bloom_index_build` (`bloom_index_build_fixed` at the configured `m_bits` width on the adapted
-  code) over the sorted attrs; where the survivors are rechecked (the adapted code's default),
-  the exact attrs beside it. Registered without attributes, the index is empty and a later
-  attribute query raises.
-- `"exact"`: `item_clause_attrs` and `clause_is_reverse[C]` bool. On `official` the attrs are
-  the `[N, C, A_max]` int64 table our `clause_mask_packed` reads; on `official-fork` the adapted
-  code's clause-major int32 slot layout (`fork_clause_attrs`, with `clause_slots[C + 1]`;
-  [kernels](kernels.md#official-fork--our-fork-of-metas-ops)).
+  `bloom_index_build_fixed` at the configured `m_bits` width (`bloom_index_build` with
+  `bloom_width="upstream"`) over the sorted attrs; where the survivors are rechecked (the
+  default), the exact attrs beside it. Registered without attributes, the index is empty and a
+  later attribute query raises.
+- `"exact"`: `item_clause_attrs` in the clause-major int32 slot layout (`fork_clause_attrs`, with
+  `clause_slots[C + 1]`; [kernels](kernels.md#cuda--the-adapted-forward)) and
+  `clause_is_reverse[C]` bool.
 - `"none"`: no filter buffers; `prepare_queries` raises and `forward` requires `prepared=None`.
 
 > **State dicts are portable between the two backends in `"none"`**: both register the same CSR.
@@ -427,8 +414,7 @@ cluster-sorted order:
   `RetrievalModule` (a minimal lifecycle ABC — `k` attr + abstract
   `register_index`, called exactly once; forward signatures deliberately
   unconstrained), `FilterModule`, `LinrBackend = Literal["torch",
-  "triton"]`, `SilverTorchBackend = OfficialBackend = Literal["official",
-  "official-fork"]`, `check_backend(backend, literal)` (every constructor
+  "triton"]`, `SilverTorchBackend = Literal["cuda"]`, `check_backend(backend, literal)` (every constructor
   calls it — see [Backend dispatch](#backend-dispatch)),
   `ops_for(backend)` (the backend → op-namespace resolver), `DISPATCH` (the
   dispatch table as data) and `load_prebuilt` (the builders' state-dict
@@ -439,9 +425,9 @@ cluster-sorted order:
 - [`modules/official.py`](../../retrieve/src/retrieve/modules/official.py) —
   Meta's own `silvertorch.modules` classes (`BloomIndexSearchModule`,
   `FilterQueryParserModule`, their builders), fetched on first attribute
-  access after `retrieve.ops.official.ensure_loaded()`; without the extra
+  access after `retrieve.ops.official.ensure_loaded()`; without the package
   the access raises `OfficialMissing` with the install hint. Nothing in the
-  library calls them — `SilverTorch(backend="official")` uses the ops.
+  library calls them — `SilverTorch` uses the ops.
 
 ## Kernels
 
@@ -468,9 +454,8 @@ Each Triton path is **one launch per `forward()`** followed by a
 host-side `torch.topk` over the score buffer (CUB beats anything we can
 write in pure Triton). `SilverTorch` runs no kernel of ours:
 [`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py)
-adapts Meta's `torch.ops.st.*` ops as published (eager-only: 19 launches and 3 host syncs per
-unfiltered forward on the A100) and the adapted `torch.ops.stfork.*` (one `search` op, no sync).
-Seven of the eight ops are registered with `@torch.library.triton_op` so inductor can see the
+adapts Meta's SilverTorch ops, adapted (`torch.ops.st.*`: one `search` op, no sync).
+Six of the seven ops are registered with `@torch.library.triton_op` so inductor can see the
 `@triton.jit` body; the stream-compaction kernel `clause_compact` is an opaque
 `@torch.library.custom_op` instead, because its data-dependent store address makes inductor's
 mutation analysis flag the index buffers and cudagraph trees skip the compiled forward. Full
@@ -484,9 +469,7 @@ per-kernel detail, and that mechanism, in [kernels.md](kernels.md).
 | `ops.triton` | [`clause_compact`](../../retrieve/src/retrieve/ops/triton/clause_compact.py) — fused clause eval + stream compaction | `ExactAttributeFilter.evaluate_indices` |
 | `ops.triton` | [`clause_mask`](../../retrieve/src/retrieve/ops/triton/clause_mask.py) — fused clause eval emitting `[B, N]` bool | `ExactAttributeFilter.evaluate_mask` |
 | `ops.triton` | [`clause_mask_scores`](../../retrieve/src/retrieve/ops/triton/clause_mask.py) — the same pass writing `scores` or `-inf` | `ExactAttributeFilter.mask_scores` (`LiNRV1`) |
-| `ops.triton` | [`clause_mask_packed`](../../retrieve/src/retrieve/ops/triton/clause_mask.py) — the same pass packed into Meta's `filtering_bit_mask` | `SilverTorch(backend="official", filter_mode="exact")` |
-
-| `ops.official` | [`official_probe_score`, `fork_search`, `bloom_partial_masks`, …](../../retrieve/src/retrieve/ops/official/adapter.py) — adapter over Meta's `torch.ops.st.*` (as published, eager-only) and `torch.ops.stfork.*` (adapted); no kernel of ours | `SilverTorch` |
+| `ops.official` | [`fork_search`, `official_probe_score`, `bloom_partial_masks`, …](../../retrieve/src/retrieve/ops/official/adapter.py) — adapter over Meta's `torch.ops.st.*`, adapted (`search` is the forward; the upstream-shaped ops are the gates' reference path); no kernel of ours | `SilverTorch` |
 
 ### Backend dispatch
 
@@ -494,12 +477,11 @@ Every module resolves `backend` to an op namespace with
 `interfaces.ops_for` — `"triton"` → `retrieve.ops.triton`, `"torch"` →
 `retrieve.ops.reference` (identical op names and signatures, so a module's
 forward is one code path calling `ops.<op>(...)`) — and `SilverTorch` takes
-`"official"` / `"official-fork"` only, through `retrieve.ops.official`, its `forward`
-branching on `backend` to `_forward_official` / `_forward_fork`.
+`"cuda"` only, through `retrieve.ops.official`.
 The constructor rejects anything else.
 The importable truth is
 [`interfaces.DISPATCH`](../../retrieve/src/retrieve/interfaces.py):
-`{class name: {backend: "triton" | "torch" | "cublas" | "official" | None}}`,
+`{class name: {backend: "triton" | "torch" | "cublas" | "cuda" | None}}`,
 `"cublas"` where both backends score with cuBLAS (on triton, a single query takes the
 `gemv_scores` GEMV where it equals cuBLAS bit for bit, so the two still match) and `None`
 where the constructor raises
@@ -507,9 +489,9 @@ where the constructor raises
 every key is a `retrieve.modules` class). The same table, with the op each
 label stands for:
 
-| module | `"triton"` | `"torch"` | `"official"` / `"official-fork"` |
+| module | `"triton"` | `"torch"` | `"cuda"` |
 |---|---|---|---|
-| `SilverTorch` | raises `ValueError` | raises `ValueError` | Meta's ops: `official` as published (eager-only, the parity reference), `official-fork` adapted (the default) |
+| `SilverTorch` | raises `ValueError` | raises `ValueError` | Meta's SilverTorch code, adapted (`torch.ops.st.search`) |
 | `LiNRV2` / `LiNRV3` | the primitives' Triton ops below | eager (`ops.reference`) | raises `ValueError` |
 | `LiNRV1` | cuBLAS; one query on `gemv_scores` where `register_index` found it bit-exact ([kernels](kernels.md), `gemv_scores`); a filter cell adds the filter's own path | cuBLAS | raises `ValueError` |
 | `PrefilterKNN` | `fused_masked_knn_topk` | eager (`ops.reference`) | raises `ValueError` |
@@ -518,13 +500,13 @@ label stands for:
 
 | `PostfilterKNN` | cuBLAS; one query on `gemv_scores` where bit-exact | cuBLAS | raises `ValueError` |
 
-A cell labelled `backend="official"` for anything other than
+A cell labelled `backend="cuda"` for anything other than
 `SilverTorch` therefore cannot exist. The eval harness mirrors that
 rather than catching the error: its `PATHS` table maps every
 `(algo, filter_kind, backend)` to the code path that actually runs
-(`cublas`, `triton`, `torch`, `cublas+triton`, `official`, or `None`),
+(`cublas`, `triton`, `torch`, `cublas+triton`, `cuda`, or `None`),
 collapses backends that run the same code into one job, and builds the
-standalone filter modules for `official` cells with `backend="triton"` —
+standalone filter modules for `cuda` cells with `backend="triton"` —
 see [evaluation.md](evaluation.md#algorithms-and-the-paths-table).
 `PATHS` is derived from `DISPATCH`
 ([`bench/algos.py`](../../evaluation/bench/algos.py)), and

@@ -4,7 +4,7 @@ created: 2026-10-12
 updated: 2026-10-12
 type: comparison
 tags: [paper]
-sources: [articles/linr.md, articles/silvertorch.md, official-fork/CHANGES.md, retrieve/src/retrieve/modules/filters.py, retrieve/src/retrieve/modules/linr.py, retrieve/src/retrieve/modules/silvertorch.py, retrieve/src/retrieve/ops/official/, evaluation/bench/, research/decisions.md, research/paper/reproduction-deviations.md, research/paper/meta-published-vs-adapted.md, research/paper/results.md]
+sources: [articles/linr.md, articles/silvertorch.md, silvertorch/CHANGES.md, retrieve/src/retrieve/modules/filters.py, retrieve/src/retrieve/modules/linr.py, retrieve/src/retrieve/modules/silvertorch.py, retrieve/src/retrieve/ops/official/, evaluation/bench/, research/decisions.md, research/paper/reproduction-deviations.md, research/paper/meta-published-vs-adapted.md, research/paper/results.md]
 ---
 
 # Method differences: what we report against what the papers describe
@@ -12,7 +12,7 @@ sources: [articles/linr.md, articles/silvertorch.md, official-fork/CHANGES.md, r
 What each reported number measures, method by method, against what LiNR's
 paper (`articles/linr.md`), SilverTorch's paper
 (`articles/silvertorch.md`) and Meta's
-published code (`backend="official"`, pinned `21aa35e`) do. Filtering
+published code (pinned `21aa35e`; `backend="official"` until RENAME) do. Filtering
 comes first, since that is where the methods differ most and where our
 configuration is being changed now.
 
@@ -20,7 +20,7 @@ This page summarises; the per-item records stay where they are:
 [reproduction-deviations](reproduction-deviations.md) (paper against us,
 with the evidence),
 [meta-published-vs-adapted](meta-published-vs-adapted.md) and
-[`official-fork/CHANGES.md`](../../official-fork/CHANGES.md) (what our
+[`silvertorch/CHANGES.md`](../../silvertorch/CHANGES.md) (what our
 adaptation of Meta's code changed), [results](results.md) (the numbers).
 Paper sections are the arXiv numbering ([claims](claims.md)). Anything not
 confirmed from code or text is marked **unverified**.
@@ -98,8 +98,7 @@ The adapted code can test every bloom survivor exactly before scoring
 Bloom ∧ exact is the exact filter, so with the recheck the bloom changes
 speed, not results. It is not in Meta's code or either paper.
 
-- **Library default:** on for `backend="official-fork"`
-  (`OfficialConfig.recheck_for`, `__init__.py:164-170`); Meta's code has none.
+- **Library default:** on (`OfficialConfig.recheck`); Meta's code has none.
 - **The study's setting:** **off** (user, 2026-10-12: "NO RECHECKS in timed
   code, only as part of grading the recall"). SilverTorch is evaluated with
   its probabilistic bloom, false positives allowed; the cost shows up as

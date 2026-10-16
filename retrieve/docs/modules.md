@@ -22,7 +22,7 @@ Two families, and the paper's variants of the first:
 | `LiNRV1` | fp16 inputs, fp32 dot | 1× (fp16) | Dense scan, filter as a mask. |
 | `LiNRV2` | fp16 inputs, fp32 dot | 1× (fp16) | Filter → candidates → exact rescoring; filter required. |
 | `LiNRV3` | Hamming, then fp16-input fp32 dot | ~1/16× + 1× | 1-bit top-`candidate_pool`, then exact rescoring. |
-| `SilverTorch` | INT8 ANN over IVF | 0.5× + centroids | Scales to large `N`; optional bloom / exact filter. Needs the `official` extra. |
+| `SilverTorch` | INT8 ANN over IVF | 0.5× + centroids | Scales to large `N`; optional bloom / exact filter. Meta's code, adapted (`silvertorch`). |
 | `FullScanKNN` | exact dot product | 1× (fp32) | Reference / small-N. |
 | `PostfilterKNN` | fp16 inputs, fp32 dot | 1× (fp16) | Dense scan + optional boolean mask. |
 | `PrefilterKNN` | fp16 inputs, fp32 dot | 1× (fp16) | Scores only a candidate set. |
@@ -50,23 +50,19 @@ Triton path runs fused kernels; the torch path is pure PyTorch (still GPU) and i
 `torch.compile`-friendly. Results are equivalent. `PostfilterKNN` accepts the flag for API
 symmetry but always runs the same code (cuBLAS already covers its case).
 
-`SilverTorch` takes `backend="official-fork"` (default) or `backend="official"`, both from the
-`official` extra (built from source, needs a CUDA toolkit matching your torch):
+`SilverTorch` takes `backend="cuda"`, its only value: Meta's official SilverTorch code, adapted
+(`torch.ops.st.*`, the `silvertorch` package that ships with `torchretrieve`, built from source
+against a CUDA toolkit matching your torch; the improvements are listed in its CHANGES file). Ids
+and scores were gated bit-exact against Meta's code as published at int32; no host sync, so it
+captures and compiles; its bloom is evaluated over the probed clusters only and by default
+rechecks the bloom's survivors exactly, so it returns no false positives.
 
-- `"official-fork"`: Meta's official SilverTorch code, adapted (`torch.ops.stfork.*`, package
-  `silvertorch-fork`; the improvements are listed in its CHANGES file). Ids and scores equal to
-  Meta's at int32, no host sync, so it captures and compiles; its bloom is evaluated over the
-  probed clusters only (`OfficialConfig(bloom_path="full")` raises) and by default rechecks the
-  bloom's survivors exactly, so it returns no false positives.
-- `"official"`: Meta's code as published (`torch.ops.st.*`, `meta-recsys/silvertorch`), the
-  reference the adapted code is checked against: eager-only (`torch.compile` raises), its bloom
-  width Meta's own (`m_bits` is optional).
-
-Both run our k-means and quantization in front and take `official=OfficialConfig(...)`:
-`b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path, the
-partial-vs-full bloom path (`official` only), `bloom_width`, `recheck`. The expression parse runs
-in `prepare_queries`. Any module given a backend outside its literal (`"official"` on a LiNR
-module, `"triton"` on `SilverTorch`, a typo) raises `ValueError` at construction.
+It runs our k-means and quantization in front and takes `official=OfficialConfig(...)`:
+`b_multiplier`, `n_stored_hashes`, the `"int32"` bit-exact vs `"fp16"` serving score path,
+`bloom_width` (`"configured"`: `m_bits` per doc; `"upstream"`: Meta's own width), `recheck`. The
+expression parse runs in `prepare_queries`. Any module given a backend outside its literal
+(`"cuda"` on a LiNR module, `"triton"` on `SilverTorch`, a typo) raises `ValueError` at
+construction.
 
 ## LiNR variants
 
@@ -153,12 +149,11 @@ inputs, fp32 accumulation). Ranking is what the layers promise; cast at the boun
 
 > `SilverTorch` runs on Meta's official SilverTorch code, adapted by us (improvements listed in
 > its CHANGES file: no host syncs, CUDA-graph capture, `m_bits` honoured, an exact recheck of
-> bloom survivors), installed with the `official` extra. `backend="official"` (Meta's code as
-> published) is the reference the adapted code is checked against.
+> bloom survivors), the `silvertorch` package that installs with `torchretrieve`.
 
 ```python
 SilverTorch(k, n_lists, n_probe, filter_mode="none", m_bits=None, k_hash=None,
-            n_iter=10, seed=0, kmeans_init="random", backend="official-fork", official=None)
+            n_iter=10, seed=0, kmeans_init="random", backend="cuda", official=None)
 ```
 
 - `register_index(item_embs, item_clause_attrs=None, clause_is_reverse=None)`
@@ -176,8 +171,9 @@ Parameters:
 - `n_probe`: clusters scanned per query (≤ `n_lists`). Higher = more recall, more work.
   `set_query_params(n_probe=...)` changes it after `register_index`, with the same validation.
 - `filter_mode`: `"none"`, `"bloom"`, or `"exact"`. `"bloom"` is Meta's bloom index and needs
-  `k_hash` (the search `k`, ≤ 10) and, on `official-fork`, `m_bits` (power of 2, multiple of 64;
-  the width per doc); `"exact"` is the clause test over the probed items. See the
+  `k_hash` (the search `k`, ≤ 10) and `m_bits` (power of 2, multiple of 64; the width per doc;
+  optional with `OfficialConfig(bloom_width="upstream")`); `"exact"` is the clause test over the
+  probed items. See the
   [filtering guide](filtering-and-quantization.md).
 - `backend` / `official`: see [Backend](#backend).
 
@@ -187,7 +183,7 @@ plain attribute, settable at any time.
 
 After `register_index`, `build_timings` holds the seconds of the four build phases
 (`kmeans_s`, `assemble_s`, `quantize_s`, `filter_s`; `{}` before it and on a prebuilt module).
-`capturable` is `True` on `official-fork` and `False` on `official` (eager-only).
+`capturable` is `True`.
 
 ### `SilverTorchBuilder(**kwargs)`
 
@@ -197,7 +193,7 @@ After `register_index`, `build_timings` holds the seconds of the four build phas
 ann = (SilverTorchBuilder(k=100, n_lists=1024, n_probe=24, filter_mode="bloom", m_bits=1024, k_hash=5)
        .set_item_embeddings(item_embs)
        .set_item_attributes(item_attrs, clause_is_reverse=None)
-              .set_backend("official-fork", official=OfficialConfig(score_path="int32"))
+       .set_backend("cuda", official=OfficialConfig(score_path="int32"))
        .set_device("cuda")
        .build())                                   # == construct + register_index + .to(device)
 

@@ -63,21 +63,21 @@ import retrieve.ops.triton              # registers torch.ops.retrieve.* (Triton
 retrieve.ops.triton.clause_mask(item_clause_attrs, clause_is_reverse, query_clause_attrs)
 retrieve.ops.reference.clause_mask(...)   # same signature, pure torch, torch.equal to the above
 retrieve.ops.official.ensure_loaded(); retrieve.ops.official.st.fused_kmean_ann(...)   # Meta's op
-retrieve.ops.available_backends()       # ("triton", "torch"), plus "official" / "official-fork" where each loads
+retrieve.ops.available_backends()       # ("triton", "torch"), plus "cuda" where the silvertorch extension loads
 ```
 
 | op | `triton` / `reference` | consumer |
 | --- | --- | --- |
 
 | `clause_mask`, `clause_mask_scores`, `clause_compact` | exact clause predicate → `[B, N]` bool / masked scores / compact candidates | `ExactAttributeFilter` |
-| `clause_mask_packed` | the clause predicate packed into Meta's `filtering_bit_mask` | `SilverTorch(backend="official", filter_mode="exact")` |
 | `gemv_scores` | one query's dense fp32 scores in cuBLAS's order | `PostfilterKNN` at `B = 1` |
 | `fused_masked_knn_topk` | gather + fp32-accumulated dot over candidate ids + top-k | `PrefilterKNN` |
 | `oporp_1bit_match_topk_full`, `oporp_1bit_match_topk_indirect` | XOR + popcount + top-k, full scan / through candidate ids | `OneBitKNN`, `SimHashKNN` |
 
-`retrieve.ops.official` is the adapter over Meta's `torch.ops.st.*` and the adapted
-`torch.ops.stfork.*` (`official_probe_score`, `fork_search`, the bloom index and
-expression-parser helpers, `OfficialConfig`, `OfficialMissing`); the ops themselves are reachable
-verbatim as `retrieve.ops.official.st.<name>` / `.stfork.<name>` once `ensure_loaded(backend)`
-ran. `retrieve.modules.official` re-exports Meta's four `silvertorch.modules` classes the same
-lazy way. Both need the `official` extra. `retrieve.ops.tune` is the `tune-kernels` autotune CLI.
+`retrieve.ops.official` is the adapter over Meta's `torch.ops.st.*`, adapted (`fork_search`, the
+one-op forward; `official_probe_score`, the bloom index and expression-parser helpers,
+`OfficialConfig`, `OfficialMissing`); the ops themselves are reachable verbatim as
+`retrieve.ops.official.st.<name>` once `ensure_loaded()` ran. `retrieve.modules.official`
+re-exports Meta's four `silvertorch.modules` classes the same lazy way. Both need the
+`silvertorch` extension (a dependency; `OfficialMissing` without it or without a CUDA device).
+`retrieve.ops.tune` is the `tune-kernels` autotune CLI.

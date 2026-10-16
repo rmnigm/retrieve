@@ -116,17 +116,17 @@ def test_campaign_default_timeout_fits_the_largest_group(tiny_configs, tmp_path,
 def test_campaign_restart_keeps_the_groups_parity_spill(tiny_configs, tmp_path, monkeypatch):
     """A kill mid-group, then a new campaign process: its first child still compares against
     the spill the killed process wrote; another group's leftover spill is dropped. Children
-    run in-process (no second CPU backend exists; ``official`` is torch relabelled)."""
+    run in-process (no second CPU backend exists; ``cuda`` is torch relabelled)."""
     ds, suites = tiny_configs
     out = tmp_path / "results"
     clause = [j for j in load_matrix(ds, suites, "e2e", algos=["linr_v1_filter_mask"])
               if j.filter_kind == "clause"]  # fmt: skip
-    with monkeypatch.context() as m:  # the killed process: its official backend finished
+    with monkeypatch.context() as m:  # the killed process: its cuda backend finished
         real_build = run.build_module
         m.setattr(run, "build_module", lambda job, *a, **kw: real_build(
             dataclasses.replace(job, backend="torch"), *a, **kw))  # fmt: skip
         m.setattr(run.algos, "filter_backend", lambda b: "torch")
-        run.run([dataclasses.replace(j, backend="official") for j in clause], out_dir=out,
+        run.run([dataclasses.replace(j, backend="cuda") for j in clause], out_dir=out,
                 skip_perf=True)  # fmt: skip
     stale = out / "_parity" / "other-d64_linr_v3" / "0.npz"
     stale.parent.mkdir()
@@ -151,8 +151,8 @@ def test_campaign_restart_keeps_the_groups_parity_spill(tiny_configs, tmp_path, 
     parity = {(r["algo"], r["sweep"]): r["quality"]["parity"] for r in recs}
     assert parity == {
         ("linr_v1_filter_mask", "full_scan"): "reference",
-        ("linr_v1_filter_mask", "c0"): "vs_official",
-        ("linr_v1_filter_mask", "c0c1"): "vs_official",
+        ("linr_v1_filter_mask", "c0"): "vs_cuda",
+        ("linr_v1_filter_mask", "c0c1"): "vs_cuda",
         ("linr_v3", "full_scan"): "reference",
         ("linr_v3", "c0"): "reference",
         ("linr_v3", "c0c1"): "reference",
@@ -214,12 +214,11 @@ def test_zero_cells_is_an_error(tiny_configs, tmp_path):
 
 
 def test_env_prints_provenance_and_clocks_as_json(monkeypatch):
-    monkeypatch.setattr(measure, "official_commit", lambda: "abc123")
     r = CliRunner().invoke(cli.main, ["env"])
     assert r.exit_code == 0, r.output
     env = json.loads(r.output)
     assert set(env) == set(measure.provenance()) | set(measure.clocks())
-    assert env["official_commit"] == "abc123" and "sm_mhz" in env and "code_version" in env
+    assert "silvertorch_build" in env and "sm_mhz" in env and "code_version" in env
 
 
 def test_bench_run_keys_the_inductor_cache_by_code_version(tiny_configs, tmp_path, monkeypatch):
