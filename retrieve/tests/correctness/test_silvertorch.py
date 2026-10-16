@@ -12,6 +12,7 @@ import copy
 import pytest
 import torch
 
+from retrieve.indexing.kmeans import KMeans
 from retrieve.indexing.quantize import quantize_int8_global
 from retrieve.interfaces import SILVERTORCH_BACKENDS
 from retrieve.modules.knn import FullScanKNN
@@ -489,6 +490,17 @@ class TestBuilder:
         if filter_mode != "none":
             b.set_item_attributes(data["attrs"])
         return b.build()
+
+    @pytest.mark.parametrize("backend", BACKENDS)
+    def test_probe_ranks_by_the_assignment_metric(self, data, backend):
+        """The first probe is the query's nearest centroid under ``KMeans.assign``'s L2, on a
+        fresh build and on its state-dict twin."""
+        require_official()
+        src = self._fresh(data, backend, "none")
+        twin = self._builder(backend, "none").set_state_dict(src.state_dict()).build()
+        nearest = KMeans.assign(data["query"], src.centroids)
+        for m in (src, twin):
+            assert torch.equal(m._phase1_probe_ids(data["query"])[:, 0], nearest)
 
     @pytest.mark.parametrize("backend", BACKENDS)
     @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])

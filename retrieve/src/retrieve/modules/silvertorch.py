@@ -45,6 +45,7 @@ class SilverTorch(RetrievalModule):
     capturable = True
 
     centroids: Tensor
+    centroid_half_sqnorm: Tensor
     item_codes: Tensor
     global_scale: Tensor
     cluster_offsets: Tensor
@@ -145,6 +146,7 @@ class SilverTorch(RetrievalModule):
         for name, buf in ivf.items():
             self.register_buffer(name, buf)
         self._register_filter_buffers(item_clause_attrs, clause_is_reverse, perm)
+        self._register_centroid_norms()
         t4 = lap()
         self.build_timings = {
             "kmeans_s": t1 - t0,
@@ -192,6 +194,13 @@ class SilverTorch(RetrievalModule):
         ).fit(item_embs)
         self.register_buffer("centroids", centroids)
         return assignments
+
+    def _register_centroid_norms(self) -> None:
+        # Not persistent and registered last, as a state-dict load does: derived from
+        # ``centroids``, so the state-dict keys and the buffer order stay as they are.
+        self.register_buffer(
+            "centroid_half_sqnorm", 0.5 * self.centroids.square().sum(dim=1), persistent=False
+        )
 
     def _check_probe_pool(self, n_probe: int, width: int, k: int) -> None:
         if width < k:
@@ -311,8 +320,10 @@ class SilverTorch(RetrievalModule):
         return self._search(query, prepared)
 
     def _phase1_probe_ids(self, query: Tensor) -> Tensor:
-        """Centroid scores → top-``n_probe`` cluster ids ``[B, n_probe]``."""
-        cent_scores = query @ self.centroids.t()
+        """The ``n_probe`` nearest centroids by L2, the metric ``KMeans`` assigned items with:
+        ``argmin ‖q − c‖² = argmax q·c − ‖c‖²/2``. Ranking by ``q·c`` alone would favour
+        large-norm centroids. ``[B, n_probe]``."""
+        cent_scores = query @ self.centroids.t() - self.centroid_half_sqnorm
         _, probe_ids = torch.topk(cent_scores, self.n_probe, dim=1)
         return probe_ids
 
@@ -400,8 +411,9 @@ def _unique_plans(expressions: list[str], device: torch.device) -> tuple[list[st
 
 def _rederive_cached_scalars(module: SilverTorch, incompatible_keys) -> None:
     """``load_state_dict`` post-hook: the two Python scalars the forward reads instead of the
-    buffers a load has just replaced."""
+    buffers a load has just replaced, and the centroid norms the probe reads."""
     module._global_scale_f = float(module.global_scale.item())
+    module._register_centroid_norms()
     module._probe_width = probe_width(module.cluster_sizes, module.n_probe)
 
 
