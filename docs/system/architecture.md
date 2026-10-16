@@ -362,13 +362,18 @@ cluster-sorted order:
   `clause_is_reverse[C]` bool.
 - `"none"`: no filter buffers; `prepare_queries` raises and `forward` requires `prepared=None`.
 
+Last, a non-persistent `centroid_half_sqnorm[n_lists]` (`‖c‖²/2`, not in the state dict). The
+probe ranks centroids by `q·c − ‖c‖²/2`, so it picks the `n_probe` nearest centroids by L2, the
+metric `KMeans.assign` put the items in clusters with; `q·c` alone would favour large-norm
+centroids, and Lloyd's means of unit vectors differ in norm.
+
 > **State dicts are portable between the two backends in `"none"`**: both register the same CSR.
 > The exact attrs differ in layout and the bloom index in width, so a filtered module is rebuilt
 > with `register_index` across the boundary. Loading is `nn.Module.load_state_dict` into a module
 > whose `register_index` already ran (or `load_prebuilt` / the builder's `set_state_dict`). A
 > `load_state_dict` post-hook re-derives the two Python scalars the forwards read instead of the
 > buffers, `_global_scale_f` (from `global_scale`) and `_probe_width` (from `cluster_sizes` and
-> `n_probe`), with two `.item()` syncs at load time, so a loaded index scores exactly like the
+> `n_probe`), with two `.item()` syncs at load time, and re-registers `centroid_half_sqnorm` last, so a loaded index scores exactly like the
 > saved one.
 
 ## Utility modules

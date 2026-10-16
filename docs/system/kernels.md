@@ -1147,7 +1147,7 @@ slower.
 **Epilogue (OFFICIAL-REWORK).** Everything query-side runs in `prepare_queries`, outside the
 timed forward: bloom → the expressions rendered and parsed, one plan per distinct expression plus
 a device row → plan index (`query_plan_index`, which Meta's partial search accepts); exact → the
-int32 query attrs. The forward is the probe (centroid matmul + `topk`), Meta's search and scorer,
+int32 query attrs. The forward is the probe (the `n_probe` nearest centroids by L2, `q·c − ‖c‖²/2` + `topk`, the metric `KMeans` assigned items with), Meta's search and scorer,
 then a top-k on the scorer's raw `[B, M]` (int32 dots or `fp16(dot / divisor)`, pads at the
 dtype's minimum) with only the `[B, k]` winners dequantized and mapped through `sort_perm`
 (`official_probe_score`, the reference path; fused into `search` on the forward). Dequantizing
