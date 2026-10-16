@@ -15,7 +15,9 @@ uv run --no-sync --with pandas python ../research/artifacts/export-prep/check_me
 
 State: [validation § Harness gates](../../validation.md#harness-gates).
 
-## The records-don't-move GPU check (after SYNTH-MID, controller's grant)
+## The records-don't-move GPU check
+
+Ran on pod e 2026-10-16 (GPU 0, `dev/export-harness` c79f04cf): 127 records compared, 0 differ or missing ([validation](../../validation.md#harness-gates), the EXPORT-HARNESS quality subset row). The tree needs the gitignored `evaluation/data -> /data` symlink (the FR configs name `data/<dataset>/...`) and a venv whose adapted extension was built from the same branch (`VENV=`; the main checkout's build predates C14's `clause_slots` argument).
 
 | file | what |
 |---|---|
@@ -23,6 +25,6 @@ State: [validation § Harness gates](../../validation.md#harness-gates).
 | [`compare_quality.py`](compare_quality.py) | every rerun record against the FR record with the same key block: `quality` equal (the parity note aside) and the per-query sidecar arrays equal; exit 1 on any difference |
 
 ```bash
-TREE=/scratch/wt/export-harness CFG=/scratch/fr/config OUT=/scratch/export-prep/quality-subset \
+TREE=/scratch/wt/export-harness CFG=/scratch/fr/config OUT=/scratch/export-prep/quality-subset VENV=/venvs/export-harness \
     research/artifacts/export-prep/quality_subset.sh
 ```

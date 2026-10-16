@@ -4,7 +4,8 @@
 # compare_quality.py. Adapted SilverTorch none / exact / bloom and LiNR exact cells, seed 0, no timing.
 #
 # usage: TREE=/scratch/wt/export-harness CFG=/scratch/fr/config OUT=/scratch/export-prep/quality-subset quality_subset.sh
-#   env  VENV (default /venvs/retrieve)  LOCK (default /scratch/gpu0.lock)  RETRIEVE_DATA_ROOT (default /data)
+#   env  VENV (default /venvs/retrieve; its silvertorch_fork extension must be built from TREE)  LOCK (default /scratch/gpu0.lock)
+#        RETRIEVE_DATA_ROOT (default /data); TREE/evaluation/data must point at the data root (the FR configs use data/<dataset>/...)
 set -eu
 TREE=${TREE:?} CFG=${CFG:?} OUT=${OUT:?} VENV=${VENV:-/venvs/retrieve} LOCK=${LOCK:-/scratch/gpu0.lock}
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0} RETRIEVE_DATA_ROOT=${RETRIEVE_DATA_ROOT:-/data}
