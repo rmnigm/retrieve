@@ -229,8 +229,8 @@ raises an illegal address or returns wrong ids.
 
 ## Padding
 
-`tl.arange` needs a power-of-two extent, and the datasets do not all have one (pubmed and
-openalex D = 768; OPORP's default `k_bits = D` gives `W = 3` and `12`).
+`tl.arange` needs a power-of-two extent, and the datasets do not all have one (pubmed's
+D = 768; OPORP's default `k_bits = D` gives `W = 3` and `12`).
 Every kernel with a lane axis over the embedding or word width takes the true width and
 its `triton.next_power_of_2` as two constexprs (`D` / `D_PAD`, `W` / `W_PAD`), aranges over
 the padded one and masks lanes `≥ D` (`≥ W`) out of both the query and the item load with

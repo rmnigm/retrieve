@@ -25,8 +25,8 @@ gets is decided by whether it sets `checkpoint`:
 
 | shape | datasets | query embeddings come from | filters |
 |---|---|---|---|
-| **sequential** | goodreads, yambda-500m (unfiltered); out of the study: yambda-5b, kuairand | a trained SASRec checkpoint ([which one](checkpoints.md#what-the-harness-reads)), encoded at eval time | goodreads, kuairand |
-| **text** | arxiv, arxiv-synth, arxiv-corr-synth, pubmed, laion30m, openalex | pre-encoded embeddings on disk | yes |
+| **sequential** | goodreads, yambda-500m (unfiltered) | a trained SASRec checkpoint ([which one](checkpoints.md#what-the-harness-reads)), encoded at eval time | goodreads |
+| **text** | arxiv, arxiv-synth, arxiv-corr-synth, pubmed, laion30m | pre-encoded embeddings on disk | yes |
 
 A third variant, **synthetic**, is a text dataset grown to arbitrary `N`
 by interpolating between real embeddings — used for scale sweeps where a
@@ -59,8 +59,6 @@ HuggingFace's `datasets` in the shared venv.
 | [`etl/goodreads.py`](../../evaluation/eval_datasets/etl/goodreads.py) | `goodreads` | UCSD Book Graph mirror (HTTPS) |
 | [`etl/arxiv.py`](../../evaluation/eval_datasets/etl/arxiv.py) | `arxiv` | HF `open-index/open-arxiv` (~2.99M papers) |
 | [`etl/pubmed.py`](../../evaluation/eval_datasets/etl/pubmed.py) | `pubmed` | NCBI FTP MedCPT embeddings + MEDLINE baseline (~36M articles) |
-| [`etl/kuairand.py`](../../evaluation/eval_datasets/etl/kuairand.py) | `kuairand` | Zenodo KuaiRand-27K + category supplement (32M videos) |
-| [`etl/openalex.py`](../../evaluation/eval_datasets/etl/openalex.py) | `openalex` | OpenAlex snapshot on public S3, parquet copy (476M works, streamed) |
 | [`ingest.py`](../../evaluation/eval_datasets/ingest.py) | `ingest` | vectors + attribute tables, no ETL ([below](#the-generic-ingest-eval-data-ingest)) |
 | [`etl/laion.py`](../../evaluation/eval_datasets/etl/laion.py) | `laion` | HF `laion/relaion2B-en-research-safe` (gated, auto-approved), first two parquet parts |
 | [`etl/synth_arxiv.py`](../../evaluation/eval_datasets/etl/synth_arxiv.py) | `synth-arxiv` | an already-encoded arxiv directory |
@@ -111,9 +109,7 @@ and needs no network: `test_layout.py` runs the contract on the shared
 tiny-dataset writer of `tests/conftest.py` (both item layouts clean, each
 breakage flagged). Give each new loader a fixture test that writes the upstream format into `tmp_path`
 and runs `validate_layout` on
-what it wrote. `test_openalex.py` builds its rows in the snapshot's projected
-parquet schema (nested `primary_topic.field.id` etc.) and runs `prep` →
-`attrs` → `validate_layout` on a 60-paper citation-connected staging dir.
+what it wrote.
 `test_synth_filter.py` is G-synth ([below](#synthetic-selectivity-attrs)).
 
 ### Shared conventions
@@ -153,10 +149,9 @@ keeps the first 10,000 of 45,932 test users.
 The harness reads the E1c checkpoints `checkpoints/sasrec-ssm-logq-d{64,128,256}`
 and `test.parquet`, which is the Hub's `trainer/test.parquet` (the split
 the checkpoints were scored on; the Hub's root `test.parquet` has the
-same rows without timestamps). yambda-5b is out of the study; its ETL,
-config and checkpoints stay.
+same rows without timestamps).
 
-`uv run eval-data yambda prep --variant {50m,500m,5b} --output-dir data/yambda/<v>`
+`uv run eval-data yambda prep --variant {50m,500m} --output-dir data/yambda/<v>`
 
 Downloads `<variant>/sequential/listens.parquet`, runs `preprocess()`
 (Listen+ branch: `played_ratio ≥ 50%`), and writes the four artifacts the
@@ -510,301 +505,6 @@ one-shot int8 quantize (two more 28.6 GiB fp32 copies) and LiNR V3's
 one-shot 1-bit build both OOMed here. Both now quantize chunk by chunk in
 the library, with `bench/` and the slice unchanged.
 
-### kuairand
-
-**Status: out of the study**; its ETL, config and
-code stays. Nothing is on the Hub (its repo, which held the trainer inputs, was deleted, 2026-10-15):
-`eval-data kuairand all` rebuilds the trainer and eval inputs (its `prep` and `attrs` steps), and the d64
-`train_on_val` checkpoint was not kept.
-d128 does not fit. The one filter cell recorded ran on the deleted gSASRec `gsasrec-d128-shared`
-checkpoint and is not reproducible.
-Nothing below is citable.
-
-`uv run eval-data kuairand all --output-dir data/kuairand`, or the four
-subcommands in turn. Sources, both CC BY 4.0 on Zenodo and md5-checked by
-`download`:
-
-- `KuaiRand-27K.tar.gz` (9.89 GB): four standard logs, one random-exposure
-  log, `video_features_basic_27k.csv`, `user_features_27k.csv` and three
-  video statistics CSVs;
-- `kuairand_video_categories.csv` (3.69 GB, the 2026 supplement): a
-  four-level category path per video, keyed on `final_video_id`, `-124`
-  for an unknown level.
-
-`convert` streams the tarball once, straight into ZSTD parquet under
-`data/_raw/kuairand/processed/`. It unpacks nothing to disk and never
-writes the 21.7 GB of statistics CSVs, which nothing reads.
-`final_video_id` is the 27K `video_id`: the supplement has exactly one row
-for each of the 32,038,725 ids `0..N-1`, and its level-1 category equals
-the basic features' first `tag` on 64 % of videos, far above chance.
-
-**`prep`.** The positives are `is_click == 1` and `is_rand == 0`.
-`is_rand` is 0 on every standard-log row and 1 on every row of the random
-log, so the filter drops exactly the 1,186,059 random exposures. Those
-exposures come from a uniform intervention, not from the user's choice,
-and KuaiRand ships them for unbiased evaluation. They are therefore not
-training signal. The harness measures recall against its own oracle and
-does not use them.
-
-That leaves 122,052,542 clicks from 27,285 users, a median of 3,806 per
-user.
-
-- **Catalog.** The full catalog is the item space, whether or not a video
-  was ever clicked. `item_id = video_id + 1`, and `item_id_map.json` is
-  the identity map over all 32,038,725 videos, 12.06 M of them clicked in
-  train.
-- **Split.** `timesplit.sequential_split_train_val_test` runs on the local
-  dates of the logs (Asia/Shanghai, a fixed UTC+8). Test is 2022-05-07 and
-  05-08, val is 05-06, with 30-minute gaps.
-- **`test.parquet`.** One row per user: the last 200 items of
-  train ++ val as the history, and every test click as the targets. That
-  is 26,221 rows with a median of 246 targets; `test_users.parquet` holds
-  their `user_id`s.
-- **`train.parquet`.** Each user's train history is cut from the end into
-  non-overlapping 200-transition windows (`train_windows`), because the
-  trainer reads only the last `max_seq_length + 1` items of a row. That
-  gives 561,486 rows covering all 109.6 M train transitions, instead of the
-  27k × 200 that one row per user would train.
-- **`timestamps`.** Every train/val/test row carries `timestamps`, the unix
-  seconds (`time_ms // 1000`) of each `item_ids` entry, cut into the same
-  windows and tails; it covers the history, not `targets`.
-
-**`attrs`.** It writes `item_attrs_narrow.pt` `[32,038,725, 7, 4]` int64
-(7.2 GB), `clause_is_reverse_narrow.pt`, `attr_vocab.json` (every
-vocabulary, the thresholds and the reference date) and
-`eval_split.parquet`. It takes 4 min and peaks at 37 GB RSS. The
-**two filter protocols** occupy disjoint clause slots, because the harness
-reads one `query_attrs_narrow` per query and a sweep only chooses which
-clauses are live:
-
-| clause | attribute | item slots | query value | mean pass rate |
-|---|---|---|---|---|
-| C0 | level-1 category (38) | 1 | **target-derived** | 3.6 % |
-| C1 | finer category, levels 4 → 3 → 2 in one space (801) | up to 3, deepest first | **target-derived** | 1.0 % |
-| C2 | `tag` (58) | up to 4, upstream order | **target-derived** | 4.5 % |
-| C3 | `upload_type` (38) | 1 | **target-derived** | 14.2 % |
-| C4 | `video_type` — **reverse** | 1 | **business**: "no ads" | 99.9 % |
-| C5 | duration ≤ {15, 30, 60, 180} s | every cap it fits under | **business**: the tightest cap at or above the user's median history duration | 52.9 % |
-| C6 | uploaded ≤ {3, 7, 14, 30} days before 2022-05-07 | every window it fits | **business**: "within 7 days" | 25.8 % |
-
-The pass rates are exact means over all 26,221 queries (`prep_log.json` →
-`attrs.mean_pass_rate`).
-
-- **Target-derived** values come from the held-out target's own
-  attributes, through `common.synthesize_qa_narrow`.
-- **Business-rule** values never look at the target. They are the rules a
-  feed would apply: hide ads, cap the length at what this user watches, and
-  keep it fresh.
-- **Ranges as equality.** C5 and C6 encode range predicates as equality
-  clauses: an item carries every threshold id it satisfies, so the query
-  value `j` means "≤ threshold `j`". The clause kernels support equality
-  only ([filtering](filtering.md#linr-paper-31--fixed-clause-schema-no-dsl)).
-- **Reverse and bloom.** C4 is the reverse clause, so it is excluded from
-  bloom sweeps.
-
-What the data ruled out:
-
-- **Upload month.** 90 % of videos were uploaded within 42 days of the
-  test start, so a month bucket is near-constant. Recency relative to the
-  test start replaces it.
-- **Author.** There are 8.8 M authors and the median author has one video,
-  so "not the target's author" would pass about 100 %.
-- **`music_type`.** Six values, one of them 65 %.
-
-The sweeps of [`config/kuairand.yaml`](../../evaluation/config/kuairand.yaml)
-are `t_*` over C0–C3 and `b_*` over C4–C6. Bloom runs `t_cat1`, `t_tag`,
-`b_short` and `b_fresh`. The dataset is not in the `filter` suite (out of the study).
-
-**Training** runs over the full 32 M catalog (32,038,725 items; 32,038,726 table rows with padding). At d64
-two separate tables fit (62.6 GB peak on the 80 GB H100). At d128 even one
-shared table (`reuse_item_embeddings`) does not: weight, two AdamW moments
-and the two dense gradients it receives in backward exceed 80 GB. Every epoch
-also scores the full catalog for the val users, so `eval_max_users` bounds
-that cost. The final
-KuaiRand model is refit with `train_on_val=true` at the epoch count chosen
-on val, because next-day clicks drift and the val day is otherwise never
-trained on: a train-only run picks the epoch count, the refit follows.
-
-The d64 refit takes ~261 s/epoch at 62.7 GB peak on the H100 (4 epochs).
-
-```
-data/kuairand/
-├── item_id_map.json            identity over 32,038,725 videos (video_id v → v+1), 619 MB
-├── train.parquet               item_ids, timestamps: 200-transition windows, 561,486 rows
-├── val.parquet / test.parquet  item_ids (last 200), timestamps, targets
-├── test_users.parquet          user_id of each test row
-├── item_attrs_narrow.pt        [32,038,725, 7, 4] int64, -1 pad
-├── clause_is_reverse_narrow.pt [7] bool = [F, F, F, F, T, F, F]
-├── attr_vocab.json
-├── eval_split.parquet          target_id, query_attrs_narrow [7]
-├── prep_log.json
-├── gt_d64/                     exact oracles, built by the harness per sweep
-└── checkpoints/sasrec-ssm-logq-d64-trainval/   the harness checkpoint (config/kuairand.yaml); retrained, never on the Hub
-    ├── best_model.pt, config.json, eval_quality.json, train_metrics.json
-    └── _resume.pt              model + AdamW state (the bulk of the dir); not on the Hub
-```
-
-### openalex
-
-**Status: built at 10 M, `bench check` clean, one filter cell run; not on the Hub; dropped from the
-study (2026-10-08).** The OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's.
-`convert --sample-rate 0.35 --workers 64` streamed all 2,040 files of release 2026-09-23
-(297.1 GB read in 572 s, 0 failures); a 15 M catalog was prepped and encoded
-(`encode_text` 15,663 s on the A100, 958 docs/s), did not fit the harness (below), and was
-cut to 10 M: `prep --keep-items 10000000` (374 s), `reshard --from-dir` the 15 M vectors
-(34 s, no encode; all 10 M rows `torch.equal` to their source rows,
-`check_reshard.py`), `encode_queries`,
-`attrs`. `verify_prep.py` re-derives every query with no mismatch, and
-`bench check --dataset openalex` reports `openalex d768: ok`. The dataset is in the `filter`
-suite. One cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (so
-`partial`): pass rate 0.0526, `recall_oracle@1000` **0.9959**, held-out (a cited paper)
-`recall@100` 0.505 / `@1000` 0.741, n = 10,000, 64 GB reserved. SilverTorch-triton
-and LiNR V2 / V3 run at D = 768 since the Triton kernels pad to the next power of two
-([kernels](kernels.md#padding)); not yet run on this dataset. Nothing here is citable yet.
-
-The full-scan filter counts (`convert_log.jsonl`, summed): 476,196,327 rows → year
-373,119,082 → English 261,736,236 → type 154,189,252 → flags 130,910,232 → hash sample
-(0.35) 45,821,266 → abstract 29,944,334 staged, 11 of them dropped as `abstract_truncated`.
-So **~85.6 M works are eligible**, not the 54.6 M `plan`'s row-group sample estimated: the
-sample under-counts badly because row groups cluster by type. Use `plan` for the projected
-bytes (exact, from every footer), not for the eligible count.
-
-The 10 M prep: 29,944,334 staged → 10,000,000 items, 19,944,334 in the held-out pool;
-7,658,677 pool papers cite the catalog, 4,890,174 have a same-field earlier-era reference,
-10,000 drawn; 35,673 qrels. The attrs: field 99.85 % covered, source 51.6 %; the target
-passes the query's field and era clauses for every query (subfield 75 %). The superseded
-15 M run (`run15m-*` logs) held 4.77 in-catalog references per query, 2.85 same field +
-earlier era.
-
-The dry run:
-`convert` on 8 real snapshot files (50,304 records) staged 4,581 works; a few thousand
-rows barely cite each other, so `api_citation_topup.py`
-added the 1,060 eligible works that 60 pool papers really cite (OpenAlex API, same
-`stage_table`). `prep --keep-items 5073` held out 75 papers with 994 in-catalog
-references (405 same field, earlier era), `verify_prep.py` re-derived all of it with no
-mismatch, `encode_text` / `encode_queries` ran on the A100 (a deleted shard re-encoded
-bit-identically), `attrs` built the clauses, and `bench check` against that directory
-reports `openalex d768: ok` (and flags a removed `eval_split.parquet`). Every harness
-reader (`layout.load_text_items` / `load_text_queries` / `load_item_attrs` /
-`load_query_attrs`) loads it.
-
-`download` → `convert` → `prep` → `encode_text` → `encode_queries` → `attrs`, with
-`plan` first; for a smaller catalog of the same staging, `reshard --from-dir <larger>`
-replaces `encode_text` (the N smallest hashes are a subset of any larger N, so the rows are
-copied, not encoded). Source: the OpenAlex quarterly snapshot on public S3, anonymous, CC0.
-Verified against release **2026-09-23**: the 2026 layout is
-`s3://openalex/data/{jsonl,parquet}/<entity>/updated_date=*/part_*` with a
-`manifest.json` per format, written last (the old `data/works/` path is an S3 delete
-marker; `legacy-data/` is frozen). `works` is **476,196,327 records in 2,040 files**:
-659.0 GB of gzipped JSONL, **707.1 GB of parquet**. `download` pins that manifest in
-`_raw/openalex/manifest.json`; every later step walks its files in (date, part) order.
-
-**Why the parquet copy.** Column projection. `convert` reads 14 leaves (`id`,
-`publication_year`, `language`, `type`, the three flags, `primary_topic.{field,subfield}.id`,
-`primary_location.source.id`, `open_access.is_oa`, `title`, `abstract_inverted_index`,
-`referenced_works`), which the footers of all 2,040 files put at **297.1 GB (42.0 %)**. The
-abstract is a JSON *string* in the parquet copy (an object in JSONL and the API); only rows
-that survive the cheap filters are JSON-parsed.
-
-#### The streaming `convert`
-
-The snapshot is never landed. `convert --workers W` runs one spawned process per file
-(`stage_file`): row group by row group, read the projected columns over S3, filter
-(`stage_table`), and write the survivors to `_raw/openalex/staging/<date>_<part>.parquet`
-atomically. A killed run resumes at the first file without a staging parquet; the
-parameters (release, year range, types, sample rate, seed) are pinned in
-`staging/params.json` and a resume under different ones is refused. A file that fails with
-an S3 / Arrow error is reported and skipped; rerunning picks it up.
-
-The filters, in order, each counted into `convert_log.jsonl`:
-
-1. `publication_year` in [2000, release year];
-2. `language == "en"`;
-3. `type` in `article, preprint, review, conference-paper, book-chapter, dissertation` —
-   `dataset` is 29 % of English works and mostly boilerplate (every CCDC crystal-structure
-   entry shares one abstract, i.e. exact-duplicate vectors);
-4. not `is_paratext` / `is_retracted` / `is_xpac`;
-5. the **hash sample**: `common.pmid_hash(work_id, seed) < sample_rate · 2⁶⁴`;
-6. abstract present. The text is the inverted index's words in position order
-   (`abstract_text`). The parquet copy caps strings just under 32,767 chars, which cuts
-   about one index in 7 M mid-JSON (1 in 7,108,348 sampled, W4214716959); such a row is
-   counted as `abstract_truncated` and dropped.
-
-`plan` measures these rates on a seeded sample of row groups (weighted by records) and
-turns `--keep-items` into the `--sample-rate` that stages `keep_items × (1 + margin)`
-works. The parser was checked row-for-row against the API: the abstract rebuilt from the
-parquet string equals the one rebuilt from the API object.
-
-#### The slice, the queries, the relevance
-
-`prep` keeps the **N smallest work-id hashes** of the staged rows (`common.select_pmids`,
-so the catalog is the same set whatever the file order, and a smaller N is a subset of a
-larger one); a work id staged twice keeps its newest copy. Item ids are 1-indexed dense in
-(file, row) order; `papers.parquet` is written in item-id order, which `encode_text` and
-`attrs` rely on (`attrs` checks it).
-
-The staged works above rank N — the `margin` — are the **held-out pool**: never in the
-catalog. A pool paper is a query candidate when at least one work it references is in the
-catalog *with the same field and a strictly earlier era* (below). `--n-heldout` (10,000)
-of them are drawn with the seed. Per query:
-
-- `qrels.parquet` — every in-catalog reference (`query_row, item_id, passes_field_era`):
-  the relevance signal, "the papers this paper cites";
-- `heldout.parquet` — `item_id` = **the target**, one reference drawn with the seed among
-  those passing field + era (the harness text path takes one target per query), plus the
-  query's `work_id / year / era / field / subfield / source / is_oa` and its
-  `n_relevant` / `n_relevant_field_era`;
-- `queries.parquet` — its title and abstract, the query text.
-
-Recall is measured against the harness's exact filtered oracle, as everywhere; the qrels
-carry the citation relevance for the multi-target metrics the harness does not yet read.
-`verify_prep.py` re-derives every query's qrels,
-flags and target from `item_id_map.json`, `papers.parquet` and the staged `refs`.
-
-#### Attribute semantics
-
-`item_attrs_narrow.pt` is `[N, 5, 4]`, the shape of the other text datasets:
-
-| clause | attribute | cardinality | query value |
-|---|---|---|---|
-| C0 | `primary_topic.field` | 26 | the query's field |
-| C1 | earlier era (below) | 5 eras | the query's era |
-| C2 | `primary_topic.subfield` | ~250 | the query's subfield |
-| C3 | `primary_location.source` | top `--source-vocab` (5,000) | the query's own venue — **reverse** |
-| C4 | `open_access.is_oa` (null → 0) | 2 | `1` for every query |
-
-`clause_is_reverse_narrow.pt` is `[F, F, F, T, F]`; C3 is bloom-incompatible and
-excluded from the bloom sweeps of [`config/openalex.yaml`](../../evaluation/config/openalex.yaml).
-The study's predicate "year < query year, same field" is the `field_era` sweep, C0 ∧ C1.
-
-**Why eras.** Clauses are equality-only
-([filtering](filtering.md#linr-paper-31--fixed-clause-schema-no-dsl)), so an order
-predicate is encoded as a set: an item of era *b* lists the eras *b+1 … 4* in its C1
-slots, and a query sends its own era, which matches exactly the items of strictly earlier
-eras (`earlier_era_slots`). Four slots allow five eras: 2000–09, 2010–14, 2015–18,
-2019–21, ≥2022 (the sampled eligible works split 25 / 21 / 16 / 15 / 23 %). This is
-**subtractive** against the exact year predicate — a reference from earlier in the
-query's own era is excluded — so it benchmarks "published in an earlier era", and the
-harness oracle is built from the same attrs, so recall stays exact for that filter.
-
-#### Encoding
-
-`nomic-embed-text-v1.5` at its native 768 dims (no truncation),
-`"search_document: "` / `"search_query: "` prefixes as on arxiv, text
-`"{prefix}{title}. {abstract[:1500]}"`, 512 tokens, bf16 weights, fp16 L2-normalised
-output. `encode_text` writes `content_d768/text_emb_shard_NNN.pt` of `--shard-rows`
-(1 M) items each, atomically; a killed run skips every finished shard, and
-`encode_params.json` refuses a resume under different settings. `shard_index.json` and
-`text_emb.meta.json` are written only once every shard exists, so a partial encode is
-never loadable. The encoder's remote code needs `einops` (now a dependency).
-
-Measured on the A100 on 20,292 real texts (mean 228 tokens, 1.7 % at 512): **898 docs/s**
-with bf16 weights at batch 256 (755 under bf16 autocast, 813 at batch 512; min cosine
-between the two dtypes 0.99989); the forward alone runs 954 docs/s, so tokenization in
-the main thread costs ~6 %. `flash_attn` is not installed.
-
-#### Budget
-
 ### laion30m
 
 **Status: built, `bench check` ok; not on the Hub, so a pod that needs it rebuilds it with the
@@ -1025,8 +725,6 @@ data/arxiv-papers/                       # config/arxiv.yaml: data_dir
 (`content_d768`) whose item matrix is **sharded** — `shard_index.json` +
 `text_emb_shard_*.pt`, the synth-arxiv layout — instead of one
 `text_emb.pt`; `load_text_items` and `validate_layout` take either.
-`openalex` is the pubmed shape plus `queries.parquet` and `qrels.parquet`
-(listing under [openalex](#openalex)).
 
 Filter sweeps additionally need:
 
@@ -1049,14 +747,10 @@ dataset in `EVAL_DATASETS`, and `results_repo()` is `<owner>/eval-results`, the 
 HF user or organisation in `RETRIEVE_HUB_OWNER` (`hub_owner()`, its one reader; unset, every Hub
 command raises with that instruction).
 
-`yambda-5b` and `kuairand` name repos the user deleted (2026-10-15); their keys stay in the
-code; a fetch of them fails.
-
 `<owner>/eval-pubmed` (private, revision `10d48d05`, 17.2 GB) holds the dot-product 10 M slice
 (`pubmed-medcpt-dot`, [pubmed](#pubmed)): `content_d768/`, attrs, `eval_split.parquet`, `heldout.parquet`,
 `item_id_map.json` and vocabularies, no titles, abstracts or ETL intermediates (published from a directory of
-hardlinks to exactly those files). `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `<owner>/eval-openalex` likewise. KuaiRand has no Hub repo (`<owner>/eval-kuairand`, which held only its trainer inputs, was
-deleted, 2026-10-15); rebuild it with its ETL ([kuairand](#kuairand)). `<owner>/eval-laion30m` (private) is to hold the
+hardlinks to exactly those files). `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `<owner>/eval-laion30m` (private) is to hold the
 staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`); not yet published. The old A100
 `checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).
 
@@ -1067,8 +761,7 @@ staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`
 - `<owner>/eval-goodreads-work-id` `trainer/`: all of `data/goodreads-work-id/trainer/`
   (`train/val/test.parquet`, `item_id_map.json`, `prep_log.json`, `book_to_work.parquet`);
 - `<owner>/eval-yambda-500m` `trainer/`: all of `data/yambda-500m/trainer/`
-  (`train/val/test.parquet`, `item_id_map.json`, the re-prep with `timestamps`);
-- KuaiRand: none on the Hub (repo deleted); rebuild everything with `eval-data kuairand all`.
+  (`train/val/test.parquet`, `item_id_map.json`, the re-prep with `timestamps`).
 
 ```bash
 hf download <owner>/eval-goodreads-work-id --repo-type dataset \
@@ -1133,8 +826,8 @@ reproducible, not merely restarted.
 `resume_every` (default 1) is the number of epochs between `_resume.pt`
 writes (`resume_due`); the last epoch, including an early stop, always
 writes it, so a finished run stays resumable. The file is model + both AdamW
-moments, three times `best_model.pt`: 49.2 GB and ~45 s per write at
-KuaiRand d64 (two 32 M × 64 tables), about a fifth of a ~210 s epoch. The
+moments, three times `best_model.pt`: 49.2 GB and ~45 s per write with
+two 32 M × 64 item tables, about a fifth of a ~210 s epoch. The
 trade-off: a crash loses up to `resume_every − 1` finished epochs, which
 `--resume` retrains. A superseded best snapshot is deleted at once unless
 the current `_resume.pt` names it; that one goes at the next `_resume.pt`

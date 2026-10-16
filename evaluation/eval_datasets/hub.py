@@ -19,11 +19,8 @@ from loguru import logger
 EVAL_DATASETS: tuple[str, ...] = (
     "arxiv-papers",
     "yambda-500m",
-    "yambda-5b",
     "goodreads-work-id",
     "pubmed",
-    "kuairand",
-    "openalex",
     "laion30m",
 )
 

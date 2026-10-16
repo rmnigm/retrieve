@@ -31,8 +31,6 @@ with logQ, L2-normalized).
 |---|---|---|---|
 | `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `<owner>/eval-goodreads-work-id` `checkpoints/` |
 | `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `<owner>/eval-yambda-500m` `checkpoints/`; yambda-500m is in the study, unfiltered |
-| `kuairand.yaml` | `sasrec-ssm-logq-d64-trainval` | 64 | not kept anywhere (user); KuaiRand is out of the study |
-| `yambda-5b.yaml` | `gsasrec-d{dim}` | 64, 128 | not kept anywhere (its Hub repo was deleted, 2026-10-15); out of the study, no E1c model trained |
 
 Each E1c dir holds `best_model.pt`, `item_embs.pt`, `config.json`,
 `item_id_map.json`, `eval_quality.json`, `train_metrics.json` and a short
@@ -53,9 +51,6 @@ before the switch (the earliest goodreads runs use `gsasrec-d128-drop0.5-id`).
 |---|---|
 | `<owner>/eval-goodreads-work-id` | `gsasrec-d{64,128,256}-drop0.5-id` |
 | `<owner>/eval-yambda-500m` | `gsasrec-d{64,128,256}-drop0.5` |
-
-KuaiRand's gSASRec `gsasrec-d128-shared` was deleted from the Hub (user);
-nothing reproduces the one filter cell made with it.
 
 The yambda-500m ones as recorded at training time (Listen+, full-catalog
 ranking against all 1,866,170 items, no history masking, the
@@ -229,13 +224,10 @@ The registry lives in
 | Dataset key | HF repo (dataset type) |
 |---|---|
 | `yambda-500m` | `<owner>/eval-yambda-500m` |
-| `yambda-5b` | `<owner>/eval-yambda-5b` |
 | `goodreads-work-id` | `<owner>/eval-goodreads-work-id` |
 | `arxiv-papers` | `<owner>/eval-arxiv-papers` |
-| `kuairand` | `<owner>/eval-kuairand` |
-
-The `yambda-5b` and `kuairand` repos were deleted by the user (2026-10-15): their keys remain
-in the registry but resolve to nothing.
+| `pubmed` | `<owner>/eval-pubmed` |
+| `laion30m` | `<owner>/eval-laion30m` |
 
 A given checkpoint then lands at
 `<owner>/eval-<dataset>/tree/main/checkpoints/<ckpt-id>/` rather than its
