@@ -123,7 +123,7 @@ for tail in (-1, 2**40):
     ids, counts = exact.evaluate_indices(exact.prepare_queries(qa))
     assert hits and (counts < n).all() and (ids[~counts_to_valid(counts, n)] == tail).all()
     res = [m(query, m.prepare_queries(qa)) for m in mods]
-        c_ids, c_counts = combine_indices([exact, other], [qa, qa])
+    c_ids, c_counts = combine_indices([exact, other], [qa, qa])
     res.append((torch.where(counts_to_valid(c_counts, c_ids.shape[1]), c_ids, -1), c_counts))
     torch.empty = real_empty
     torch.cuda.synchronize()
