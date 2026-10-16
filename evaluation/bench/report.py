@@ -34,7 +34,8 @@ def provenance(recs: list[dict[str, Any]], gate: str | None) -> dict[str, Any]:
 
     if not gate:
         add(
-            "no --gate given: no roadmap gate is declared green for these records", "gate not green"
+            "no --gate given: no validation gate is declared passed for these records",
+            "gate not green",
         )
     if status["failed"]:
         add(f"{status['failed']} record(s) with status=failed", f"{status['failed']} failed")
@@ -212,7 +213,7 @@ def generate(results_dir: Path, out: Path, *, gate: str | None = None) -> dict[s
 @click.option(
     "--gate",
     default=None,
-    help="the roadmap step whose gate is green for these records. Without it the report is "
+    help="the validation gate passed for these records. Without it the report is "
     "marked NOT CITABLE; it cannot override evidence.",
 )
 def report(root, out, gate) -> None:

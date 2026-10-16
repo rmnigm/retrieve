@@ -5,7 +5,7 @@ pure function of ``fit``'s output, so a non-reproducible ``fit`` makes every Sil
 number non-reproducible with it. Measured: two seed-0 builds of the same
 index differed by 1.8e-2 in the centroids, because the centroid update reduced with
 ``index_add_``'s floating-point atomics, whose summation order follows block scheduling. Quality
-then only reproduced to ~1e-4, under the golden gate's 1e-6.
+then only reproduced to ~1e-4, under a 1e-6 quality gate.
 
 The reduction is now order-fixed (``KMeans._cluster_sums``: integer ``bincount`` for the
 counts, a float64 one-hot GEMM accumulated panel by panel for the sums). These tests are the

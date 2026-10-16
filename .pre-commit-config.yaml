@@ -13,11 +13,11 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=1024]  # raw outputs live on the Hub (docs/system/evaluation.md)
-      # Frozen or recorded bytes are never rewritten: the papers, raw artifacts, the golden cells.
+      # Meta's vendored files keep their bytes.
       - id: end-of-file-fixer
-        exclude: ^(articles|research/artifacts|evaluation/golden|silvertorch)/
+        exclude: ^silvertorch/
       - id: trailing-whitespace
-        exclude: ^(articles|research/artifacts|evaluation/golden|silvertorch)/
+        exclude: ^silvertorch/
 
   - repo: local
     hooks:

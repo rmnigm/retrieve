@@ -16,9 +16,9 @@ from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download, snapshot
 from bench import records
 from bench.records import sha256
 from bench.report import provenance
+from eval_datasets.hub import results_repo
 
 EVAL_DIR = Path(__file__).resolve().parents[1]
-RESULTS_REPO = "pinkmeme/eval-results"  # the registry entry, beside eval_datasets.hub.EVAL_REPOS
 MANIFEST_VERSION = 1
 GENERATED = ("MANIFEST.json", "README.md")
 
@@ -92,7 +92,7 @@ def readme(manifests: list[dict]) -> str:
         "upload overwrites it. Each subtree's `MANIFEST.json` is the authority.",
         "",
         '**Nothing here is citable unless its `MANIFEST.json` says `"citable": true`.**',
-        "A subtree is citable only when the uploader named a green roadmap gate *and* the",
+        "A subtree is citable only when the uploader named a passed validation gate *and* the",
         "records back it: no `failed` or `partial` cell, no dirty library subtree, and every",
         "record taken on `staging`, `development` or `main` (CLAUDE.md rule 2 — harness numbers",
         "from a branch are not paper material). The verdict is computed by the same function",
@@ -181,7 +181,9 @@ def _other_manifests(api, repo_id: str, prefix: str) -> list[dict]:
 
 
 @click.command()
-@click.option("--repo-id", default=RESULTS_REPO, show_default=True, help="target HF dataset repo")
+@click.option(
+    "--repo-id", default=None, help="target HF dataset repo [default: <owner>/eval-results]"
+)
 @click.option(
     "--results",
     type=click.Path(path_type=Path),
@@ -192,14 +194,14 @@ def _other_manifests(api, repo_id: str, prefix: str) -> list[dict]:
 @click.option(
     "--gate",
     default=None,
-    help="the roadmap step whose gate is green for these records (e.g. D1). Without "
+    help="the validation gate passed for these records. Without "
     "it the manifest says NOT CITABLE; it cannot override the evidence.",
 )
 @click.option(
     "--private/--public",
     default=True,
     show_default=True,
-    help="public is roadmap F4's decision, never a default",
+    help="a public repo is a release decision, never a default",
 )
 @click.option(
     "--verify",
@@ -210,6 +212,7 @@ def _other_manifests(api, repo_id: str, prefix: str) -> list[dict]:
 @click.option("--dry-run", is_flag=True, help="print the listing and the manifest, upload nothing")
 def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:  # fmt: skip
     """Publish a results tree to a HuggingFace dataset repo, with its provenance."""
+    repo_id = repo_id or ("<owner>/eval-results" if dry_run else results_repo())
     results = (results if results.is_absolute() else EVAL_DIR / results).resolve()
     if not results.is_dir():
         raise click.ClickException(f"{results} is not a directory")
@@ -260,7 +263,9 @@ def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:
 
 
 @click.command()
-@click.option("--repo-id", default=RESULTS_REPO, show_default=True, help="source HF dataset repo")
+@click.option(
+    "--repo-id", default=None, help="source HF dataset repo [default: <owner>/eval-results]"
+)
 @click.option("--path-in-repo", "prefix", required=True, help="the subtree to fetch, e.g. d1-a")
 @click.option(
     "--results",
@@ -271,6 +276,7 @@ def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:
 def fetch(repo_id, prefix, results) -> None:
     """Download one published subtree into a results tree, checked against its manifest, which
     is kept beside the files (``bench merge`` reads it; a re-upload skips it)."""
+    repo_id = repo_id or results_repo()
     results = (results if results.is_absolute() else EVAL_DIR / results).resolve()
     prefix = prefix.strip("/")
     with tempfile.TemporaryDirectory(prefix="bench-fetch-") as tmp:

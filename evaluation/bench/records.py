@@ -122,7 +122,7 @@ def append_record(path: Path, rec: dict[str, Any]) -> None:
         os.fsync(f.fileno())
 
 
-# RENAME (roadmap §5): the adapted SilverTorch was `official-fork` when the study's records were
+# RENAME: the adapted SilverTorch was `official-fork` when the study's records were
 # written; `official` (Meta's code as published, no longer in the workspace) keeps its label.
 RENAMED_BACKENDS = {"official-fork": "cuda"}
 

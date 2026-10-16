@@ -96,7 +96,7 @@ def fake_hub(monkeypatch):
 
 
 def _run(*args):
-    return CliRunner().invoke(upload.upload, list(args))
+    return CliRunner().invoke(upload.upload, list(args), env={"RETRIEVE_HUB_OWNER": "u"})
 
 
 # ----- the listing: scratch never leaves the box ------------------------------
@@ -293,7 +293,7 @@ def _published(tree, tmp_path, monkeypatch):
 
 
 def _fetch(*args):
-    return CliRunner().invoke(upload.fetch, list(args))
+    return CliRunner().invoke(upload.fetch, list(args), env={"RETRIEVE_HUB_OWNER": "u"})
 
 
 def test_fetch_restores_a_subtree_resume_can_read(tree, tmp_path, monkeypatch):

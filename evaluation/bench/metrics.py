@@ -1,5 +1,5 @@
 """Retrieval quality metrics as device-side running sums (§2.4). ``per_row``'s float32
-arithmetic and op order are frozen: the golden cells were scored with it."""
+arithmetic and op order are frozen, so quality numbers compare across runs."""
 
 from __future__ import annotations
 

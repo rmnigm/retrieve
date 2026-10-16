@@ -12,9 +12,7 @@ sources: [docs/, retrieve/docs/]
 > Last updated: 2026-10-11 | Total pages: 9
 
 How the `retrieve` library (package `torchretrieve`) and the `evaluation`
-harness work, kept in sync with the code. The research behind it (the
-work queue, decisions, measured results, the paper drafts) is a separate
-wiki in [research/](../research/index.md).
+harness work, kept in sync with the code.
 
 ## Library user guide
 
@@ -50,7 +48,6 @@ their headings are stable.
 
 ## Contributing
 
-The coding guidelines ([research/contracts](../research/contracts/coding-guidelines.md))
-apply to every change; a change to behaviour updates the matching
+[AGENTS.md](../AGENTS.md)'s rules apply to every change; a change to behaviour updates the matching
 `docs/system` page in the same commit, and
 `python3 scripts/check_doc_links.py` stays at zero broken links.

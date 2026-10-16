@@ -95,7 +95,7 @@ def test_campaign_records_a_timed_out_child(tiny_configs, tmp_path, monkeypatch)
 
 
 def test_campaign_default_timeout_fits_the_largest_group(tiny_configs, tmp_path, monkeypatch):
-    """Roadmap H3: without ``--timeout`` every child gets 48 h, above the ~10 h arxiv ``deep``
+    """Without ``--timeout`` every child gets 48 h, above the ~10 h arxiv ``deep``
     ``silvertorch`` group, about 10 h."""
     ds, _ = tiny_configs
     seen = []

@@ -517,8 +517,7 @@ gates are semantic and live in `test_official.py`.
   `torch.equal`, the two cached scalars, forwards); `build_timings` is `{}` on the prebuilt
   module; the full chain (`set_item_attributes` with reverse flags, `set_backend` with an
   `OfficialConfig`, `set_device`); `build()` with neither or both sources raises.
-- `kmeans_init` (`TestKMeansInit`): the default is `"random"`
-  ([decisions](../../research/decisions.md#library)); a `"kmeans++"` module builds on both
+- `kmeans_init` (`TestKMeansInit`): the default is `"random"`; a `"kmeans++"` module builds on both
   backends, its centroids differ from random init's, are reproducible, and
   `build_timings["kmeans_s"] > 0`.
 - Edge case: `n_lists = N` (one item per cluster) → recall ≥ 0.85 at full probe.
@@ -576,8 +575,7 @@ chunk-tail size, on CUDA and CPU. And `init="kmeans++"`:
 
 ### [`test_boundary.py`](../../retrieve/tests/correctness/test_boundary.py)
 
-The library side of the library-harness boundary
-([decisions](../../research/decisions.md#harness)), for
+The library side of the library-harness boundary, for
 each of `SilverTorch` (`filter_mode="exact"`, on the adapted code) and `LiNRV1`–`LiNRV3` (with an
 `ExactAttributeFilter`, on `triton` and `torch`) on a tiny index:
 

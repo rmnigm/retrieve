@@ -28,8 +28,8 @@ def _resolve_ckpt_ids(dataset: str, selector: str) -> list[str]:
 @click.option(
     "--dataset",
     required=True,
-    type=click.Choice(sorted(hub.EVAL_REPOS)),
-    help="Logical dataset name (key into EVAL_REPOS).",
+    type=click.Choice(sorted(hub.EVAL_DATASETS)),
+    help="Logical dataset name (one of hub.EVAL_DATASETS).",
 )
 @click.option(
     "--ckpt-id",

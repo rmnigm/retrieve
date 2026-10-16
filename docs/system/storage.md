@@ -10,9 +10,7 @@ sources: [evaluation/eval_datasets/hub.py, evaluation/bench/]
 # Where the harness keeps data
 
 What a machine running the harness needs on disk, and the variables that
-point the harness at it. The GPU pods this project's numbers were measured
-on, their disks and budget are in the research wiki
-([pod storage](../../research/environment/storage.md)).
+point the harness at it.
 
 ## Data root
 
@@ -46,11 +44,9 @@ export UV_PROJECT_ENVIRONMENT=/venvs/retrieve         # optional: one shared ven
 `TORCHINDUCTOR_CACHE_DIR` must be **private per job** (one job per GPU):
 inductor's on-disk FX cache does not invalidate when a `@triton_op` host
 wrapper's Python source changes, so a shared `/tmp/torchinductor_root`
-silently serves stale kernels
-([reproduction-deviations](../../research/paper/reproduction-deviations.md) D-7).
+silently serves stale kernels.
 For the same reason it must change with the library tree: a job directory
-reused after a library edit replays the old body in every `graph`-mode cell
-([validation](../../research/validation.md#library-gates), V1-FUSE), so it is
+reused after a library edit replays the old body in every `graph`-mode cell, so it is
 keyed by `code_version`: `bench` appends the library tree's `code_version` to
 the directory it is given, and the library pytest suite uses a fresh
 directory per run. A script that compiles outside `bench` and pytest keys its

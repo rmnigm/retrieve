@@ -301,7 +301,7 @@ class _Fixed(torch.nn.Module):
 
 
 def test_postfilter_records_oracle_recall_per_k(tiny_configs, tmp_path):
-    """Roadmap D5-code: ``recall_oracle`` against the exact oracle, at each k from a run at
+    """``recall_oracle`` against the exact oracle, at each k from a run at
     that k (``PER_K_QUALITY``), never above the exact V1 of the same sweep."""
     ds, suites = tiny_configs
     jobs = load_matrix(ds, suites, "postfilter")
@@ -441,7 +441,7 @@ def test_perf_prepares_the_pool_before_timing_and_records_it(tiny_configs, monke
 
 
 def test_eager_only_partial_is_per_job(tiny_configs, tmp_path, monkeypatch):
-    """Roadmap H6: an eager-only run marks a capturable module's record ``partial`` for
+    """An eager-only run marks a capturable module's record ``partial`` for
     ``modes`` and not an uncapturable one, whose graph entry is ``not_capturable`` anyway.
     Both run the torch path underneath; the ``cuda``-labelled build is flagged uncapturable."""
     job = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP])[0]

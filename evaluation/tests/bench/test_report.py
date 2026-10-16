@@ -118,7 +118,7 @@ def test_each_reason_is_stated_in_the_verdict_and_the_report(results, tmp_path):
     records.append_record(results / "filter" / "goodreads-d128.jsonl", rec)
     prov = report.generate(results, tmp_path / "out")
     assert prov["blockers"] == [
-        "no --gate given: no roadmap gate is declared green for these records",
+        "no --gate given: no validation gate is declared passed for these records",
         "1 record(s) with status=failed",
         "1 record(s) with status=partial (partial_reasons: skip_perf 1)",
         "1 record(s) with env.dirty (library subtree was dirty)",

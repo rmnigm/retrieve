@@ -14,7 +14,7 @@ EVAL = Path(__file__).resolve().parents[1]
 PACKAGES = ("bench", "training", "eval_datasets")
 MIN_FILES = 25  # 37 today; fewer means the walk is broken, not that the tree shrank
 ALLOWED = {
-    "bench": {"bench", "training.encode", "eval_datasets.layout"},
+    "bench": {"bench", "training.encode", "eval_datasets.layout", "eval_datasets.hub"},
     "training": {"training", "eval_datasets.hub", "eval_datasets.layout"},
     "eval_datasets": {"eval_datasets"},
 }

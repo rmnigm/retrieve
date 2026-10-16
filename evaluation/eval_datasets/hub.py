@@ -14,16 +14,18 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from huggingface_hub.utils import HfHubHTTPError
 from loguru import logger
 
-EVAL_REPOS: dict[str, str] = {
-    "arxiv-papers": "pinkmeme/eval-arxiv-papers",
-    "yambda-500m": "pinkmeme/eval-yambda-500m",
-    "yambda-5b": "pinkmeme/eval-yambda-5b",
-    "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
-    "pubmed": "pinkmeme/eval-pubmed",
-    "kuairand": "pinkmeme/eval-kuairand",
-    "openalex": "pinkmeme/eval-openalex",
-    "laion30m": "pinkmeme/eval-laion30m",
-}
+# each dataset's eval repo is ``<owner>/eval-<dataset>`` under the HF user or organisation named by
+# ``RETRIEVE_HUB_OWNER`` (``hub_owner()``), the one reader of that variable
+EVAL_DATASETS: tuple[str, ...] = (
+    "arxiv-papers",
+    "yambda-500m",
+    "yambda-5b",
+    "goodreads-work-id",
+    "pubmed",
+    "kuairand",
+    "openalex",
+    "laion30m",
+)
 
 RAW_REPOS: dict[str, tuple[str, str]] = {  # source -> (repo_id, repo_type)
     "arxiv": ("open-index/open-arxiv", "dataset"),
@@ -98,12 +100,27 @@ def _require_raw(source: str) -> tuple[str, str]:
         raise ValueError(f"Unknown raw source {source!r}. Known: {avail}") from e
 
 
-def _require_dataset(dataset: str) -> str:
-    try:
-        return EVAL_REPOS[dataset]
-    except KeyError as e:
-        avail = ", ".join(sorted(EVAL_REPOS)) or "(none)"
-        raise ValueError(f"Unknown dataset {dataset!r}. Known: {avail}") from e
+def hub_owner() -> str:
+    """The HF user or organisation holding the ``eval-<dataset>`` and ``eval-results`` repos."""
+    owner = os.environ.get("RETRIEVE_HUB_OWNER")
+    if not owner:
+        raise RuntimeError(
+            "set RETRIEVE_HUB_OWNER to the HF user or organisation that holds the eval-<dataset> "
+            "and eval-results repos"
+        )
+    return owner
+
+
+def eval_repo(dataset: str) -> str:
+    """``<owner>/eval-<dataset>``, the dataset's HF repo (eval inputs + ``checkpoints/``)."""
+    if dataset not in EVAL_DATASETS:
+        raise ValueError(f"Unknown dataset {dataset!r}. Known: {', '.join(EVAL_DATASETS)}")
+    return f"{hub_owner()}/eval-{dataset}"
+
+
+def results_repo() -> str:
+    """``<owner>/eval-results``, the results repo ``bench upload`` / ``bench fetch`` use."""
+    return f"{hub_owner()}/eval-results"
 
 
 def download_eval_dataset(
@@ -115,7 +132,7 @@ def download_eval_dataset(
 ) -> Path:
     """Pull ``dataset``'s eval inputs; ``dims`` restricts the ``content_d*`` directories,
     ``include_checkpoints`` adds ``checkpoints/``."""
-    repo_id = _require_dataset(dataset)
+    repo_id = eval_repo(dataset)
     local = (target or eval_dir(dataset)).resolve()
     local.mkdir(parents=True, exist_ok=True)
 
@@ -151,7 +168,7 @@ def download_eval_dataset(
 
 def download_checkpoint(dataset: str, ckpt_id: str, target: Path | None = None) -> Path:
     """Pull a single checkpoint directory from a per-dataset eval repo."""
-    repo_id = _require_dataset(dataset)
+    repo_id = eval_repo(dataset)
     local = (target or eval_dir(dataset)).resolve()
     local.mkdir(parents=True, exist_ok=True)
 
@@ -233,7 +250,7 @@ def upload_eval_dataset(
     dry_run: bool = False,
 ) -> None:
     """Create-or-update the per-dataset eval repo and upload eval inputs."""
-    repo_id = _require_dataset(dataset)
+    repo_id = eval_repo(dataset)
     src = (source or eval_dir(dataset)).resolve()
     if not src.is_dir():
         raise FileNotFoundError(f"{src} does not exist")
@@ -322,7 +339,7 @@ def upload_checkpoint(
     dry_run: bool = False,
 ) -> None:
     """Upload one checkpoint directory to ``checkpoints/<ckpt_id>/`` of the dataset's repo."""
-    repo_id = _require_dataset(dataset)
+    repo_id = eval_repo(dataset)
     src = (source or ckpt_dir(dataset, ckpt_id)).resolve()
     if not src.is_dir():
         raise FileNotFoundError(f"{src} does not exist")

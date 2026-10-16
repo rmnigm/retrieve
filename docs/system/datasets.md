@@ -149,7 +149,7 @@ parquet schema (nested `primary_topic.field.id` etc.) and runs `prep` →
 
 yambda-500m is in the study unfiltered only: it has no attributes, so its
 config has no `filters` block and every cell is `none`; `users_limit: 10000`
-keeps the first 10,000 of 45,932 test users ([decisions](../../research/decisions.md#datasets)).
+keeps the first 10,000 of 45,932 test users.
 The harness reads the E1c checkpoints `checkpoints/sasrec-ssm-logq-d{64,128,256}`
 and `test.parquet`, which is the Hub's `trainer/test.parquet` (the split
 the checkpoints were scored on; the Hub's root `test.parquet` has the
@@ -200,8 +200,7 @@ as `item_ids`, the input history only) and, for val/test, `targets`.
 Nothing breaks ties between one user's events at the same second, and
 goodreads has many (bulk shelving), so the order inside a tie, and which
 tied items survive the 200-item cut, change from run to run; a re-run
-differs from the Hub copy only there
-([validation](../../research/validation.md#trainer-inputs-with-timestamps-data-gates-not-citable)).
+differs from the Hub copy only there.
 
 **Vocab order (`attrs`).** Every vocab and top-k cut is a total order of its inputs: language,
 author and wide-shelf vocab by count descending, **ties by name**; per-book and per-work genre
@@ -211,7 +210,7 @@ keeps the first row per `book_id`. Before this, `group_by` handed back tied valu
 thread-dependent order, so their ids (C1 language, C4 author, the wide shelves) and the genre
 picked among tied counts changed from build to build. Two builds are byte-identical
 (`tests/eval_datasets/test_goodreads.py`). The staged copy stays canonical, pinned by Hub
-revision `pinkmeme/eval-goodreads-work-id@4714e9b5` (`item_attrs_narrow.pt` sha256
+revision `<owner>/eval-goodreads-work-id@4714e9b5` (`item_attrs_narrow.pt` sha256
 `584993bd…`, `eval_split.parquet` `f1208e12…`); a rebuild with this code is **not byte-equal** to it.
 
 > `prep` deliberately passes `drop_non_train_items=False`, mirroring
@@ -223,7 +222,7 @@ the catalog parquets:
 
 ```
 item_attrs_narrow.pt        [N, 5, 4] int64   (genre, lang, format, year, author)
-item_attrs_wide.pt          [N, 1, 32] int64  (shelves; built, never read: [backlog](../../research/backlog.md#unused-dataset-artifacts))
+item_attrs_wide.pt          [N, 1, 32] int64  (shelves; built, never read)
 clause_is_reverse_narrow.pt [5] bool = [F, T, F, F, F]
 lang_vocab.json / format_vocab.json / author_vocab.json / wide_shelf_vocab.json
 wide_shelf_global_freq.pt   [V_wide] int64
@@ -254,7 +253,7 @@ by name**; the author join before each paper's `head(2)` keeps the left order. B
 tied values (about 1.5 M authors, most of them tied) got thread-dependent ids, so C4 author ids
 and, through the query side, `eval_split.parquet` changed from build to build. Two builds are
 byte-identical (`tests/eval_datasets/test_arxiv.py`). The staged copy stays canonical, pinned by
-Hub revision `pinkmeme/eval-arxiv-papers@354e6937` (`item_attrs_narrow.pt` sha256 `7f5f2f4d…`,
+Hub revision `<owner>/eval-arxiv-papers@354e6937` (`item_attrs_narrow.pt` sha256 `7f5f2f4d…`,
 `eval_split.parquet` `91b58ab2…`); a rebuild with this code is **not byte-equal** to it.
 
 Arxiv has **no user sequences**, so `prep` does no interactions and no
@@ -301,7 +300,7 @@ with a null license (15.1 %) carried INT64_MIN in the published file, and
 so did the 1,528 `eval_split.parquet` queries whose target is one of them,
 instead of bucket 9 `none`. C2 and C3 had the same latent pattern, but
 the source has no nulls there. The corrected C1 is re-derived by
-[`patch_license_clause.py`](../../research/artifacts/arxiv-etl-fix/patch_license_clause.py),
+`patch_license_clause.py`,
 which rewrites only C1 and the matching query column and asserts that every
 non-null item's bucket is unchanged.
 
@@ -315,7 +314,7 @@ normalised**, scored by dot product as MedCPT is trained (`normalize: false` in
 copies of the canonical `pubmed-medcpt` (vocab order below), its `item_id_map.json` is byte-equal to
 it, and only `content_d768/` was rebuilt. The older `pubmed-medcpt` holds the same vectors
 L2-normalised (cosine). `bench check` passes. A rebuild from source on a fresh pod gives
-the same slice, embeddings included; state in [validation](../../research/validation.md#datasets).
+the same slice, embeddings included.
 The dataset is not on the Hub.
 
 `plan` → `download --what pmids` → `convert --fetch --delete-raw` →
@@ -344,7 +343,7 @@ width 768, and the row count must equal `len(pmids_chunk_i.json)`. The MEDLINE
 baseline *does* publish `.md5` and `verify --medline` checks those.
 
 **No dimensionality reduction.** Every dataset is benchmarked at its encoder's
-native dim ([decisions](../../research/decisions.md#datasets): no PCA), so pubmed has
+native dim, so pubmed has
 exactly one content dir, `content_d768`.
 [`config/pubmed.yaml`](../../evaluation/config/pubmed.yaml) is the dataset
 file, listed in the `filter` suite at 768.
@@ -439,7 +438,7 @@ builds of the same inputs are byte-identical (`test_attrs_two_builds_are_byte_id
 The staged `pubmed-medcpt` predates the tie rule: its journal / language ids are
 one draw of the old order and stay canonical (controller, 2026-10-10), pinned by sha256
 (`item_attrs_narrow.pt` `8a3bce0f…`, `eval_split.parquet` `3a83c6f9…`); the dot-product build
-`pubmed-medcpt-dot` copies these files, and `pinkmeme/eval-pubmed@10d48d05` holds them. Pods that need the old one copy it; a rebuild with this code is **not byte-equal** to it.
+`pubmed-medcpt-dot` copies these files, and `<owner>/eval-pubmed@10d48d05` holds them. Pods that need the old one copy it; a rebuild with this code is **not byte-equal** to it.
 
 #### Query sets
 
@@ -470,8 +469,7 @@ the unfiltered cross-check sweep is meaningful rather than an identity lookup.
 #### Disk budget and the slice
 
 Computed by `eval-data pubmed plan --medline --keep-items N`
-from the server's own sizes (the JSON reports are in
-[dataset-candidates-artifacts/pubmed/](../../research/artifacts/dataset-candidates/pubmed/)),
+from the server's own sizes,
 at the 23.9 MB/s a single-stream 64 MB probe measured that day (an earlier
 `curl` probe saw 41 MB/s; the range is the honest number):
 
@@ -506,26 +504,21 @@ all 38 shards, with `medline --stream` (21 min, 39,994,988 rows) running
 beside it. On disk: 17 GB under `pubmed-medcpt/` (15 GB of fp16 shards,
 1.5 GB of attrs, 0.7 GB of `staging/` article parquets, 0.1 GB of MEDLINE
 parquet), plus 0.4 GB of PMID lists kept in `_raw/pubmed/`. The exact
-`c0_mesh` oracle (k_gt 1000, 10,000 queries) builds in 23 s
-([artifacts/e2-pubmed/](../../research/artifacts/e2-pubmed/)). The item budget above
+`c0_mesh` oracle (k_gt 1000, 10,000 queries) builds in 23 s. The item budget above
 leaves little room for the index builds' own temporaries: SilverTorch's
 one-shot int8 quantize (two more 28.6 GiB fp32 copies) and LiNR V3's
 one-shot 1-bit build both OOMed here. Both now quantize chunk by chunk in
-the library, with `bench/` and the slice unchanged
-([validation](../../research/validation.md#library-gates), rows *Build-time int8
-quantization* and *Build-time 1-bit quantization*).
+the library, with `bench/` and the slice unchanged.
 
 ### kuairand
 
-**Status: out of the study** ([decisions](../../research/decisions.md#datasets)); its ETL, config and
+**Status: out of the study**; its ETL, config and
 code stays. Nothing is on the Hub (its repo, which held the trainer inputs, was deleted, 2026-10-15):
 `eval-data kuairand all` rebuilds the trainer and eval inputs (its `prep` and `attrs` steps), and the d64
-`train_on_val` checkpoint was not kept ([validation](../../research/validation.md#final-models-the-e1c-recipe);
-its flags are in [its command.sh](../../research/artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)).
+`train_on_val` checkpoint was not kept.
 d128 does not fit. The one filter cell recorded ran on the deleted gSASRec `gsasrec-d128-shared`
 checkpoint and is not reproducible.
-Nothing below is citable. The staging scripts and the gSASRec run's config and metrics are in
-[artifacts/e4-kuairand/](../../research/artifacts/e4-kuairand/).
+Nothing below is citable.
 
 `uv run eval-data kuairand all --output-dir data/kuairand`, or the four
 subcommands in turn. Sources, both CC BY 4.0 on Zenodo and md5-checked by
@@ -625,19 +618,14 @@ are `t_*` over C0–C3 and `b_*` over C4–C6. Bloom runs `t_cat1`, `t_tag`,
 **Training** runs over the full 32 M catalog (32,038,725 items; 32,038,726 table rows with padding). At d64
 two separate tables fit (62.6 GB peak on the 80 GB H100). At d128 even one
 shared table (`reuse_item_embeddings`) does not: weight, two AdamW moments
-and the two dense gradients it receives in backward exceed 80 GB
-([probe](../../research/artifacts/seqrec-encoder/k128-probe-oom/README.md)). Every epoch
+and the two dense gradients it receives in backward exceed 80 GB. Every epoch
 also scores the full catalog for the val users, so `eval_max_users` bounds
 that cost. The final
 KuaiRand model is refit with `train_on_val=true` at the epoch count chosen
 on val, because next-day clicks drift and the val day is otherwise never
-trained on ([validation](../../research/validation.md#kuairand-temporal-drift)). The
-commands are the [train-only run](../../research/artifacts/seqrec-encoder/k64-sasrec-ssm-logq/command.sh)
-that picks the epoch count and the
-[refit](../../research/artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh).
+trained on: a train-only run picks the epoch count, the refit follows.
 
-The d64 refit takes ~261 s/epoch at 62.7 GB peak on the H100 (4 epochs); its test
-numbers and the drift diagnosis are in [validation](../../research/validation.md#final-models-the-e1c-recipe).
+The d64 refit takes ~261 s/epoch at 62.7 GB peak on the H100 (4 epochs).
 
 ```
 data/kuairand/
@@ -659,19 +647,18 @@ data/kuairand/
 ### openalex
 
 **Status: built at 10 M, `bench check` clean, one filter cell run; not on the Hub; dropped from the
-study (user, 2026-10-08; [backlog](../../research/backlog.md#datasets-not-in-the-study)).** The OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's.
+study (2026-10-08).** The OpenAlex fallback (no Semantic Scholar key), a 10 M catalog like pubmed's.
 `convert --sample-rate 0.35 --workers 64` streamed all 2,040 files of release 2026-09-23
 (297.1 GB read in 572 s, 0 failures); a 15 M catalog was prepped and encoded
 (`encode_text` 15,663 s on the A100, 958 docs/s), did not fit the harness (below), and was
 cut to 10 M: `prep --keep-items 10000000` (374 s), `reshard --from-dir` the 15 M vectors
 (34 s, no encode; all 10 M rows `torch.equal` to their source rows,
-[`check_reshard.py`](../../research/artifacts/e3-openalex/check_reshard.py)), `encode_queries`,
+`check_reshard.py`), `encode_queries`,
 `attrs`. `verify_prep.py` re-derives every query with no mismatch, and
 `bench check --dataset openalex` reports `openalex d768: ok`. The dataset is in the `filter`
 suite. One cell, `linr_v1_filter_mask`/triton clause `field_era`, eager, `--skip-perf` (so
 `partial`): pass rate 0.0526, `recall_oracle@1000` **0.9959**, held-out (a cited paper)
-`recall@100` 0.505 / `@1000` 0.741, n = 10,000, 64 GB reserved
-([record](https://huggingface.co/datasets/pinkmeme/eval-results/blob/main/artifacts/e3-openalex/filter-openalex-d768-cell.jsonl)). SilverTorch-triton
+`recall@100` 0.505 / `@1000` 0.741, n = 10,000, 64 GB reserved. SilverTorch-triton
 and LiNR V2 / V3 run at D = 768 since the Triton kernels pad to the next power of two
 ([kernels](kernels.md#padding)); not yet run on this dataset. Nothing here is citable yet.
 
@@ -689,9 +676,9 @@ passes the query's field and era clauses for every query (subfield 75 %). The su
 15 M run (`run15m-*` logs) held 4.77 in-catalog references per query, 2.85 same field +
 earlier era.
 
-The dry run (artifacts in [e3-openalex/](../../research/artifacts/e3-openalex/)):
+The dry run:
 `convert` on 8 real snapshot files (50,304 records) staged 4,581 works; a few thousand
-rows barely cite each other, so [`api_citation_topup.py`](../../research/artifacts/e3-openalex/api_citation_topup.py)
+rows barely cite each other, so `api_citation_topup.py`
 added the 1,060 eligible works that 60 pool papers really cite (OpenAlex API, same
 `stage_table`). `prep --keep-items 5073` held out 75 papers with 994 in-catalog
 references (405 same field, earlier era), `verify_prep.py` re-derived all of it with no
@@ -771,7 +758,7 @@ of them are drawn with the seed. Per query:
 
 Recall is measured against the harness's exact filtered oracle, as everywhere; the qrels
 carry the citation relevance for the multi-target metrics the harness does not yet read.
-[`verify_prep.py`](../../research/artifacts/e3-openalex/verify_prep.py) re-derives every query's qrels,
+`verify_prep.py` re-derives every query's qrels,
 flags and target from `item_id_map.json`, `papers.parquet` and the staged `refs`.
 
 #### Attribute semantics
@@ -802,7 +789,7 @@ harness oracle is built from the same attrs, so recall stays exact for that filt
 
 #### Encoding
 
-`nomic-embed-text-v1.5` at its native 768 dims (no truncation, [decisions](../../research/decisions.md#datasets)),
+`nomic-embed-text-v1.5` at its native 768 dims (no truncation),
 `"search_document: "` / `"search_query: "` prefixes as on arxiv, text
 `"{prefix}{title}. {abstract[:1500]}"`, 512 tokens, bf16 weights, fp16 L2-normalised
 output. `encode_text` writes `content_d768/text_emb_shard_NNN.pt` of `--shard-rows`
@@ -818,15 +805,11 @@ the main thread costs ~6 %. `flash_attn` is not installed.
 
 #### Budget
 
-The measured sizes, rates and wall times of the 10 M build are in the artifact's
-[README](../../research/artifacts/e3-openalex/README.md#budget).
-
 ### laion30m
 
 **Status: built, `bench check` ok; not on the Hub, so a pod that needs it rebuilds it with the
-steps below (Re-LAION may be shared as vectors only, and the user decides whether:
-[release](../../research/paper/release-and-licenses.md)).** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
-([decisions](../../research/decisions.md#datasets)). Nothing here is citable. The first dataset staged
+steps below (Re-LAION may be shared as vectors only).** A 30 M scale point at d256, `filter`
+only. The first dataset staged
 through the [generic ingest](#the-generic-ingest-eval-data-ingest).
 
 **Order.** The clause codes come from the generic ingest (count descending, ties by value), so
@@ -897,8 +880,7 @@ over the 768 output dims, keep the first 256, L2-normalise, store fp16. Prefixes
 without the `layer_norm`, so the two datasets' vectors are not built the same way.
 `encode_text` writes `_raw/relaion/laion30m/items_NNN.npy` (1 M rows each), resumable per
 shard and pinned by `encode_params.json`; `encode_queries` writes `queries.npy`. The ingest
-re-normalises them in fp32 into the staged fp16 shards (the measured rates are in
-[validation](../../research/validation.md#datasets)). Targets: the ingest's default, each
+re-normalises them in fp32 into the staged fp16 shards. Targets: the ingest's default, each
 query's exact unfiltered top-1 item (a caption query has no relevant item of its own). The
 headline is `recall_oracle`, as everywhere.
 
@@ -980,8 +962,7 @@ and each oracle blob's name also carries the attrs digest. The builder
 never touches `item_attrs_narrow.pt`, whose digest keys every existing
 oracle and record. With one value per clause a bloom filter has almost no
 false positives here, so synth bloom cells measure only what the bloom
-path costs as the pass rate changes. Measured pass counts per rate:
-[validation](../../research/validation.md#harness-gates). laion30m's files are built
+path costs as the pass rate changes. laion30m's files are built
 the same way (seed 20261008, 30 M items, 10,000 queries); `laion1m`,
 `laion3m` and `laion10m` do not rebuild them: `eval-data subset` copies the
 parent's `item_attrs_synth.pt` and `synth_u.pt` rows ([Subsets](#subsets)),
@@ -1015,8 +996,7 @@ files beside the uniform ones and touches no existing file:
 
 [`arxiv-corr-synth.yaml`](../../evaluation/config/arxiv-corr-synth.yaml)
 reads them at d128 only (the clusters are d128's) with sweeps `c001`,
-`c003` and `c01`. Achieved pass rates:
-[validation](../../research/validation.md#harness-gates).
+`c003` and `c01`.
 
 ### On-disk layout the harness expects
 
@@ -1064,48 +1044,34 @@ plus, for a `-synth` config, the four `synth-filter` files, or for
 
 [`hub.py`](../../evaluation/eval_datasets/hub.py) holds the repo
 registry and the fetch/publish helpers, so no path or repo id is
-hard-coded in the ETL modules:
-
-```python
-EVAL_REPOS = {
-    "arxiv-papers":      "pinkmeme/eval-arxiv-papers",
-    "yambda-500m":       "pinkmeme/eval-yambda-500m",
-    "yambda-5b":         "pinkmeme/eval-yambda-5b",
-    "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
-    "pubmed":            "pinkmeme/eval-pubmed",
-    "kuairand":          "pinkmeme/eval-kuairand",
-    "openalex":          "pinkmeme/eval-openalex",
-    "laion30m":          "pinkmeme/eval-laion30m",
-}
-```
+hard-coded in the ETL modules: `eval_repo(dataset)` is `<owner>/eval-<dataset>` for every
+dataset in `EVAL_DATASETS`, and `results_repo()` is `<owner>/eval-results`, the owner being the
+HF user or organisation in `RETRIEVE_HUB_OWNER` (`hub_owner()`, its one reader; unset, every Hub
+command raises with that instruction).
 
 `yambda-5b` and `kuairand` name repos the user deleted (2026-10-15); their keys stay in the
 code; a fetch of them fails.
 
-What may be
-published from each repo: [release and licenses](../../research/paper/release-and-licenses.md).
-
-`pinkmeme/eval-pubmed` (private, revision `10d48d05`, 17.2 GB) holds the dot-product 10 M slice
+`<owner>/eval-pubmed` (private, revision `10d48d05`, 17.2 GB) holds the dot-product 10 M slice
 (`pubmed-medcpt-dot`, [pubmed](#pubmed)): `content_d768/`, attrs, `eval_split.parquet`, `heldout.parquet`,
 `item_id_map.json` and vocabularies, no titles, abstracts or ETL intermediates (published from a directory of
-hardlinks to exactly those files). `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `pinkmeme/eval-openalex` likewise. KuaiRand has no Hub repo (`pinkmeme/eval-kuairand`, which held only its trainer inputs, was
-deleted, 2026-10-15); rebuild it with its ETL ([kuairand](#kuairand)). `pinkmeme/eval-laion30m` (private) is to hold the
+hardlinks to exactly those files). `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `<owner>/eval-openalex` likewise. KuaiRand has no Hub repo (`<owner>/eval-kuairand`, which held only its trainer inputs, was
+deleted, 2026-10-15); rebuild it with its ETL ([kuairand](#kuairand)). `<owner>/eval-laion30m` (private) is to hold the
 staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`); not yet published. The old A100
 `checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).
 
 **Trainer inputs** sit under `trainer/` in the private eval repos, uploaded with
-`upload_folder` ([script](../../research/artifacts/seqrec-encoder/hub-upload/trainer_upload.py);
-`hub.py` has no helper for them). The trainer's `data_dir` needs
+`upload_folder` (`hub.py` has no helper for them). The trainer's `data_dir` needs
 `train/val/test.parquet` and `item_id_map.json` in one directory:
 
-- `pinkmeme/eval-goodreads-work-id` `trainer/`: all of `data/goodreads-work-id/trainer/`
+- `<owner>/eval-goodreads-work-id` `trainer/`: all of `data/goodreads-work-id/trainer/`
   (`train/val/test.parquet`, `item_id_map.json`, `prep_log.json`, `book_to_work.parquet`);
-- `pinkmeme/eval-yambda-500m` `trainer/`: all of `data/yambda-500m/trainer/`
+- `<owner>/eval-yambda-500m` `trainer/`: all of `data/yambda-500m/trainer/`
   (`train/val/test.parquet`, `item_id_map.json`, the re-prep with `timestamps`);
 - KuaiRand: none on the Hub (repo deleted); rebuild everything with `eval-data kuairand all`.
 
 ```bash
-hf download pinkmeme/eval-goodreads-work-id --repo-type dataset \
+hf download <owner>/eval-goodreads-work-id --repo-type dataset \
     --include 'trainer/*' --local-dir data/goodreads-work-id
 ```
 
@@ -1146,8 +1112,7 @@ uv run --directory evaluation train run data_dir=/data/yambda-500m/trainer \
 uv run --directory evaluation train run data_dir=/data/yambda-500m/trainer loss=gbce num_negatives=256 warmup_steps=0
 ```
 
-The defaults are the E1c recipe
-([artifact](../../research/artifacts/seqrec-encoder/e1c-yambda-d64-sasrec-ssm-logq/config.json)):
+The defaults are the E1c recipe:
 d64, 2 blocks, 2 heads, ffn 256, dropout 0.5; `loss=sampled_softmax` with
 `normalize`, `temperature=0.05`, `num_negatives=8192`,
 `inbatch_negatives=4096`, `logq`; lr 1e-3, batch 256, L 200, warmup 1000,
@@ -1221,8 +1186,7 @@ Negatives are uniform over `1..N`, drawn on the GPU inside the step.
   over positive + K negatives. The `pow(−beta)` and `1/(x−1)` steps lose
   the positive class in fp32, hence float64. One `[K]` vector shared by the
   batch does not train: only K table rows get a negative gradient per step,
-  and on yambda-500m d64 the user queries collapse onto a few popular items
-  ([validation](../../research/validation.md#seqrec-encoder)).
+  and on yambda-500m d64 the user queries collapse onto a few popular items.
 - `sampled_softmax` — cross-entropy of the positive against one candidate
   vector shared by the batch: `inbatch_negatives` positives of the batch (a
   random subset) plus `num_negatives` uniform ids, at `temperature` (default 0.05), in fp32 outside
@@ -1315,7 +1279,7 @@ uv run --directory evaluation eval-data ingest mydata \
 
 `prep_log.json["ingest"]` records the counts, vocab sizes, the share of queries with each
 clause live, and each clause's mean pass rate over the first 100 queries. Then add the
-dataset to a suite in `config/suites.yaml`, and `EVAL_REPOS` in `hub.py` to publish it.
+dataset to a suite in `config/suites.yaml`, and `EVAL_DATASETS` in `hub.py` to publish it.
 laion30m is the first user: its ETL does only what is LAION-specific (download, dedup and
 split, domains and buckets, caption encode), then calls `ingest`.
 
@@ -1332,7 +1296,7 @@ For the sequential shape, or when the source needs work before it is vectors + t
 2. If it has attributes, add an `attrs` subcommand producing
    `item_attrs_narrow.pt`, `clause_is_reverse_narrow.pt`, the vocab
    JSONs, and `eval_split.parquet` aligned 1:1 with `test.parquet`.
-3. Add an entry to `EVAL_REPOS` in `hub.py`.
+3. Add the dataset to `EVAL_DATASETS` in `hub.py`.
 4. Add one `evaluation/config/<name>.yaml` (one YAML per
    dataset, see [evaluation.md](evaluation.md#config-one-yaml-per-dataset--suitesyaml))
    and list the dataset in the suites it belongs to in

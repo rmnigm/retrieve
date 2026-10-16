@@ -8,7 +8,10 @@ import ast
 from pathlib import Path
 
 EVAL = Path(__file__).resolve().parents[1]
-OWNERS = {"RETRIEVE_DATA_ROOT": "eval_datasets/hub.py"}  # read through hub.data_root()
+OWNERS = {  # read through hub.data_root() / hub.hub_owner()
+    "RETRIEVE_DATA_ROOT": "eval_datasets/hub.py",
+    "RETRIEVE_HUB_OWNER": "eval_datasets/hub.py",
+}
 MIN_FILES = 40  # 57 today; fewer means the walk is broken
 
 

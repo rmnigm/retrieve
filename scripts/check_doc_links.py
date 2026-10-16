@@ -1,8 +1,7 @@
-"""Report relative markdown links whose target does not exist; in the wiki (AGENTS.md,
-README.md, docs/, research/ minus paper/, artifacts/ and log.md) also backticked repo paths
-that do not exist and `bench` / `eval-data` / `train` subcommands the click groups do not
-define; and `docs/... § Heading` citations in tracked files whose heading is gone (SCHEMA:
-cited headings are stable). The command table is read from the CLI sources with ast:
+"""Report relative markdown links whose target does not exist; in the docs (AGENTS.md,
+README.md, docs/) also backticked repo paths that do not exist and `bench` / `eval-data` /
+`train` subcommands the click groups do not define; and `docs/... § Heading` citations in
+tracked files whose heading is gone (cited headings are stable). The command table is read from the CLI sources with ast:
 nothing is imported or run."""
 
 import ast
@@ -15,8 +14,8 @@ ROOT = Path(__file__).resolve().parent.parent
 LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 FENCE = re.compile(r"^\s*```")
 CODE = re.compile(r"`([^`]+)`")
-REPO_PATH = re.compile(r"(?:retrieve|evaluation|scripts|docs|research)/[\w./-]*")
-SECTION = re.compile(r"((?:docs|research)/[\w/-]+\.md) ?§ ?([^.;:)\"\n,]+)")
+REPO_PATH = re.compile(r"(?:retrieve|evaluation|scripts|docs)/[\w./-]*")
+SECTION = re.compile(r"(docs/[\w/-]+\.md) ?§ ?([^.;:)\"\n,]+)")
 HEADING = re.compile(r"^(?:#+ (.*)|\*\*([^*]+)\*\*)", re.M)
 LINE_SUFFIX = re.compile(r"(#.*|:\d+(-\d+)?)$")
 CLI_CALL = re.compile(r"(?<![\w./-])(bench|eval-data|train) ([a-z][\w-]*)")
@@ -26,7 +25,7 @@ CLIS = {
     "train": "evaluation/training",
 }
 RUNTIME = {"evaluation/data"}  # gitignored: the data-root symlink each checkout makes
-MIN_PATHS, MIN_CLI = 60, 50  # 100 and 85 today; fewer means a pattern broke
+MIN_PATHS, MIN_CLI = 40, 40  # 66 and 142 today; fewer means a pattern broke
 
 
 def _click_name(fn: ast.FunctionDef) -> tuple[str | None, str | None] | None:
@@ -44,7 +43,11 @@ def _click_name(fn: ast.FunctionDef) -> tuple[str | None, str | None] | None:
                 if d.args
                 else next((k.value for k in d.keywords if k.arg == "name"), None)
             )
-            name = fn.name.replace("_", "-") if arg is None else getattr(arg, "value", None)
+            name = (
+                fn.name.replace("_", "-")
+                if arg is None
+                else getattr(arg, "value", None)
+            )
             return (None if owner == "click" else owner), name
     return None
 
@@ -82,13 +85,7 @@ def commands(package: Path) -> set[str]:
 
 
 def in_wiki(rel: str) -> bool:
-    if rel == "research/log.md":  # append-only history: it names what was removed
-        return False
-    if rel in ("AGENTS.md", "README.md"):
-        return True
-    return rel.startswith(("docs/", "research/")) and not rel.startswith(
-        ("research/paper/", "research/artifacts/")
-    )
+    return rel in ("AGENTS.md", "README.md") or rel.startswith("docs/")
 
 
 def _plain(text: str) -> str:
@@ -105,8 +102,6 @@ def section_citations() -> int:
         ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
     ).stdout.split()
     for rel in files:
-        if rel == "research/log.md" or rel.startswith("research/artifacts/"):
-            continue
         try:
             text = (ROOT / rel).read_text()
         except (UnicodeDecodeError, FileNotFoundError):
@@ -114,7 +109,9 @@ def section_citations() -> int:
         for lineno, line in enumerate(text.splitlines(), 1):
             for page, cited in SECTION.findall(line):
                 want = _plain(cited)
-                if not want or want[0].isdigit():  # "§3.4": a numbered section, not a heading
+                if (
+                    not want or want[0].isdigit()
+                ):  # "§3.4": a numbered section, not a heading
                     continue
                 if page not in heads:
                     target = ROOT / page
@@ -122,12 +119,17 @@ def section_citations() -> int:
                         [
                             t.rstrip(".:")
                             for a, b in HEADING.findall(target.read_text())
-                            for t in {_plain(a or b), *re.split(r" — | \(", _plain(a or b))[:1]}
+                            for t in {
+                                _plain(a or b),
+                                *re.split(r" — | \(", _plain(a or b))[:1],
+                            }
                         ]
                         if target.exists()
                         else []
                     )
-                if not any(h.startswith(want) or want.startswith(h) for h in heads[page] if h):
+                if not any(
+                    h.startswith(want) or want.startswith(h) for h in heads[page] if h
+                ):
                     print(f"SECTION {rel}:{lineno} -> {page} § {cited.strip()}")
                     bad += 1
     return bad
@@ -138,8 +140,7 @@ table = {prog: commands(ROOT / pkg) for prog, pkg in CLIS.items()}
 broken = n_paths = n_cli = 0
 runtime_seen = set()
 for md in sorted(ROOT.rglob("*.md")):
-    # .chains/: an append-only note log, not wiki; its repo-relative links do not resolve there
-    if any(p in md.parts for p in (".git", ".venv", "node_modules", ".chains")):
+    if any(p in md.parts for p in (".git", ".venv", "node_modules")):
         continue
     rel = md.relative_to(ROOT).as_posix()
     if only and not any(rel.startswith(o) for o in only):
@@ -165,7 +166,9 @@ for md in sorted(ROOT.rglob("*.md")):
                 if "<" in token or "*" in token or not REPO_PATH.fullmatch(token):
                     continue
                 n_paths += 1
-                runtime = {r for r in RUNTIME if token == r or token.startswith(r + "/")}
+                runtime = {
+                    r for r in RUNTIME if token == r or token.startswith(r + "/")
+                }
                 runtime_seen |= runtime
                 if not runtime and not (ROOT / token).exists():
                     print(f"MISSING {rel}:{lineno} -> {span}")
@@ -188,7 +191,9 @@ for md in sorted(ROOT.rglob("*.md")):
 if not only:
     broken += section_citations()
 if not only and RUNTIME - runtime_seen:
-    print(f"no doc names {sorted(RUNTIME - runtime_seen)}; drop the stale RUNTIME entry")
+    print(
+        f"no doc names {sorted(RUNTIME - runtime_seen)}; drop the stale RUNTIME entry"
+    )
     broken += 1
 if not only and (n_paths < MIN_PATHS or n_cli < MIN_CLI):
     print(

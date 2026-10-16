@@ -537,8 +537,8 @@ class TestBuilder:
 
 
 class TestKMeansInit:
-    """``kmeans_init`` reaches ``indexing.KMeans``; the default stays ``"random"``
-    ([decisions](research/decisions.md § Library): every recorded number was taken on it)."""
+    """``kmeans_init`` reaches ``indexing.KMeans``; the default stays ``"random"`` (every
+    recorded number was taken on it)."""
 
     def test_default_is_random(self):
         require_official()

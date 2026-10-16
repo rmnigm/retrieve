@@ -11,11 +11,11 @@
 #   interleaved rounds (seed × window) are the timing repeats elsewhere.
 # - bs {1, 16}; bs 64 only in C5 / C7's 30 M regime and the timed tune; k {100, 1000}, k 100 where N·p < 4·1000.
 # - SilverTorch scans at most a quarter of the lists: n_probe <= n_lists / 4 (user). n_lists and n95 per dataset come
-#   from the tune (validation, night-queue item 8); 24 is the paper's n_probe.
+#   from the tune; 24 is the paper's n_probe.
 # - SilverTorch is Meta's SilverTorch code, adapted (`cuda`, its only backend), `none` / `bloom` only; LiNR with a bloom
 #   filter is not in the study and runs nowhere (LiNR arms are clause only). The FR records of these suites carry
-#   `official`, Meta's code as published, which left the workspace at RENAME (records keep their names; the adapted
-#   code's own FR grid is NUMBERS', research/artifacts/numbers/). One backend per algo (`triton`) except the C3 torch arms.
+#   `official`, Meta's code as published, which left the workspace at RENAME (records keep their names). One backend
+#   per algo (`triton`) except the C3 torch arms.
 # - No openalex, no bs 8, no k 500.
 
 # Kept sweeps (one high pass rate, one low, one conjunctive / reverse), from measured pass rates:
@@ -376,7 +376,7 @@ nsweep-codesign:               # C5 across N: partial vs full masks, Meta's kern
         laion30m: {build: {n_lists: [16384]}}
 
 # Seeds 0-2 where a CI rests on them (controller 2026-10-13, the final-pass seed decision): C1's crossover cells at 3 / 30 M
-# at bs 16 (the rates that bracket each crossover) and C7's 30 M cell at bs 64, all three seeds on one box (pod b), so each CI is
+# at bs 16 (the rates that bracket each crossover) and C7's 30 M cell at bs 64, all three seeds on one box, so each CI is
 # over one box; their own suites, so these keys are separate from the main grid's seed-0 cells.
 seeds-c1:                      # 3 M d128 (dims are per suite: arxiv-synth would otherwise also run at d256)
   datasets: [arxiv-synth]

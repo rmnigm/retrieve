@@ -25,39 +25,34 @@ run writes out) see [datasets.md](datasets.md#training--evaluationtraining).
 
 The sequential datasets are encoded
 with the current trainer's E1c checkpoints (gSASRec body, sampled softmax
-with logQ, L2-normalized; [decisions](../../research/decisions.md#sequential-encoder)).
-Metrics: [validation](../../research/validation.md#final-models-the-e1c-recipe) (not
-yet validated, not citable). Which older records this invalidates:
-[validation](../../research/validation.md#encoder-switch-evals-to-redo).
+with logQ, L2-normalized).
 
 | dataset config | ckpt-id | D | where it is |
 |---|---|---|---|
-| `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-goodreads-work-id` `checkpoints/` |
-| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-yambda-500m` `checkpoints/`; yambda-500m is in the study, unfiltered |
-| `kuairand.yaml` | `sasrec-ssm-logq-d64-trainval` | 64 | not kept anywhere (user); KuaiRand is out of the study ([refit command.sh](../../research/artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)) |
-| `yambda-5b.yaml` | `gsasrec-d{dim}` | 64, 128 | not kept anywhere: `pinkmeme/eval-yambda-5b` was deleted by the user (2026-10-15); out of the study, no E1c model trained |
+| `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `<owner>/eval-goodreads-work-id` `checkpoints/` |
+| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `<owner>/eval-yambda-500m` `checkpoints/`; yambda-500m is in the study, unfiltered |
+| `kuairand.yaml` | `sasrec-ssm-logq-d64-trainval` | 64 | not kept anywhere (user); KuaiRand is out of the study |
+| `yambda-5b.yaml` | `gsasrec-d{dim}` | 64, 128 | not kept anywhere (its Hub repo was deleted, 2026-10-15); out of the study, no E1c model trained |
 
 Each E1c dir holds `best_model.pt`, `item_embs.pt`, `config.json`,
 `item_id_map.json`, `eval_quality.json`, `train_metrics.json` and a short
 `README.md`. Fetch one with
 
 ```bash
-hf download pinkmeme/eval-goodreads-work-id --repo-type dataset \
+hf download <owner>/eval-goodreads-work-id --repo-type dataset \
     --include 'checkpoints/sasrec-ssm-logq-d128/*' --local-dir "$RETRIEVE_DATA_ROOT/goodreads-work-id"
 ```
 
 ## The published gSASRec checkpoints (kept, not read by the harness)
 
 Trained by the retired trainer with gBCE (per-position negatives). They
-are the bars the E1c models were measured against
-([bars](../../research/validation.md#bars)), and the inputs of every record made
-before the switch: the golden goodreads cells and the earliest goodreads legs
-use `gsasrec-d128-drop0.5-id`.
+are the bars the E1c models were measured against, and the inputs of every record made
+before the switch (the earliest goodreads runs use `gsasrec-d128-drop0.5-id`).
 
 | HF repo | ckpt-id |
 |---|---|
-| `pinkmeme/eval-goodreads-work-id` | `gsasrec-d{64,128,256}-drop0.5-id` |
-| `pinkmeme/eval-yambda-500m` | `gsasrec-d{64,128,256}-drop0.5` |
+| `<owner>/eval-goodreads-work-id` | `gsasrec-d{64,128,256}-drop0.5-id` |
+| `<owner>/eval-yambda-500m` | `gsasrec-d{64,128,256}-drop0.5` |
 
 KuaiRand's gSASRec `gsasrec-d128-shared` was deleted from the Hub (user);
 nothing reproduces the one filter cell made with it.
@@ -66,7 +61,7 @@ The yambda-500m ones as recorded at training time (Listen+, full-catalog
 ranking against all 1,866,170 items, no history masking, the
 [Yambda paper](https://arxiv.org/abs/2505.22238) Table 2 protocol). Their
 test numbers came from a split no longer on disk; re-scored on today's
-file they are the [bars](../../research/validation.md#bars):
+file they are the bars:
 
 | ckpt-id | Dim | Dropout | Best epoch | Test NDCG@10 | NDCG@100 | Recall@10 | Recall@100 |
 |---|---|---|---|---|---|---|---|
@@ -229,21 +224,21 @@ The `.pt` files are **not** stored in git (see `.gitignore`). HF storage is
 `checkpoints/<ckpt-id>/` subtree (alongside the dataset's eval inputs).
 The registry lives in
 [`evaluation/eval_datasets/hub.py`](../../evaluation/eval_datasets/hub.py) as
-`EVAL_REPOS`:
+`EVAL_DATASETS` (`<owner>/eval-<dataset>`, `RETRIEVE_HUB_OWNER`):
 
 | Dataset key | HF repo (dataset type) |
 |---|---|
-| `yambda-500m` | `pinkmeme/eval-yambda-500m` |
-| `yambda-5b` | `pinkmeme/eval-yambda-5b` |
-| `goodreads-work-id` | `pinkmeme/eval-goodreads-work-id` |
-| `arxiv-papers` | `pinkmeme/eval-arxiv-papers` |
-| `kuairand` | `pinkmeme/eval-kuairand` |
+| `yambda-500m` | `<owner>/eval-yambda-500m` |
+| `yambda-5b` | `<owner>/eval-yambda-5b` |
+| `goodreads-work-id` | `<owner>/eval-goodreads-work-id` |
+| `arxiv-papers` | `<owner>/eval-arxiv-papers` |
+| `kuairand` | `<owner>/eval-kuairand` |
 
 The `yambda-5b` and `kuairand` repos were deleted by the user (2026-10-15): their keys remain
 in the registry but resolve to nothing.
 
 A given checkpoint then lands at
-`pinkmeme/eval-<dataset>/tree/main/checkpoints/<ckpt-id>/` rather than its
+`<owner>/eval-<dataset>/tree/main/checkpoints/<ckpt-id>/` rather than its
 own model repo. Local layout mirrors that:
 `data/<dataset>/checkpoints/<ckpt-id>/`. Override the local root with
 `RETRIEVE_DATA_ROOT=/some/path`; otherwise it resolves to

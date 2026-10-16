@@ -14,7 +14,7 @@ This is the high-level map of the `retrieve` package (distribution
 which kernels back which paths. For per-kernel detail (launch grids, tile
 shapes, autotune keys, numerics) see [kernels.md](kernels.md).
 
-**What ships** ([decisions](../../research/decisions.md#goal-and-scheduling)): the
+**What ships**: the
 release carries LiNR V1-V3 with their filters and kernels, and `SilverTorch` on Meta's official
 SilverTorch code, adapted (`backend="cuda"`, its only backend; the `silvertorch/` workspace
 member, under Meta's own names). Meta's code as published and our earlier Triton reimplementation
@@ -76,16 +76,14 @@ for `SilverTorch`; every constructor validates its own):
 |---|---|---|
 | `"triton"` | fused Triton kernels. The default. | every module but `SilverTorch` |
 | `"torch"` | pure-torch eager equivalent, same semantics, larger intermediates | every module but `SilverTorch` |
-| `"cuda"` | Meta's SilverTorch code, adapted ([`silvertorch/`](../../silvertorch/CHANGES.md), package `silvertorch`, `torch.ops.st.*`) for phases 2+3 through the adapter; `SilverTorch`'s only backend; CUDA-graph capturable and compilable ([validation](../../research/validation.md#meta-fork-backendofficial-fork)) | **`SilverTorch` only** |
+| `"cuda"` | Meta's SilverTorch code, adapted ([`silvertorch/`](../../silvertorch/CHANGES.md), package `silvertorch`, `torch.ops.st.*`) for phases 2+3 through the adapter; `SilverTorch`'s only backend; CUDA-graph capturable and compilable | **`SilverTorch` only** |
 
 `"cuda"` needs the `silvertorch` workspace member, a dependency of `torchretrieve` that builds a
 CUDA extension and registers sixteen `torch.ops.st.*` ops. The adapter is the
 `retrieve.ops.official` package; without the package or a CUDA device,
 `SilverTorch(...)` raises `OfficialMissing`. Building it needs an nvcc that matches the torch
 wheel (`CUDA_HOME=/usr/local/cuda-12.8` for the cu128 wheel — upstream's README insists on the
-match), `ninja` and `setuptools`; see
-[../artifacts/official-silvertorch/README.md](../../research/artifacts/official-silvertorch/README.md)
-for the upstream pin and its build record.
+match), `ninja` and `setuptools`.
 
 `"cuda"` is not a universal path: it exists solely for `SilverTorch`, which takes nothing else.
 Every other class takes `LinrBackend` and raises `ValueError` on anything else, `"cuda"`
@@ -324,7 +322,7 @@ on the device, no host sync in the forward, so it captures and compiles. Meta's 
 Constructed directly (`SilverTorch(k, n_lists, n_probe, filter_mode="none", m_bits=None,
 k_hash=None, n_iter=10, seed=0, kmeans_init="random", backend="cuda", official=None)`;
 `kmeans_init="kmeans++"` opts into D² seeding, the default stays random because every recorded
-number was taken on it, [decisions](../../research/decisions.md#library)) or through
+number was taken on it) or through
 `SilverTorchBuilder(**those)` → `.set_item_embeddings(x)` [+ `.set_item_attributes(attrs,
 clause_is_reverse)`] or `.set_state_dict(sd)` → [`.set_backend(b, official=None)`,
 `.set_device(d)`] → `.build()`, which is construct → `register_index` (or the prebuilt load, no
@@ -406,7 +404,7 @@ cluster-sorted order:
   accumulated panel by panel, not `index_add_`'s floating-point atomics,
   whose scheduling-dependent order makes two seed-0 builds differ by 1.8e-2
   in the centroids and puts every SilverTorch quality number out of reach of
-  the golden gate's 1e-6. It costs ~1.3× the wall time of the atomic
+  a 1e-6 quality gate. It costs ~1.3× the wall time of the atomic
   reduction at N=200k, D=128, n_lists=1024, bounded by one extra
   assignment-sized matmul per Lloyd iteration.
 - Two abstract bases plus the two backend literals and their validator in
@@ -540,12 +538,12 @@ call it; no caller crosses quantizer families (the bit-KNNs never see INT8,
 while the package attribute `retrieve.ops.triton.<kernel>` is the op of
 the same name. Op schemas, buffer names and registration order are
 stable, so a state dict written by an earlier release loads into the
-current modules ([decisions](../../research/decisions.md#library)); state is added,
+current modules; state is added,
 never renamed (the composites' `filter.` prefix).
 
 ## Which page owns what
 
-One home per fact (AGENTS.md rule 4, [coding guidelines](../../research/contracts/coding-guidelines.md)):
+One home per fact (AGENTS.md):
 when a code area's behaviour changes, this is the `docs/system` page to
 update in the same commit.
 
@@ -559,5 +557,3 @@ update in the same commit.
 | `evaluation/eval_datasets/` (ETL, Hub transfer) | [datasets.md](datasets.md) |
 | training (`evaluation/training/`) and checkpoints | [checkpoints.md](checkpoints.md) |
 | where the harness keeps data, its environment variables | [storage.md](storage.md) |
-| standing decisions and constraints (why, not what) | [decisions.md](../../research/decisions.md) |
-| what gates pass and the measured results that stand | [validation.md](../../research/validation.md) |
