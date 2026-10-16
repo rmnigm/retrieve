@@ -1,21 +1,4 @@
-"""``bench`` — the harness console script: ``run`` (one process), ``campaign`` (one
-child per group), ``oracle`` (prebuild the exact-oracle blobs), ``check`` (the on-disk
-layout), ``upload`` / ``fetch`` (results ↔ the HF Hub), ``report`` (tables and figures from
-the records; roadmap D4), ``env`` (the provenance and clock block as JSON, for a validation
-record).
-
-``bench run`` expands one ``(dataset, suite)`` through ``config.load_matrix`` (every option
-below ``--suite`` is a narrow; ``--k`` / ``--bs`` / ``--mode`` replace the suite's lists and
-make the records ``partial``) and runs the cells in *this* process via ``run.run``. Zero
-cells — a ``--sweep`` typo, say — is an error (exit 1), never an empty success.
-``bench campaign`` runs one child process per ``(dataset, dim,
-algo, backend)`` group, sequential, ``stdout+stderr`` to ``<out>/_logs/<group>.log``, a
-one-line summary per child in ``<out>/_logs/campaign.log``, non-zero rc recorded and the
-loop continues; ``--resume`` fills gaps; the records are aggregated into
-``<out>/results.parquet`` at the end. A child that outlives ``--timeout`` hours is killed
-and recorded as ``rc=timeout`` (exit code 124). The child is ``python -m bench.cli run …``
-on the same interpreter (no second ``uv`` resolution).
-"""
+"""The ``bench`` console script (docs/system/evaluation.md § CLI)."""
 
 from __future__ import annotations
 
@@ -39,6 +22,7 @@ from bench import measure, records
 from bench import run as run_mod
 from bench.algos import BACKENDS, FILTER_KINDS
 from bench.config import interleave_units, load_dataset, load_matrix
+from bench.merge import merge
 from bench.report import report
 from bench.upload import fetch, upload
 from eval_datasets.layout import validate_layout
@@ -46,9 +30,7 @@ from eval_datasets.layout import validate_layout
 EVAL_DIR = Path(__file__).resolve().parents[1]
 SUITES = ("filter", "deep", "codesign")
 RC_TIMEOUT = 124  # the ``timeout(1)`` convention
-# Sized for the largest group (arxiv `deep` silvertorch ~10 h; pubmed `filter` groups past 6 h):
-# the timeout catches hangs, it does not budget work.
-TIMEOUT_H = 48.0
+TIMEOUT_H = 48.0  # catches hangs, does not budget work: the largest group runs about 10 h
 
 
 def _say(summary: TextIO, line: str) -> None:
@@ -68,9 +50,8 @@ def _multi(v) -> list | None:
 
 
 def _children(jobs: list, interleave: bool) -> list[tuple[str, int, tuple, tuple]]:
-    """``(dataset, dim, algos, backends)`` per campaign child, in suite order: one per
-    ``Job.group``, or with ``interleave`` one per connected set of groups that an interleave
-    unit spans (its ``--algo`` × ``--backend`` narrows must select exactly that set)."""
+    """``(dataset, dim, algos, backends)`` per child: one per ``Job.group``, or with
+    ``interleave`` one per connected set of groups an interleave unit spans."""
     if not interleave:
         return [(d, dim, (a,), (b,)) for d, dim, a, b in dict.fromkeys(j.group for j in jobs)]
     root: dict[tuple, tuple] = {j.group: j.group for j in jobs}
@@ -99,12 +80,13 @@ def _children(jobs: list, interleave: bool) -> list[tuple[str, int, tuple, tuple
 
 @click.group()
 def main() -> None:
-    """The retrieval benchmark: run, campaign, oracle, check, upload, fetch, report, env."""
+    """The retrieval benchmark: run, campaign, oracle, check, upload, fetch, merge, report, env."""
 
 
 main.add_command(upload)
 main.add_command(fetch)
 main.add_command(report)
+main.add_command(merge)
 
 
 @main.command()
@@ -235,7 +217,7 @@ def campaign(
                     say(f"{s} {ds}: no cells selected (dims {list(dims) or 'all'}) rc=1")
                     worst = max(worst, 1)
                 for d, dim, algos, backends in children:
-                    # on disk, not in memory: a restart mid-group keeps the earlier process's spill
+                    # decided from the disk: a restart mid-group keeps the killed process's spill
                     keep = {run_mod.parity_group(d, dim, a) for a in algos}
                     for stale in parity.glob("*"):
                         if stale.name not in keep:

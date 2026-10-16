@@ -1,4 +1,4 @@
-"""CPU-only tests for the OpenAlex loader (roadmap E3): the inverted-index abstract, the C1
+"""CPU-only tests for the OpenAlex loader: the inverted-index abstract, the C1
 "strictly earlier era" encoding, the stream filter over the snapshot's projected parquet
 schema, and prep → attrs → ``validate_layout`` on a tiny citation-connected staging dir.
 The parser was checked against live snapshot rows and the API (docs/system/datasets.md

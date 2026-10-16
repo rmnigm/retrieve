@@ -107,7 +107,7 @@ def test_end_to_end_records(tiny_configs, tmp_path):
         assert rec["quality"]["oracle"]["recall@4"] == pytest.approx(1.0)
         assert rec["quality"]["oracle"]["recall@2"] == pytest.approx(1.0)
         assert rec["n_kept"] == 7 and rec["filter_mib"] > 0  # query 4 is skip-masked
-        assert 0.0 < rec["pass_rate"] < 1.0 and rec["bloom_fp_rate"] is None
+        assert 0.0 < rec["pass_rate"] < 1.0 and "bloom_fp_rate" not in rec
         assert rec["n_queries_heldout"] <= rec["n_kept"] and rec["n_queries_oracle"] == 7
         assert rec["quality"]["heldout"]["n"] == rec["n_queries_heldout"]
         assert rec["n_targets_in_filter"] == rec["n_queries_heldout"]  # 1 target, in filter
@@ -306,13 +306,12 @@ def test_postfilter_records_oracle_recall_per_k(tiny_configs, tmp_path):
     ds, suites = tiny_configs
     jobs = load_matrix(ds, suites, "postfilter")
     out = tmp_path / "results"
-    assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 9}
+    assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 6}
     recs = _records(out / "postfilter" / "tiny-d64.jsonl")
     exact = {(r["filter_kind"], r["sweep"]): r for r in recs if r["algo"] != "postfilter"}
     post = [r for r in recs if r["algo"] == "postfilter"]
     assert sorted((r["filter_kind"], r["sweep"], r["params"]["alpha"]) for r in post) == [
-        (fk, sw, a) for fk, sw in (("bloom", "c0"), ("clause", "c0"), ("clause", "c0c1"))
-        for a in (1, 2)
+        (fk, sw, a) for fk, sw in (("clause", "c0"), ("clause", "c0c1")) for a in (1, 2)
     ]  # fmt: skip
     for r in post:
         assert r["backend"] == "torch" and r["path"] == "cublas+torch"
@@ -371,7 +370,7 @@ def test_heldout_recall_counts_only_reachable_targets():
 
 
 def test_quality_holds_torch_cpu_threads_for_the_loop_and_restores_them():
-    """H-QLOOP: the chunk loop runs at ``QUALITY_CPU_THREADS`` and gives the caller's count back."""
+    """The chunk loop runs at ``QUALITY_CPU_THREADS`` and gives the caller's count back."""
     seen = []
 
     class Probe(_Fixed):
@@ -475,7 +474,7 @@ def test_append_record_writes_valid_json_for_non_finite_and_tensors(tmp_path):
 
 def test_a_cell_with_no_in_filter_heldout_target_records_null(tiny_configs, tmp_path, monkeypatch):
     """Pubmed's reverse clause: no kept query has a held-out target the filter admits. The
-    held-out side has no mean, so it is null with ``n == 0``, never 0.0 (roadmap H7)."""
+    held-out side has no mean, so it is null with ``n == 0``, never 0.0."""
     real = run.oracle.load_or_build
 
     def unreachable(*a, **kw):
@@ -502,22 +501,21 @@ def _arms(cfgs, **narrow):
     return load_matrix(ds, suites, "arms", **narrow)
 
 
+@pytest.mark.gpu
 def test_gridded_bloom_width_is_the_cells_own(tiny_configs, tmp_path):
-    """G-bloomwidth (CPU): ``m_bits`` in ``params`` sets that job's bloom — the module's index,
-    the standalone filter's pass counts and ``bloom_fp_rate``, the record's ``bloom`` — while
-    the ungridded cell keeps the suite default and a key without ``m_bits``."""
-    jobs = _arms(tiny_configs, filter_kinds=["bloom"])
+    """``m_bits`` in ``params`` sets that job's bloom (the record's ``bloom``) while the
+    ungridded cell keeps the suite default and a key without ``m_bits``."""
+    ds, suites = tiny_configs
+    jobs = load_matrix(ds, suites, "widths")
     out = tmp_path / "results"
     assert dict(run.run(jobs, out_dir=out, skip_perf=True, **KW)) == {"partial": 3}
-    recs = _records(out / "arms" / "tiny-d64.jsonl")
+    recs = _records(out / "widths" / "tiny-d64.jsonl")
     by = {r["params"].get("m_bits"): r for r in recs}
     assert by[64]["bloom"] == {"m_bits": 64, "k_hash": 2}
     assert by[256]["bloom"] == {"m_bits": 256, "k_hash": 2}
     assert by[None]["bloom"] == {"m_bits": 64, "k_hash": 2}  # the suite default
-    assert by[None]["params"] == {"n_lists": 4, "n_probe": 2}
-    assert by[256]["index_mib"] > by[64]["index_mib"]  # the bloom words live in the index
-    assert all(r["bloom_fp_rate"] is not None for r in recs)
-    assert by[256]["bloom_fp_rate"] <= by[64]["bloom_fp_rate"]
+    assert by[None]["params"] == {"n_lists": 4, "recheck": False, "n_probe": 2}
+    assert all(r["filter_mib"] == 0.0 for r in recs)  # no standalone filter on a bloom cell
 
 
 def test_resolve_pool_from_the_sweeps_pass_counts():
@@ -555,14 +553,14 @@ def test_compiled_arm_times_its_warmup_apart_and_skips_graph(tiny_configs, tmp_p
     (max-autotune replays its own CUDA graphs). The compiler itself is faked on CPU."""
     calls = []
     monkeypatch.setattr(torch.nn.Module, "compile", lambda self, **kw: calls.append(kw))
-    jobs = _arms(tiny_configs, filter_kinds=["clause"], algos=["silvertorch"])
+    jobs = _arms(tiny_configs, algos=["linr_v2"])
     out = tmp_path / "results"
     assert dict(run.run(jobs, out_dir=out, **KW)) == {"ok": 2}
     assert calls == [{"mode": "max-autotune"}] * 2
     recs = _records(out / "arms" / "tiny-d64.jsonl")
     assert {r["sweep"] for r in recs} == {"c0", "c0c1"}
     for r in recs:
-        assert r["params"] == {"n_lists": 4, "compile": "max-autotune", "n_probe": 2}
+        assert r["params"] == {"compile": "max-autotune"}
         assert r["compile_s"] > 0 and r["build_s"] > 0
         graph = [e for e in r["perf"] if e["mode"] == "graph"]
         assert graph and all(e["reason"] == "not_capturable" and e["median_ms"] is None
@@ -572,12 +570,12 @@ def test_compiled_arm_times_its_warmup_apart_and_skips_graph(tiny_configs, tmp_p
 
 
 def test_quality_cache_copies_seed_free_arms_only(tiny_configs, tmp_path, monkeypatch):
-    """G-cache (CPU): V1 and the postfilter copy seed 0's quality to seeds 1-2 (perf still runs
-    per seed); V3 and SilverTorch always recompute. A new code_version or other ks is a miss."""
+    """V1 and the postfilter copy seed 0's quality to seeds 1-2 (perf still runs per seed); V3
+    always recomputes. A new code_version or other ks is a miss."""
     ds, suites = tiny_configs
     out = tmp_path / "results"
     path = out / "cache" / "tiny-d64.jsonl"
-    assert dict(run.run(load_matrix(ds, suites, "cache"), out_dir=out, **KW)) == {"ok": 12}
+    assert dict(run.run(load_matrix(ds, suites, "cache"), out_dir=out, **KW)) == {"ok": 9}
     by = {(r["algo"], r["seed"]): r for r in _records(path)}
     for algo in ("linr_v1_filter_mask", "postfilter"):
         assert by[algo, 0]["quality_source"] is None and by[algo, 0]["seed_scope"] == "pool"
@@ -585,10 +583,9 @@ def test_quality_cache_copies_seed_free_arms_only(tiny_configs, tmp_path, monkey
             r = by[algo, seed]
             assert r["quality_source"] == {"seed": 0, "code_version": bench.code_version()}
             assert r["quality"] == by[algo, 0]["quality"] and r["perf"]
-    for algo in ("linr_v3", "silvertorch"):
-        for seed in (0, 1, 2):
-            r = by[algo, seed]
-            assert r["quality_source"] is None and r["seed_scope"] == "pool+build"
+    for seed in (0, 1, 2):
+        r = by["linr_v3", seed]
+        assert r["quality_source"] is None and r["seed_scope"] == "pool+build"
     # Fresh quality at seed 1 equals what the cache copied.
     fresh = tmp_path / "fresh"
     jobs = load_matrix(ds, suites, "cache", algos=["linr_v1_filter_mask"], seeds=[1])
@@ -908,7 +905,7 @@ def test_score_path_arms_share_the_triton_parity_spill(tiny_configs, tmp_path):
 
 
 def test_each_finished_arm_is_freed_before_the_next_is_built(tiny_configs, tmp_path, monkeypatch):
-    """Roadmap H-ARMFREE: no module of a finished unit is alive when the next unit builds, so
+    """No module of a finished unit is alive when the next unit builds, so
     one process can run several 10-30 M arms in a row."""
     jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"])
     assert len(jobs) == 3
@@ -928,7 +925,7 @@ def test_each_finished_arm_is_freed_before_the_next_is_built(tiny_configs, tmp_p
 def test_a_failed_build_is_released_after_its_traceback_is_gone(
     tiny_configs, tmp_path, monkeypatch
 ):
-    """Roadmap H-ARMFREE: the release after a failed build runs once the exception (whose
+    """The release after a failed build runs once the exception (whose
     traceback holds the half-built tensors) is gone, so a retry does not see them held."""
     jobs = _jobs(tiny_configs, algos=["linr_v1_filter_mask"])
     real_build, real_release, held, seen = run.build_module, run._release, [], []

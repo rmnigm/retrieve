@@ -25,7 +25,7 @@ LIBRARY = {
 }
 LIBRARY_NAMES = {
     "retrieve": {
-        "SilverTorch", "LiNRV1", "LiNRV2", "LiNRV3", "BloomFilter",
+        "SilverTorch", "LiNRV1", "LiNRV2", "LiNRV3",
         "ExactAttributeFilter", "OfficialConfig", "OneBitKNN",
     },
     "retrieve.interfaces": {"DISPATCH", "FilterModule", "OFFICIAL_BACKENDS"},

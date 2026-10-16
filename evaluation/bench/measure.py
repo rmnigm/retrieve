@@ -1,19 +1,5 @@
-"""Measurement primitives (§2.1, §2.3, §2.5): environment, provenance, clocks,
-build timing, index size, the latency windows, graph capture and the profiler split.
-
-Imports torch, the stdlib, ``triton`` (version) and ``retrieve`` (files). ``run.py`` composes
-these: ``setup`` → ``warm_gpu_once`` → ``provenance`` / ``clocks`` → ``timed_build`` →
-``index_bytes`` → per ``(k, bs, mode)`` ``latency`` / ``latency_group`` (with ``graph_callable``
-for ``mode="graph"``) → optional ``profile_once``.
-
-Timing protocol (§2.5): 50 warm-up calls → sync → ``N = clamp(2 s / median_est, 1000,
-5000)`` → 3 windows of N calls, each call bracketed by CUDA events on the current stream,
-wall clock around the window with one sync at the end, one ``nvidia-smi`` SM clock sample
-after each window; an interleaved group runs window ``i`` of every arm before window
-``i + 1``. The reported dict comes from the window with the median median; ``spread`` is
-over the three window medians. No L2 flush: the caller's pool rotation keeps
-index reads naturally cold. Closed-loop, one client.
-"""
+"""Measurement primitives (docs/system/evaluation.md § Measurement protocol): environment,
+provenance, clocks, build timing, index size, the latency windows, graph capture, profiling."""
 
 from __future__ import annotations
 
@@ -42,16 +28,12 @@ from torch.profiler import ProfilerActivity, profile
 import retrieve
 
 ROOT = Path(__file__).resolve().parents[2]
-# code_version names the library this process imports, wherever its checkout is
 LIB = Path(retrieve.__file__).resolve().parent
 MiB = 1024 * 1024
 
 
 class NotCapturable(RuntimeError):
     """The cell cannot run ``mode="graph"``; ``str(exc)`` is the record's ``reason``."""
-
-
-# ----- environment ------------------------------------------------------------
 
 
 def setup(seed: int) -> None:
@@ -84,27 +66,20 @@ def _git(*args: str, cwd: Path = ROOT) -> str | None:
 
 
 def subtree_dirty() -> bool | None:
-    """Uncommitted changes (untracked files included) under ``LIB``, in the checkout that holds
-    it — the code the harness measures. ``None`` when ``LIB`` is not in a git checkout."""
+    """Uncommitted changes (untracked files included) under ``LIB``; ``None`` outside git."""
     out = _git("status", "--porcelain", "--", ".", cwd=LIB)
     return None if out is None else bool(out)
 
 
 def repo_dirty() -> bool | None:
-    """Uncommitted changes to *tracked* files anywhere; informational (docs, plans, harness
-    code). ``None`` outside a git checkout. ``evaluation/results/`` is gitignored, so a
-    campaign appending to its records never flips it."""
+    """Uncommitted changes to tracked files anywhere in the repo; ``None`` outside git."""
     out = _git("status", "--porcelain", "--untracked-files=no")
     return None if out is None else bool(out)
 
 
 def code_version() -> str:
-    """The resume key's code component (docs/system/evaluation.md § Resume): the tree hash at
-    HEAD of the imported package's directory, in its own checkout, when that subtree is clean; else
-    ``files:<sha256>`` over the sources actually on disk (also the value outside a git
-    checkout). Read from ``LIB``, not from the checkout that launched ``bench``, so an editable
-    install pointing at another tree is stamped as what it runs. The two namespaces are
-    disjoint, and a dirty subtree never reuses a cell measured at the committed tree."""
+    """The resume key's code component (docs/system/evaluation.md § Resume): the imported
+    library's tree hash when clean, else ``files:<sha256>`` of its sources on disk."""
     if subtree_dirty() is False:
         tree = _git("rev-parse", "HEAD:./", cwd=LIB)
         if tree:
@@ -122,18 +97,15 @@ def files_hash() -> str:
 
 
 def inductor_cache_dir(code_version: str, given: str | None) -> str:
-    """The inductor cache ``bench run`` uses, always one directory per
-    ``code_version``: under the caller's ``TORCHINDUCTOR_CACHE_DIR`` when set, else under the
-    temp dir. The FX-graph and AOT-autograd caches key a graph on the custom op, not on its
-    ``@triton_op`` body, so a cache shared across library edits replays a stale kernel in graph
-    mode (testing.md § Running); a reused caller dir must not serve another tree's graphs."""
+    """One inductor cache directory per ``code_version`` under the caller's dir or the temp dir
+    (docs/system/evaluation.md § Inductor cache)."""
     base = Path(given) if given else Path(tempfile.gettempdir()) / "bench-inductor"
     return str(base / code_version.replace(":", "-"))
 
 
 def smi_device() -> str:
-    """The process's device for ``nvidia-smi -i``, which ignores ``CUDA_VISIBLE_DEVICES``: its
-    first entry (an index or a UUID), ``"0"`` when unset or empty."""
+    """The device for ``nvidia-smi -i``, which ignores ``CUDA_VISIBLE_DEVICES``: its first
+    entry, ``"0"`` when unset."""
     return os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")[0].strip() or "0"
 
 
@@ -157,8 +129,7 @@ def _nvidia_smi(query: str) -> list[str] | None:
 
 
 def official_commit() -> str | None:
-    """``vcs_info.commit_id`` of the installed ``silvertorch`` (its PEP 610
-    ``direct_url.json``); ``None`` when it is not installed or not installed from git."""
+    """The installed ``silvertorch``'s git commit (PEP 610 ``direct_url.json``), else ``None``."""
     try:
         dist = importlib.metadata.distribution("silvertorch")
     except importlib.metadata.PackageNotFoundError:
@@ -167,16 +138,13 @@ def official_commit() -> str | None:
     return direct.get("vcs_info", {}).get("commit_id")
 
 
-# Written next to silvertorch/_C*.so by a build recipe that changes Meta's defaults.
+# written beside the extension by a build recipe that changes Meta's compiler defaults
 OFFICIAL_BUILD_FLAGS = "_build_flags.json"
 
 
 def official_build(package: str = "silvertorch") -> dict[str, Any] | None:
-    """The extension an official backend would load (``silvertorch``, or our fork
-    ``silvertorch_fork``), found without importing it: ``so_path``, ``so_sha256`` and ``so_bytes``
-    (the build's identity), and ``nvcc_append_flags`` from a ``_build_flags.json`` beside the
-    ``.so`` (written by the build recipe; ``None`` = the package's ``setup.py`` flags: host code at
-    gcc ``-O0`` upstream; ``-O3`` in the fork). ``None`` when the package is absent."""
+    """The extension ``package`` would load, found without importing it: path, sha256, size
+    and its build flags; ``None`` when the package is absent."""
     spec = importlib.util.find_spec(package)
     if spec is None or not spec.submodule_search_locations:
         return None
@@ -194,13 +162,7 @@ def official_build(package: str = "silvertorch") -> dict[str, Any] | None:
 
 
 def provenance() -> dict[str, Any]:
-    """The record's ``env`` block minus clocks. ``commit`` is the repo HEAD;
-    ``dirty`` is ``subtree_dirty()`` — the flag ``report.py`` enforces — and
-    ``repo_dirty`` the informational whole-tree one; ``code_version`` follows ``dirty`` (a
-    kernel edit, committed or not, invalidates a campaign; doc churn never does).
-    ``official_commit`` is the installed ``silvertorch`` build's git commit, ``official_build``
-    the extension that loads and its build flags, ``official_fork_build`` the same for our fork
-    (whose sources are outside ``LIB``, so its ``so_sha256`` is what identifies a fork build)."""
+    """The record's ``env`` block minus the clocks (docs/system/evaluation.md § Output)."""
     driver = _nvidia_smi("driver_version")
     return {
         "gpu": torch.cuda.get_device_name() if torch.cuda.is_available() else "cpu",
@@ -224,10 +186,8 @@ def provenance() -> dict[str, Any]:
 
 
 def clocks() -> dict[str, Any]:
-    """One ``nvidia-smi`` sample of the SM / memory clocks and the power limit; every value
-    ``None`` without the tool. Whether the GPU is loaded when this runs is the caller's
-    business: ``run.py`` records the process-start sample as ``env.sm_mhz_idle`` and
-    ``latency`` samples again right after each window, under load."""
+    """One ``nvidia-smi`` sample of the SM / memory clocks and the power limit; ``None`` values
+    without the tool."""
     vals = _nvidia_smi("clocks.sm,clocks.mem,clocks.max.sm,power.limit")
     out: dict[str, Any] = dict.fromkeys(("sm_mhz", "mem_mhz", "sm_max_mhz", "power_limit_w"))
     if vals and len(vals) == 4:
@@ -237,8 +197,7 @@ def clocks() -> dict[str, Any]:
 
 
 def clock_report() -> str:
-    """``nvidia-smi -q -d CLOCK``: the job log's start / end clock block (current, application,
-    default and max clocks, clock policy)."""
+    """``nvidia-smi -q -d CLOCK``, the job log's clock block."""
     try:
         return subprocess.check_output(
             ["nvidia-smi", "-q", "-d", "CLOCK", "-i", smi_device()],
@@ -256,9 +215,6 @@ def clock_histogram(samples: Sequence[float]) -> str:
     return f"sm_mhz under load (n={len(samples)}): " + (
         ", ".join(f"{mhz}×{n}" for mhz, n in counts) or "no samples"
     )
-
-
-# ----- build / memory ---------------------------------------------------------
 
 
 def timed_build(fn: Callable[[], Any]) -> tuple[Any, float]:
@@ -279,12 +235,8 @@ def index_bytes(module: nn.Module | None) -> int:
     return sum(b.numel() * b.element_size() for b in module.buffers())
 
 
-# ----- latency ----------------------------------------------------------------
-
-
 def _time_calls(fn: Callable[[], Any], n: int) -> tuple[list[float], float]:
-    """Per-call ms (CUDA events on the current stream; ``perf_counter`` without CUDA) and
-    the window's wall seconds, one sync at the end."""
+    """Per-call ms (CUDA events; ``perf_counter`` without CUDA) and the window's wall seconds."""
     if not torch.cuda.is_available():
         ms = []
         t0 = time.perf_counter()
@@ -307,8 +259,8 @@ def _time_calls(fn: Callable[[], Any], n: int) -> tuple[list[float], float]:
 
 
 def stats(ms: list[float], wall_s: float, bs: int) -> dict[str, Any]:
-    """Robust summary of one window (§2.5). Quantiles are linear-interpolated;
-    ``trimmed_mean_ms`` drops ``n // 10`` calls from each end."""
+    """The summary of one window (§2.5): linear-interpolated quantiles, the trimmed mean over
+    ``n // 10`` calls dropped from each end."""
     t = torch.tensor(ms, dtype=torch.float64)
     n = t.numel()
     q1, med, q3, p95, p99 = torch.quantile(
@@ -350,16 +302,9 @@ def latency_group(
     n_min: int = 1000,
     n_max: int = 5000,
 ) -> list[tuple[dict[str, Any], list[float]]]:
-    """§2.5 for the arms of one ``(k, bs, mode)`` variant, timed round-robin: every arm is
-    warmed up and calibrated (its own ``N``), then round ``i`` runs window ``i`` of each arm in
-    order (A, B, A, B, …), so clock drift lands on every arm alike. Each ``fn`` is a zero-arg
-    call that rotates the pool (eager forward, or ``graph_callable``'s replay). Returns, per
-    arm, ``(perf dict, per-call ms of its chosen window)``. Eager only: the first call runs
-    under ``set_sync_debug_mode("warn")`` and ``peak_fwd_mib`` is taken over the arm's first
-    window. ``window_sm_mhz`` is the SM clock sampled right after each window's sync, while
-    the GPU is still at its load clock; ``sm_mhz`` is its last element — the per-variant value
-    the unlocked-clock fallback needs and the only clock sample ``clocks_drift`` compares.
-    Samples are ``None`` without CUDA."""
+    """§2.5 for the arms of one ``(k, bs, mode)`` variant, timed round-robin (window ``i`` of
+    every arm before window ``i + 1``, so clock drift lands on every arm alike). Returns, per
+    arm, ``(perf dict, per-call ms of its chosen window)``."""
     if mode not in ("eager", "graph"):
         raise ValueError(f"mode must be 'eager' or 'graph', got {mode!r}")
     cuda = torch.cuda.is_available()
@@ -413,17 +358,11 @@ def latency_group(
     return out
 
 
-# ----- graph mode / profiling -------------------------------------------------
-
-
 def graph_callable(module: nn.Module, *example_args: Any, warmup: int = 5) -> Callable[..., Any]:
-    """``torch.compile(mode="reduce-overhead", dynamic=False, fullgraph=True)`` of ``module``,
-    warmed on ``example_args`` (one static shape = one capture per bs). It does not reset
-    dynamo, so the arms of an interleaved group stay captured side by side; the caller resets
-    before the first capture of a variant. Raises
-    ``NotCapturable`` unless the warm-up recorded ``cudagraph_skips == 0`` and one call is
-    exactly one ``cudaGraphLaunch``; modules flagged ``capturable = False`` (the ``official``
-    backend) raise before compiling. Call with the same-shaped pool batches."""
+    """The ``graph`` mode callee: ``torch.compile(mode="reduce-overhead")`` warmed on
+    ``example_args``; raises ``NotCapturable`` unless one call is exactly one
+    ``cudaGraphLaunch`` with no cudagraph skips. No dynamo reset here: an interleaved group's
+    arms stay captured side by side."""
     if not getattr(module, "capturable", True):
         raise NotCapturable("not_capturable")
     if not torch.cuda.is_available():
@@ -453,10 +392,10 @@ RANGE_PREFIX = "## "  # profiler range annotations booked as device events (comp
 
 
 # Like-for-like kernel groups for T3; a kernel's group is the first whose substrings its
-# name contains (evaluation.md § Measurement protocol). Our scorer fuses the bloom test; Meta's
-# scoring is process_cluster + payload kernels, its bloom test bloom_search kernels: all "scorer".
+# name contains (evaluation.md § Measurement protocol). Meta's scoring is the process_cluster +
+# payload kernels, its bloom test the bloom_search kernels: all "scorer".
 KERNEL_SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("scorer", ("_codesigned_probe_score", "::fused_kmean_ann::", "::bloom_search::")),
+    ("scorer", ("::fused_kmean_ann::", "::bloom_search::")),
     ("topk", ("::mbtopk::", "::sbtopk::", "radixSortKVInPlace", "bitonicSortKVInPlace")),
     ("epilogue", ("gpu_index_kernel", "_scatter_gather_elementwise_kernel")),
 )
@@ -472,15 +411,9 @@ def kernel_scope(name: str) -> str:
 
 
 def kernel_summary(events: Sequence[Any], top: int = 8) -> dict[str, Any]:
-    """The entry fields of one profiled call from its device events (``key``,
-    ``self_device_time_total``, ``count``), sentinels dropped: ``kernels``, the ``top`` by self
-    time (``{"kernel", "us", "calls"}``), and ``kernels_us`` / ``kernels_calls``, the device time
-    and launches summed over every kernel (the top-8 sum is only a lower bound). The sums
-    skip ``## …`` events: the profiler books a compiled graph's ``## Call CompiledFxGraph …`` range
-    as a device event spanning that graph's kernels, which would count them twice.
-    ``kernel_scopes`` splits the same sums by ``kernel_scope``: ``{scope: {"us",
-    "calls"}}`` for scorer, topk, epilogue and other, adding up to ``kernels_us`` /
-    ``kernels_calls``."""
+    """``kernels`` (the ``top`` by self time), ``kernels_us`` / ``kernels_calls`` (every kernel)
+    and ``kernel_scopes`` of one profiled call. The profiler books a compiled graph's ``## …``
+    range as a device event spanning its kernels, so ranges are skipped or they count twice."""
     kernels = sorted(
         (e for e in events if SENTINEL not in e.key),
         key=lambda e: e.self_device_time_total,
@@ -504,10 +437,9 @@ def kernel_summary(events: Sequence[Any], top: int = 8) -> dict[str, Any]:
 
 
 def profile_once(fn: Callable[[], Any], top: int = 8) -> dict[str, Any]:
-    """One eager call under ``torch.profiler``: ``kernel_summary`` of its device kernels. Empty
-    kernels and zero sums without CUDA. The call is bracketed by two sentinel kernels and the
-    profile is retried with a longer idle pad on both sides of the window until both sentinels
-    are recorded; raises if they never are (docs/system/evaluation.md § Measurement protocol)."""
+    """``kernel_summary`` of one eager call under ``torch.profiler``, retried with longer idle
+    pads until both sentinel kernels are recorded (docs/system/evaluation.md § Measurement
+    protocol)."""
     if not torch.cuda.is_available():
         return kernel_summary([], top)
     fn()

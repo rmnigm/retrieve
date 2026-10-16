@@ -125,16 +125,15 @@ def _counts(jobs, *fields):
 
 def test_quality_suite_collapses_same_path_backends():
     jobs = load_matrix(MINI, SUITES, "quality")
-    # per dim: linr_v1 [triton, torch] → 1 (cublas), linr_v3 → 2, silvertorch → 3.
-    assert len(jobs) == 2 * (1 + 2 + 3)
+    # per dim: linr_v1 [triton, torch] → 1 (cublas), linr_v3 → 2, silvertorch → 2.
+    assert len(jobs) == 2 * (1 + 2 + 2)
     assert _counts(jobs, "algo", "backend", "path") == Counter(
         {
             ("linr_v1_filter_mask", "triton", "cublas"): 2,
             ("linr_v3", "triton", "triton"): 2,
             ("linr_v3", "torch", "torch"): 2,
-            ("silvertorch", "triton", "triton"): 2,
-            ("silvertorch", "torch", "torch"): 2,
             ("silvertorch", "official", "official"): 2,
+            ("silvertorch", "official-fork", "official-fork"): 2,
         }
     )
     j = jobs[0]
@@ -163,9 +162,10 @@ def test_quality_suite_collapses_same_path_backends():
 def test_filter_suite_arms_sweeps_and_seeds():
     jobs = load_matrix(MINI, SUITES, "filter")
     # (fk, sweep) pairs per dim: clause c0, c0c1 (c9_off disabled) + bloom c0 = 3. Per pair and
-    # seed: linr_v2 2 paths on all 3; linr_v3 (sweeps [c0]) on 2; silvertorch triton on 3;
-    # official (bloom only) on 1 → 6 + 2 + 3 + 1 = 12 per dim and seed.
-    assert len(jobs) == 2 * 3 * 12
+    # seed: linr_v2 2 paths on the 2 clause pairs; linr_v3 (sweeps [c0]) on clause c0;
+    # silvertorch triton on 3; official (bloom only) on 1 → 4 + 1 + 3 + 1 = 9 per dim and seed
+    # (LiNR runs no bloom cell: PATHS is None there).
+    assert len(jobs) == 2 * 3 * 9
     assert _counts(jobs, "dim", "filter_kind", "sweep") == Counter(
         {
             (d, fk, sw): n
@@ -173,7 +173,7 @@ def test_filter_suite_arms_sweeps_and_seeds():
             for (fk, sw), n in {
                 ("clause", "c0"): 12,
                 ("clause", "c0c1"): 9,
-                ("bloom", "c0"): 15,
+                ("bloom", "c0"): 6,
             }.items()
         }
     )
@@ -189,7 +189,9 @@ def test_filter_suite_arms_sweeps_and_seeds():
 def test_widths_compile_frac_ks_by_sweep_and_empty_slots():
     jobs = load_matrix(MINI, SUITES, "widths")
     st_bloom = [
-        j for j in jobs if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "triton", "bloom")
+        j
+        for j in jobs
+        if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "official-fork", "bloom")
     ]
     # m_bits gridded: the job's bloom carries it, the suite default fills k_hash.
     assert [(j.build, j.bloom) for j in st_bloom] == [
@@ -198,11 +200,13 @@ def test_widths_compile_frac_ks_by_sweep_and_empty_slots():
     ]
     # Not gridded: the key's params stay {} and the bloom is the default, as before.
     plain = [
-        j for j in jobs if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "triton", "clause")
+        j
+        for j in jobs
+        if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "official-fork", "clause")
     ]
     assert plain and all(j.build == {} for j in plain)
     assert all(j.bloom == {"m_bits": 64, "k_hash": 3} for j in plain)
-    compiled = [j for j in jobs if j.backend == "torch" and j.algo == "silvertorch"]
+    compiled = [j for j in jobs if j.backend == "torch" and j.algo == "linr_v1_filter_mask"]
     assert compiled and all(j.build == {"compile": "max-autotune"} for j in compiled)
     v3 = [j for j in jobs if j.algo == "linr_v3"]
     assert v3 and all(j.query == ({"candidate_pool_frac": 0.1},) for j in v3)
@@ -237,8 +241,8 @@ def test_deep_suite_build_query_split():
     ]
     assert st[-1].key({"n_lists": 64, "n_probe": 16})["params"] == {"n_lists": 64, "n_probe": 16}
     assert v3[0].build == {} and v3[0].query == ({"candidate_pool": 20}, {"candidate_pool": 40})
-    assert {j.dim for j in jobs} == {32} and {j.filter_kind for j in jobs} == {"bloom"}
-    assert {j.seed for j in jobs} == {0, 1}
+    assert {j.dim for j in jobs} == {32} and {j.seed for j in jobs} == {0, 1}
+    assert {j.filter_kind for j in st} == {"bloom"} and {j.filter_kind for j in v3} == {"clause"}
     assert jobs[0].bloom == {"m_bits": 128, "k_hash": 3}  # suite override on top of the default
 
 
@@ -269,10 +273,9 @@ def test_narrows_apply_before_collapse():
         dims=[16],
         backends=["torch"],
         algos=["linr_v1_filter_mask", "silvertorch"],
-    )
+    )  # silvertorch has no torch path: only the cuBLAS job, labelled torch
     assert [(j.algo, j.backend, j.path) for j in jobs] == [
         ("linr_v1_filter_mask", "torch", "cublas"),
-        ("silvertorch", "torch", "torch"),
     ]
     jobs = load_matrix(MINI, SUITES, "filter", sweeps=["c0c1"], seeds=[1], ks=[10], batch_sizes=[2])
     # per dim: linr_v2 on two paths + silvertorch triton (no bloom c0c1, linr_v3 is c0-only)
@@ -280,7 +283,7 @@ def test_narrows_apply_before_collapse():
     jobs = load_matrix(
         MINI, SUITES, "filter", sweeps=["c0"], dims=[32], seeds=[1], ks=[10], batch_sizes=[2]
     )
-    assert len(jobs) == 9 and all(
+    assert len(jobs) == 6 and all(
         j.ks == (10,) and j.batch_sizes == (2,) and j.seed == 1 for j in jobs
     )
 
@@ -313,19 +316,19 @@ def test_suite_errors_are_named():
     ("arms", "match"),
     [
         (
-            "[{algo: silvertorch, backends: [triton], build: {m_bits: [64]}}]",
+            "[{algo: silvertorch, backends: [official-fork], build: {m_bits: [64]}}]",
             "silvertorch/bloom only",
         ),
         (
-            "[{algo: silvertorch, backends: [triton], build: {compile: [max-autotune]}}]",
+            "[{algo: silvertorch, backends: [official-fork], build: {compile: [max-autotune]}}]",
             "torch arms only",
         ),
         (
-            "[{algo: silvertorch, backends: [torch], build: {compile: [default]}}]",
+            "[{algo: linr_v3, backends: [torch], build: {compile: [default]}}]",
             "torch arms only",
         ),
         (
-            "[{algo: silvertorch, backends: [triton], query: {candidate_pool_frac: [0.1]}}]",
+            "[{algo: silvertorch, backends: [official-fork], query: {candidate_pool_frac: [0.1]}}]",
             "linr_v3",
         ),
         ("[{algo: linr_v2, backends: [triton], sweeps: [nope]}]", r"sweeps \['nope'\] not in mini"),
@@ -362,7 +365,7 @@ def test_arm_errors_are_named(tmp_path, arms, match):
         load_matrix(MINI, suites, "s")
 
 
-# ----- the real grid (campaign-v2, user decisions 2026-10-08) ---------------------------
+# the real grid
 
 GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; change it deliberately
     ("filter", "goodreads"): (39, 51),
@@ -438,7 +441,7 @@ def test_grid_covers_every_suite_and_dataset():
 
 @pytest.mark.parametrize(("suite", "dataset"), list(GRID))
 def test_grid_counts_and_invariants(suite, dataset):
-    """G-grid: the job / cell counts and the final pass's rules (controller 2026-10-13) on every
+    """The job / cell counts and the final pass's rules on every
     expanded cell."""
     jobs = _real(suite, dataset)
     assert (len(jobs), sum(len(j.query) for j in jobs)) == GRID[suite, dataset]
@@ -687,7 +690,7 @@ def test_score_path_is_an_official_build_param():
         official_config("silvertorch", "bloom", "triton", {"score_path": "int32"})
 
 
-# IVF-TUNE (research/artifacts/campaign-v2/ivf-tune): SilverTorch n_lists / n95 per dataset;
+# SilverTorch n_lists / n95 per dataset (research/artifacts/campaign-v2/ivf-tune);
 # None = open
 IVF = {
     "goodreads": (4096, 64),
@@ -732,17 +735,8 @@ def test_v3bits_pubmed_is_clause_only_at_k_bits_256_and_768():
     assert {j.build["k_bits"] for j in gr} == {64, 128}
 
 
-def test_no_dataset_sets_an_exact_gate():
-    """The fp16-storage allowance was YFCC's only (user 2026-10-10): every dataset gates at the
-    floor."""
-    gates = {f.stem: load_dataset(f, _ds_dim(f)) for f in sorted(CFG.glob("*.yaml"))
-             if f.stem != "suites"}  # fmt: skip
-    assert {n for n, d in gates.items() if d.exact_gate is not None} == set()
-    assert {run.exact_gate(d, 100) for d in gates.values()} == {run.EXACT_MIN_RECALL}
-
-
 def test_normalize_is_off_for_pubmed_only(tmp_path):
-    """MedCPT scores by dot product (user 2026-10-13): PubMed and its synth draws; every other
+    """MedCPT scores by dot product: PubMed and its synth draws; every other
     dataset is L2-normalised."""
     off = {f.stem for f in sorted(CFG.glob("*.yaml"))
            if f.stem != "suites" and not load_dataset(f, _ds_dim(f)).normalize}  # fmt: skip

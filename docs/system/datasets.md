@@ -305,13 +305,6 @@ the source has no nulls there. The corrected C1 is re-derived by
 which rewrites only C1 and the matching query column and asserts that every
 non-null item's bucket is unchanged.
 
-### yfcc10m
-
-YFCC-10M left the study (user, 2026-10-13, [decisions](../../research/decisions.md#datasets)); its ETL, GT check,
-configs and tests are deleted (tag `pre-release-cleanup` holds them). Until roadmap step 6 two leftovers stay in files
-the final run imports: `eval-data yfcc` / `yfcc-check-gt` are still listed in `cli.py` and fail on import, and
-`hub.py` still names `pinkmeme/eval-yfcc10m`, a repo the user deleted (2026-10-15).
-
 ### pubmed
 
 **Status: the 10 M slice** (`--keep-items 10000000 --seed 0`) under
@@ -1131,7 +1124,6 @@ EVAL_REPOS = {
     "yambda-500m":       "pinkmeme/eval-yambda-500m",
     "yambda-5b":         "pinkmeme/eval-yambda-5b",
     "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
-    "yfcc10m":           "pinkmeme/eval-yfcc10m",
     "pubmed":            "pinkmeme/eval-pubmed",
     "kuairand":          "pinkmeme/eval-kuairand",
     "openalex":          "pinkmeme/eval-openalex",
@@ -1139,7 +1131,7 @@ EVAL_REPOS = {
 }
 ```
 
-`yambda-5b`, `yfcc10m` and `kuairand` name repos the user deleted (2026-10-15); their keys stay in the
+`yambda-5b` and `kuairand` name repos the user deleted (2026-10-15); their keys stay in the
 code until the roadmap's deletion step.
 
 What may be

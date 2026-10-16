@@ -1,13 +1,5 @@
-"""``eval-data subset``: a seeded row subset of a staged dataset (docs/system/datasets.md
-§ Subsets), for the fixed-d N-sweep (LAION 30 M d256 → 1 / 3 / 10 M).
-
-The rows are the sorted first ``n`` of one ``randperm(N_parent)`` drawn from
-``torch.Generator().manual_seed(seed)``, so the subsets of one seed nest (1 M ⊂ 3 M ⊂ 10 M).
-Item vectors, real attrs and synth attrs are the parent's rows byte for byte (synth: each item
-keeps its ``u_i``, so its pass / fail at every rate). Queries, query attrs, the reverse flags and
-the vocab are the parent's. The held-out targets are recomputed over the subset by ingest's rule
-(exact unfiltered top-1 by inner product, fp32, ties to the lowest id). ``MANIFEST.sha256``
-lists every written file."""
+"""``eval-data subset``: a seeded, nested row subset of a staged dataset (docs/system/datasets.md
+§ Subsets)."""
 
 from __future__ import annotations
 
@@ -121,8 +113,7 @@ def build(parent: Path, out: Path, n: int, seed: int = SEED, shard_rows: int = 1
 
 
 def copy_synth(parent: Path, out: Path, rows: torch.Tensor, seed: int) -> list[int]:
-    """Every uniform synth draw of ``parent`` on the subset rows (each item keeps its ``u_i``);
-    the shared all-ones query side is in ``COPIED``. Returns the draws copied."""
+    """Every uniform synth draw of ``parent`` on the subset rows; returns the draws copied."""
     n = int(rows.numel())
     draws = layout.synth_draws(parent)
     for draw in draws:
@@ -139,8 +130,8 @@ def copy_synth(parent: Path, out: Path, rows: torch.Tensor, seed: int) -> list[i
 
 
 def sync_synth(parent: Path, out: Path, seed: int = SEED) -> list[int]:
-    """Re-copy the parent's synth draws onto an existing subset (a draw built on the parent after
-    the subset): the rows are re-derived and must match the subset's recorded ``rows_sha256``."""
+    """Re-copy the parent's synth draws onto an existing subset; the re-derived rows must match
+    its recorded ``rows_sha256``."""
     parent, out = Path(parent), Path(out)
     (content,) = [p for p in out.iterdir() if (p / "shard_index.json").exists()]
     (content_p,) = [p for p in parent.iterdir() if (p / "shard_index.json").exists()]
@@ -163,8 +154,7 @@ def write_manifest(out: Path) -> None:
 
 
 def write_configs(parent: str, name: str, config_dir: Path = CONFIG_DIR) -> None:
-    """``<name>.yaml`` / ``<name>-synth*.yaml``: the parent's configs (every synth draw's) on the
-    subset's data dir."""
+    """The parent's configs, every synth draw's included, on the subset's data dir."""
     synth = sorted(p.stem[len(parent) :] for p in Path(config_dir).glob(f"{parent}-synth*.yaml"))
     for suffix in ("", *synth):
         src = Path(config_dir) / f"{parent}{suffix}.yaml"

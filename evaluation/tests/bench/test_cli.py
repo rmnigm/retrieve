@@ -66,7 +66,7 @@ def test_cli_run_campaign_and_report(tiny_configs, tmp_path):
     assert r.exit_code == 0, r.output
     assert (out / "report" / "results.parquet").exists()
     assert "NOT CITABLE" in r.output  # three partial records veto --gate
-    assert "NOT CITABLE" in (out / "report" / "tables" / "tab-memory.tex").read_text()
+    assert "NOT CITABLE" in (out / "report" / "report.md").read_text()
 
 
 def test_campaign_records_a_timed_out_child(tiny_configs, tmp_path, monkeypatch):
@@ -96,7 +96,7 @@ def test_campaign_records_a_timed_out_child(tiny_configs, tmp_path, monkeypatch)
 
 def test_campaign_default_timeout_fits_the_largest_group(tiny_configs, tmp_path, monkeypatch):
     """Roadmap H3: without ``--timeout`` every child gets 48 h, above the ~10 h arxiv ``deep``
-    ``silvertorch`` group the old 6 h default cut short."""
+    ``silvertorch`` group, about 10 h."""
     ds, _ = tiny_configs
     seen = []
 
@@ -163,7 +163,7 @@ def test_campaign_restart_keeps_the_groups_parity_spill(tiny_configs, tmp_path, 
 def test_a_failed_cell_exits_1_and_campaign_exits_with_its_worst_child(
     tiny_configs, tmp_path, monkeypatch
 ):
-    """A driver chains legs on the exit code (and ``uv run`` masks it, roadmap NUMBERS), so
+    """A driver chains legs on the exit code (and ``uv run`` masks it), so
     ``bench run`` exits 1 when any cell failed, after the loop wrote every record, and
     ``bench campaign`` exits with its worst child's code while still running every child."""
     ds, _ = tiny_configs
@@ -223,7 +223,7 @@ def test_env_prints_provenance_and_clocks_as_json(monkeypatch):
 
 
 def test_bench_run_keys_the_inductor_cache_by_code_version(tiny_configs, tmp_path, monkeypatch):
-    """Roadmap H4 / H-INDCACHE: ``bench run`` points inductor at the ``code_version`` directory,
+    """``bench run`` points inductor at the ``code_version`` directory,
     under the caller's ``TORCHINDUCTOR_CACHE_DIR`` when set; ``bench campaign`` passes children
     the caller's value (each child appends its own code_version), never the default torch
     wrote into its own environment on import."""

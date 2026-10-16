@@ -1,9 +1,5 @@
-"""The cell loop (docs/system/evaluation.md § The cell loop): ``run(jobs, out_dir=...)``
-executes ``Job``s in this process, in order, and appends one JSONL record per cell to
-``<out_dir>/<suite>/<dataset>-d<dim>.jsonl`` the moment the cell finishes. Resume, failures,
-crash safety, clocks, the quality cache and the cross-backend parity spill are specified on
-that page (§ Resume, § Quality cache, § Arm release).
-"""
+"""The cell loop (docs/system/evaluation.md § The cell loop): ``run(jobs, out_dir=...)`` runs
+``Job``s in this process and appends one JSONL record per cell as it finishes."""
 
 from __future__ import annotations
 
@@ -26,7 +22,7 @@ from loguru import logger
 from torch import nn
 
 from bench import algos, inputs, measure, oracle, records
-from bench.config import QUERY_PARAMS, Dataset, Job, interleave_units, shared_key
+from bench.config import QUERY_PARAMS, Job, interleave_units, shared_key
 from bench.metrics import accumulate, accumulator, drop_self, finalize, jaccard_at_k
 from eval_datasets.layout import atomic_write
 
@@ -62,38 +58,23 @@ class QualityGateError(RuntimeError):
     """An exact algo scored below ``EXACT_MIN_RECALL`` against the oracle (§2.4)."""
 
 
-def exact_gate(ds: Dataset, k_max: int) -> float:
-    """§2.4's floor: ``EXACT_MIN_RECALL``, or the dataset's ``exact_gate`` below k 1000 (YFCC's
-    fp16-storage allowance at k 100; @1000 stays 0.99)."""
-    return ds.exact_gate if ds.exact_gate is not None and k_max < 1000 else EXACT_MIN_RECALL
-
-
 def is_sticky(exc: BaseException) -> bool:
     """A CUDA error after which the process cannot measure anything else."""
     msg = str(exc)
     return any(s in msg for s in STICKY_CUDA)
 
 
-# ----- per (filter_kind, sweep) assets -----------------------------------------------------
-
-
 def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device) -> dict:
-    """Sweep attrs + skip mask, the standalone filter for this cell's filter backend, the
-    exact oracle blob (unfiltered on ``none`` cells), bloom pass counts (bloom cells) and the
-    row masks the quality pass scores: ``keep`` (not skip-masked), ``oracle_rows`` (kept and ≥ 1
-    survivor), ``heldout_rows`` (kept, ≥ 1 target and,
-    on filter cells, ``target_in_filter``), and ``n_targets_in_filter`` — the held-out
-    targets those rows score (on filter cells only the ones the exact mask admits).
-    ``oracle_topk`` is the ``[U, k_max]`` list oracle recall ranks against; on a
-    ``job.self_excluded`` cell it is the k_max + 1 blob without each row's ``self_ids``
-    (the held-out target, the query's own item)."""
+    """One sweep's assets: query attrs and skip mask, the standalone filter (clause cells), the
+    oracle blob and the row masks the quality pass scores (docs/system/evaluation.md
+    § Measurement protocol, § Self-match)."""
     fk, n = job.filter_kind, inp["n_queries"]
     qa_s, skip = inputs.sweep_qa(inp["qa"], job.clauses)
-    filters = inputs.build_filters(fk, inp, [job.backend], bloom=job.bloom)
+    filters = inputs.build_filters(fk, inp, [job.backend])
     filter_mod = filters.get(algos.filter_backend(job.backend))
     keep = ~skip if skip is not None else torch.ones(n, dtype=torch.bool)
     heldout = keep & (inp["n_targets"] > 0)
-    bloom_fp = self_ids = self_top1 = None
+    self_ids = self_top1 = None
     blob = sweep_oracle(job, inp, k_max, device, filters, qa_s, skip, warn_missing=True)
     oracle_topk = blob["topk"]
     if fk != "none":
@@ -106,10 +87,6 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
                         "{} rows", job.dataset, job.sweep, self_top1, int(reach.sum()))  # fmt: skip
             oracle_topk = drop_self(oracle_topk, self_ids)
     oracle_rows = keep & (oracle_topk[:, 0] != -1)
-    if fk == "bloom":
-        assert filter_mod is not None
-        counts = oracle.pass_counts(filter_mod, qa_s, skip, inp["n_items"], device=device)
-        bloom_fp = oracle.bloom_fp_rate(counts, blob["pass_counts"], inp["n_items"])
     n_tif = blob["targets_in_filter"][heldout].sum()
     return {
         "qa_s": qa_s,
@@ -124,7 +101,6 @@ def sweep_assets(job: Job, inp: dict[str, Any], k_max: int, device: torch.device
         "heldout_rows": heldout,
         "n_targets_in_filter": int(n_tif),
         "pass_rate": blob["pass_rate"],
-        "bloom_fp_rate": bloom_fp,
     }
 
 
@@ -139,11 +115,8 @@ def sweep_oracle(
     *,
     warn_missing: bool,
 ) -> dict[str, Any]:
-    """The blob v4 of a job's sweep at ``k_max`` (``oracle.load_or_build``) under the exact
-    mask (``inputs.exact_filter`` over the cell's standalone ``filters``; none on a ``none``
-    cell, whose blob ignores the attrs so every suite of the inputs shares it); ``qa_s, skip``
-    are the sweep's ``inputs.sweep_qa``. A self-excluded cell's blob is at ``k_max + 1``, cut
-    from a wider cached one when there is one."""
+    """The job's oracle blob at ``k_max`` under the exact mask (``k_max + 1`` on a
+    self-excluded cell); a ``none`` cell's blob ignores the attrs, so every suite shares it."""
     return oracle.load_or_build(
         job.data.gt_dir,
         job.sweep,
@@ -163,8 +136,7 @@ def sweep_oracle(
 
 
 def prebuild_oracles(jobs: Sequence[Job], device: torch.device | None = None) -> Counter:
-    """``bench oracle``: every blob ``jobs`` read (one per ``(dataset, dim, filter kind, sweep,
-    k_max)``), built or found, in this process, no timing. Returns ``Counter(sweeps=…)``."""
+    """``bench oracle``: every blob ``jobs`` read, built or found, no timing."""
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     measure.setup(0)
     counts: Counter = Counter()
@@ -176,7 +148,7 @@ def prebuild_oracles(jobs: Sequence[Job], device: torch.device | None = None) ->
         inp = inputs.load_inputs(next(iter(group.values())).data, device, with_filters=filtered)
         for j in group.values():
             fk = "clause" if j.filter_kind == "clause" else "none"  # bloom builds its exact one
-            filters = inputs.build_filters(fk, inp, [j.backend], bloom=j.bloom)
+            filters = inputs.build_filters(fk, inp, [j.backend])
             qa_s, skip = inputs.sweep_qa(inp["qa"], j.clauses)
             sweep_oracle(j, inp, max(j.ks), device, filters, qa_s, skip, warn_missing=False)
             counts["sweeps"] += 1
@@ -186,9 +158,8 @@ def prebuild_oracles(jobs: Sequence[Job], device: torch.device | None = None) ->
 
 
 def resolve_pool(params: dict, assets: dict) -> dict:
-    """``candidate_pool_frac`` → ``candidate_pool = max(POOL_MIN, round(frac × mean pass count
-    over the sweep's oracle rows))`` (on synth, N·p); other params pass through. The key keeps
-    the fraction, the module gets the int, the record body carries it."""
+    """``candidate_pool_frac`` → ``candidate_pool = max(POOL_MIN, round(frac × mean pass
+    count))``; the key keeps the fraction, the module gets the int."""
     if "candidate_pool_frac" not in params:
         return params
     p = dict(params)
@@ -202,8 +173,7 @@ def passing_mean(assets: dict) -> float:
 
 
 def compile_warmup(module: nn.Module, inp: dict, assets: dict, device: torch.device) -> float:
-    """Seconds of a compiled module's first forward (one quality chunk), kept apart from
-    ``build_s``; ``perf``'s per-``(bs, k)`` recompiles fall inside ``latency``'s warm-up."""
+    """Seconds of a compiled module's first forward, kept apart from ``build_s``."""
     sel = assets["keep"].nonzero().reshape(-1)[:QUALITY_CHUNK]
     q = inp["queries"][sel].to(device)
     qa = assets["qa_s"][sel].to(device) if assets["qa_s"] is not None else None
@@ -233,27 +203,15 @@ def build_module(job: Job, inp: dict, assets: dict, k_max: int, params: dict) ->
     )
 
 
-# ----- quality + parity ---------------------------------------------------------------------
-
-
 @torch.inference_mode()
 def quality(
     module: nn.Module, inp: dict, assets: dict, ks: Sequence[int], device: torch.device
 ) -> tuple[dict[str, Any], dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
-    """§2.4: stream the kept rows in chunks of 16 through ``module`` at ``k_max``, accumulate
-    every ``k`` from the one top-``k_max`` list (oracle: ranked prefix targets; held-out:
-    fixed targets) as device running sums, one sync at the end. On filter cells a held-out
-    target the exact mask excludes can never be retrieved, so it is masked to ``-1`` and
-    ``nt`` counts only the reachable ones (``blob["targets_in_filter"]``) — Goodreads
-    targets are lists, and scoring the unreachable ones biases recall down. The queries,
-    attrs, targets and oracle tensors are staged on the device once; each chunk selects its
-    rows with CPU masks and device ``index_select``, so no chunk syncs, and torch's CPU threads
-    are held at ``QUALITY_CPU_THREADS`` for the loop. Returns the metrics, the per-query
-    recall ``{recall_oracle@k, heldout_recall@k: [n_kept] float32}`` (NaN on a row the side
-    does not score; the values the sums add up) and the ``[n_kept, k_max]`` ids / scores (for
-    the parity spill). With ``assets["self_ids"]`` the module returns ``k_max + 1`` and the
-    oracle side scores it without the row's own item; the held-out side keeps the first
-    ``k_max`` (its target *is* that item)."""
+    """§2.4: the kept rows through ``module`` at ``k_max`` in chunks, every ``k`` scored from
+    the one top-``k_max`` list as device running sums. Returns the metrics, the per-query
+    recall (NaN where a side does not score the row) and the ids / scores for the parity
+    spill. A held-out target the exact mask excludes is masked to ``-1``: it can never be
+    retrieved, and scoring it would bias recall down."""
     rows = assets["keep"].nonzero().reshape(-1)
     blob = assets["blob"]
     k_out = max(ks)
@@ -263,7 +221,6 @@ def quality(
     per_q = {f"{name}@{k}": nan() for name in ("recall_oracle", "heldout_recall") for k in ks}
     ids_all: list[torch.Tensor] = []
     sc_all: list[torch.Tensor] = []
-    # staged once: a per-chunk host gather and pageable copy dominated the pass
     rows_d = rows.to(device)
     queries = inp["queries"].to(device)
     qa_all = assets["qa_s"].to(device) if assets["qa_s"] is not None else None
@@ -317,16 +274,13 @@ def quality(
 
 
 def per_query_path(job: Job, params: dict, code_version: str) -> str:
-    """The sidecar of one cell, relative to the results root: no ``_``-prefixed part, so
-    ``bench upload`` publishes it, and not ``*/*.jsonl``, so ``records.aggregate`` skips it."""
+    """The per-query sidecar of one cell, relative to the results root."""
     h = hashlib.sha1(records.resume_key(job.key(params), code_version).encode()).hexdigest()
     return f"{job.suite}/{job.dataset}-d{job.dim}.perquery/{h[:20]}.npz"
 
 
 def write_per_query(root: Path, rel: str, assets: dict, per_q: dict[str, torch.Tensor]) -> None:
-    """The per-query sidecar (docs/system/evaluation.md § Per-query sidecar): ``rows`` (index
-    into the ``users_limit``-trimmed queries), ``pass_count`` (``-1`` without a filter) and
-    the per-query recall arrays, one row per kept query."""
+    """The per-query sidecar (docs/system/evaluation.md § Per-query sidecar)."""
     rows = assets["keep"].nonzero().reshape(-1)
     counts = assets["blob"]["pass_counts"][rows]
     arrays = {n: t.numpy().astype(np.float32) for n, t in per_q.items()}
@@ -354,8 +308,7 @@ def parity(
     scores: torch.Tensor,
     ks: Sequence[int],
 ) -> dict[str, Any]:
-    """The spill-file wiring check (§2.4): write the reference when absent, else
-    compare against it."""
+    """The parity spill (§2.4): write the reference when absent, else compare against it."""
     key = {k: v for k, v in job.key(params).items() if k != "backend"}
     # score_path picks the official kernel's epilogue, a backend knob: its arms share a spill
     key["params"] = {k: v for k, v in key["params"].items() if k != "score_path"}
@@ -391,15 +344,13 @@ def parity(
 
 
 def quality_key(key: dict[str, Any], code_version: str, ks: Sequence[int]) -> str:
-    """The quality cache's lookup key: the key block minus ``seed``, plus ``code_version``
-    and ``ks``."""
+    """The quality cache's key: the key block minus ``seed``, plus ``code_version`` and ``ks``."""
     rest = {k: v for k, v in key.items() if k != "seed"}
     return json.dumps({**rest, "code_version": code_version, "ks": list(ks)}, sort_keys=True)
 
 
 def quality_sources(recs: Sequence[dict[str, Any]]) -> dict[str, dict[int, dict[str, Any]]]:
-    """``{quality_key: {seed: record}}`` over the ``ok`` / ``partial`` records that computed
-    their quality (``quality_source`` null), last record per seed."""
+    """``{quality_key: {seed: record}}`` over the records that computed their quality."""
     out: dict[str, dict[int, dict[str, Any]]] = {}
     for r in recs:
         if (
@@ -423,9 +374,6 @@ def cached_quality(
     return by_seed[seeds[0]] if seeds else None
 
 
-# ----- perf -----------------------------------------------------------------------------------
-
-
 def _call_next(callee: Any, pool: torch.Tensor, counter: Iterator[int]) -> Any:
     return callee(pool[next(counter) % pool.shape[0]])
 
@@ -438,16 +386,15 @@ def _call_next_filtered(
 
 
 def filter_arg(module: nn.Module, qa: torch.Tensor | None) -> Any:
-    """What ``module``'s forward takes for a batch's query attrs: its ``prepare_queries`` result
-    (query-side filter work done outside the call) or the attrs."""
+    """What the forward takes for a batch's query attrs: ``prepare_queries``'s result or the
+    attrs."""
     prepare = getattr(module, "prepare_queries", None)
     return qa if qa is None or prepare is None else prepare(qa)
 
 
 def prepare_pool(module: nn.Module, qa_pool: torch.Tensor | None) -> tuple[Any, float | None]:
-    """Every pool batch's filter argument, prepared once before timing (evaluation.md § Query
-    preparation): ``(per-batch arguments, query_prep_ms)``, the mean host + device ms of one
-    batch's ``prepare_queries`` (``None`` for a module without one, or an unfiltered cell)."""
+    """Every pool batch's filter argument, prepared before timing, and the mean ms of one
+    ``prepare_queries`` (docs/system/evaluation.md § Query preparation)."""
     if qa_pool is None or getattr(module, "prepare_queries", None) is None:
         return qa_pool, None
     if torch.cuda.is_available():
@@ -469,12 +416,9 @@ def _rotate(callee: Any, pool: torch.Tensor, qa_pool: Any) -> Any:
 
 @torch.inference_mode()
 def ids_sha256(callee: Any, pool: torch.Tensor, qa_pool: Any) -> tuple[str, str]:
-    """sha256 of the ids ``callee`` returns on the first ``IDS_PROBE_BATCHES`` batches of the
-    pool, int64 row-major, batch after batch: ``(exact, canon)``. ``exact`` hashes the ids as
-    returned (equal across modes is the D1-G eager-vs-graph identity gate); ``canon`` first
-    re-orders each row by (score desc, id asc), so two backends whose scores are bit-equal and
-    whose tied ids come in another order hash equal (official vs Triton). Each batch is copied
-    out before the next call (a graph replay overwrites its output buffers)."""
+    """``(exact, canon)`` sha256 of the ids ``callee`` returns on the first probe batches: as
+    returned, and with each row re-ordered by (score desc, id asc) so tied ids in another
+    order hash equal. Each batch is copied out: a graph replay overwrites its buffers."""
     exact, canon = hashlib.sha256(), hashlib.sha256()
     for i in range(min(IDS_PROBE_BATCHES, pool.shape[0])):
         ids, scores = callee(pool[i]) if qa_pool is None else callee(pool[i], qa_pool[i])
@@ -498,16 +442,9 @@ def perf(
     profile: bool,
     latency_kw: dict[str, Any],
 ) -> list[tuple[list[dict[str, Any]], list[dict[str, Any]]]]:
-    """§2.5 per ``(bs, k, mode)`` for the arms of one cell (one module, or the modules of an
-    interleave group, timed round-robin by ``measure.latency_group``): the fixed-seed pool of
-    ``job`` rotated round-robin, ``module.k = k`` before each variant, ``graph`` via
-    ``measure.graph_callable`` (one capture per shape, dynamo reset once before the variant's
-    captures) or a null entry with the ``reason`` (``official`` → ``not_capturable``).
-    Each module's pool filters are prepared before timing (``prepare_pool``) and every entry
-    records the cost as ``query_prep_ms`` (``None`` where there is no prepare step). Each
-    measured entry gets
-    ``ids_sha256``; in a group of two or more, also ``rounds``. Returns ``(entries, samples)``
-    per module."""
+    """§2.5 per ``(bs, k, mode)`` for the arms of one cell or interleave group; a variant that
+    cannot run gets a null entry with its ``reason``. Returns ``(entries, samples)`` per
+    module."""
     out: list[tuple[list[dict[str, Any]], list[dict[str, Any]]]] = [([], []) for _ in modules]
     for bs in job.batch_sizes:
         pool, qa_pool = inputs.query_pool(
@@ -558,13 +495,9 @@ def perf(
     return out
 
 
-# ----- the loop -----------------------------------------------------------------------------
-
-
 def _log_failure(msg: str, exc: BaseException) -> None:
-    """``logger.exception`` without loguru's ``diagnose``, which reads ``run``'s ``f_locals`` and
-    leaves that snapshot cached on the frame: ``exc``, its traceback and the failed arm's tensors
-    stay referenced for the rest of the run (evaluation.md § Arm release)."""
+    """``logger.exception`` without loguru's ``diagnose``: it caches ``run``'s locals on the
+    frame, so the failed arm's tensors would stay referenced for the rest of the run."""
     logger.error("{}\n{}", msg, "".join(traceback.format_exception(exc)))
 
 
@@ -610,8 +543,7 @@ def _record_failures(
     counts: Counter,
     msg: str,
 ) -> bool:
-    """Log ``exc`` and append one ``failed`` record per ``(job, params)`` cell. Returns whether
-    it is sticky: the caller re-raises then, from its own ``except`` block."""
+    """Log ``exc`` and append one ``failed`` record per cell; returns whether it is sticky."""
     _log_failure(msg, exc)
     for job, params in cells:
         records.append_record(path, _failed(job, params, env, stage, exc, t0))
@@ -645,7 +577,6 @@ def _new_record(
         "n_targets_in_filter": assets["n_targets_in_filter"],
         "n_queries_oracle": int(assets["oracle_rows"].sum()),
         "pass_rate": assets["pass_rate"],
-        "bloom_fp_rate": assets["bloom_fp_rate"],
         "bloom": dict(job.bloom) if job.filter_kind == "bloom" else None,
         "k_max": max(job.ks),
         "ks": list(job.ks),
@@ -696,11 +627,8 @@ def run(
     latency_kw: dict[str, Any] | None = None,
     device: torch.device | None = None,
 ) -> Counter:
-    """Run every cell of ``jobs`` in this process (module docstring). ``interleave`` builds
-    the arms of each suite comparison group (``config.interleave_units``) side by side and
-    times them round-robin; a group re-runs whole unless every arm's cell is ``ok``.
-    ``out_path`` overrides the per-``(suite, dataset, dim)`` file; ``latency_kw`` is forwarded
-    to ``measure.latency_group`` (tests shrink the windows). Returns ``Counter(ok / partial /
+    """Run every cell of ``jobs`` in this process; with ``interleave`` the arms of a comparison
+    group are built side by side and timed round-robin. Returns ``Counter(ok / partial /
     failed / skipped)``."""
     counts: Counter = Counter()
     if not jobs:
@@ -876,11 +804,10 @@ def run(
                         write_per_query(out_dir, rec["per_query"], assets, per_q)
                         if job.algo in EXACT_ALGOS and "oracle" in qual:
                             r = qual["oracle"][f"recall@{k_max}"]
-                            gate = exact_gate(job.data, k_max)
-                            if r is not None and r < gate:  # None: no oracle row
+                            if r is not None and r < EXACT_MIN_RECALL:  # None: no oracle row
                                 raise QualityGateError(
                                     f"{job.algo}/{job.backend} recall_oracle@{k_max} = {r:.4f} "
-                                    f"< {gate}"
+                                    f"< {EXACT_MIN_RECALL}"
                                 )
                     recs_by[id(job)] = rec
                 except QualityGateError as exc:

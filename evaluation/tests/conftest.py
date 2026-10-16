@@ -4,7 +4,8 @@ dataset on disk (``write_tiny_dataset``, the one writer ``test_inputs.py`` and
 driven end to end through ``config.load_matrix`` without a GPU or real data. The ``e2e``
 suite has two algos (the in-process loop); ``e2e1`` has one, for the campaign test's single
 child; ``postfilter`` runs the baseline next to the exact V1 it is measured against; ``arms``
-holds the campaign-v2 params (gridded bloom widths, ``compile``, ``candidate_pool_frac``);
+holds ``compile`` and ``candidate_pool_frac``; ``widths`` grids the bloom widths on the adapted
+SilverTorch (GPU only);
 ``cache`` runs seeds 0-2 of seed-free and seed-dependent arms (the quality cache); ``untimed``
 is a quality-only suite (``perf: false``); ``pair`` interleaves V1 and V2 (``--interleave``).
 Tests marked ``gpu`` skip without CUDA."""
@@ -26,7 +27,7 @@ D_E2E = 64  # LiNR V3's OPORP packs bits in words of 64
 
 
 def pytest_configure(config):
-    """H-INDCACHE: a fresh inductor cache per pytest run, so no compile gate replays a graph an
+    """A fresh inductor cache per pytest run, so no compile gate replays a graph an
     earlier tree cached for the same custom op (testing.md § Running)."""
     config.inductor_dir = tempfile.mkdtemp(prefix="pytest-inductor-")
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = config.inductor_dir
@@ -104,19 +105,18 @@ def tiny_configs(tmp_path: Path) -> tuple[Path, Path]:
         "    - {algo: linr_v3, backends: [torch], query: {candidate_pool: [8]}}\n"
         "e2e1:\n  datasets: [tiny]\n  filter_kinds: [none, clause]\n  ks: [2, 4]\n"
         "  batch_sizes: [1, 2]\n  arms: [{algo: linr_v1_filter_mask, backends: [torch]}]\n"
-        "postfilter:\n  datasets: [tiny]\n  filter_kinds: [clause, bloom]\n  ks: [2, 4]\n"
+        "postfilter:\n  datasets: [tiny]\n  filter_kinds: [clause]\n  ks: [2, 4]\n"
         "  batch_sizes: [1, 2]\n  arms:\n    - {algo: linr_v1_filter_mask, backends: [torch]}\n"
         "    - {algo: postfilter, backends: [torch], query: {alpha: [1, 2]}}\n"
-        "arms:\n  datasets: [tiny]\n  filter_kinds: [clause, bloom]\n  ks: [2, 4]\n"
+        "arms:\n  datasets: [tiny]\n  filter_kinds: [clause]\n  ks: [2, 4]\n"
         "  batch_sizes: [1]\n  arms:\n"
-        "    - {algo: silvertorch, backends: [torch], filter_kinds: [bloom],\n"
-        "       build: {n_lists: [4], m_bits: [64, 256]}, query: {n_probe: [2]}}\n"
-        "    - {algo: silvertorch, backends: [torch], filter_kinds: [bloom],\n"
-        "       build: {n_lists: [4]}, query: {n_probe: [2]}}\n"
-        "    - {algo: silvertorch, backends: [torch], filter_kinds: [clause],\n"
-        "       build: {n_lists: [4], compile: [max-autotune]}, query: {n_probe: [2]}}\n"
-        "    - {algo: linr_v3, backends: [torch], filter_kinds: [clause],\n"
-        "       query: {candidate_pool_frac: [0.5, 1.0]}}\n"
+        "    - {algo: linr_v2, backends: [torch], build: {compile: [max-autotune]}}\n"
+        "    - {algo: linr_v3, backends: [torch], query: {candidate_pool_frac: [0.5, 1.0]}}\n"
+        "widths:\n  datasets: [tiny]\n  filter_kinds: [bloom]\n  ks: [2, 4]\n  batch_sizes: [1]\n"
+        "  arms:\n    - {algo: silvertorch, backends: [official-fork], build: {n_lists: [4],\n"
+        "       m_bits: [64, 256], recheck: [false]}, query: {n_probe: [2]}}\n"
+        "    - {algo: silvertorch, backends: [official-fork],\n"
+        "       build: {n_lists: [4], recheck: [false]}, query: {n_probe: [2]}}\n"
         "untimed:\n  perf: false\n  datasets: [tiny]\n  filter_kinds: [clause]\n  ks: [2, 4]\n"
         "  batch_sizes: [1]\n  arms: [{algo: linr_v1_filter_mask, backends: [torch]}]\n"
         "pair:\n  datasets: [tiny]\n  filter_kinds: [clause]\n  ks: [2, 4]\n  batch_sizes: [1, 2]\n"
@@ -128,8 +128,6 @@ def tiny_configs(tmp_path: Path) -> tuple[Path, Path]:
         "    - {algo: linr_v1_filter_mask, backends: [torch]}\n"
         "    - {algo: postfilter, backends: [torch], query: {alpha: [1]}}\n"
         "    - {algo: linr_v3, backends: [torch], query: {candidate_pool: [8]}}\n"
-        "    - {algo: silvertorch, backends: [torch], build: {n_lists: [4]},\n"
-        "       query: {n_probe: [2]}}\n"
         "bloom: {m_bits: 64, k_hash: 2}\n"
     )
     return ds, suites

@@ -4,8 +4,8 @@ What can be checked without a GPU: the window statistics against a numpy referen
 control flow of ``latency`` (window count, chosen window, keys, spread), ``index_bytes``
 over shared submodules, ``provenance``'s git fields, the ``clocks`` record shape, and that
 ``graph_callable`` refuses (with the record's ``reason``) before compiling anything. On a GPU,
-``profile_once`` returns a Triton bloom call's kernels (H-PROFILE). The CUDA-event timing path
-and the cudagraph skip / launch assertions are exercised on the A100 in roadmap C4.
+``profile_once`` returns a Triton clause call's kernels. The CUDA-event timing path
+and the cudagraph skip / launch assertions are exercised on the GPU.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from torch import nn
 import retrieve
 from bench import measure as bench
 from eval_datasets.layout import atomic_write
-from retrieve import SilverTorch
+from retrieve import ExactAttributeFilter, LiNRV1
 
 
 def test_stats_matches_numpy_reference():
@@ -177,7 +177,7 @@ def test_dirty_is_scoped_to_the_library_subtree(monkeypatch):
     if not tree:
         pytest.skip("git unavailable")
     # Docs / harness edits: repo dirty, library clean → the tree hash still names the code.
-    monkeypatch.setattr(bench, "_git", _fake_git("", " M docs/plans/00-roadmap.md"))
+    monkeypatch.setattr(bench, "_git", _fake_git("", " M docs/system/evaluation.md"))
     p = bench.provenance()
     assert (p["dirty"], p["repo_dirty"]) == (False, True) and p["code_version"] == tree
     # An uncommitted kernel edit: the tree hash would lie, so code_version is the content
@@ -201,7 +201,7 @@ def _git_in(repo, *args):
 
 
 def test_code_version_names_the_imported_library_not_the_launching_checkout(tmp_path, monkeypatch):
-    """H-PROVENANCE: an editable install whose package sits in another checkout (the pods'
+    """An editable install whose package sits in another checkout (the pods'
     shared venv) is stamped from that checkout, and moves when it moves."""
     other = tmp_path / "other"
     lib = other / "retrieve" / "src" / "retrieve"
@@ -267,7 +267,7 @@ def test_profile_once_is_empty_without_cuda():
 
 
 def test_kernel_summary_sums_every_kernel_but_the_sentinels():
-    """H-KSUM: ``kernels`` keeps the top ``top`` by self time; ``kernels_us`` / ``kernels_calls``
+    """``kernels`` keeps the top ``top`` by self time; ``kernels_us`` / ``kernels_calls``
     sum all of them, the tail past ``top`` included, and never the two sentinels."""
     ev = lambda key, us, n: SimpleNamespace(key=key, self_device_time_total=us, count=n)  # noqa: E731
     events = [ev(f"k{i}", float(i + 1), i % 3 + 1) for i in range(12)]
@@ -296,16 +296,14 @@ def test_kernel_summary_skips_compiled_graph_ranges_in_the_sums():
 
 
 def test_kernel_scopes_split_the_full_sum_like_for_like():
-    """H-SCOPE: real kernel names from the H-KSUM and V-PROF3 tables. Ours fuses the bloom test into
-    its scorer; Meta's scorer is process_cluster + payload kernels + the separate bloom_search
-    kernels. The four scopes add up to kernels_us / kernels_calls; ranges and sentinels count
-    nowhere."""
+    """Real kernel names: Meta's scorer is process_cluster + payload kernels + the separate
+    bloom_search kernels. The four scopes add up to kernels_us / kernels_calls; ranges and
+    sentinels count nowhere."""
     ev = lambda key, us, n=1: SimpleNamespace(key=key, self_device_time_total=us, count=n)  # noqa: E731
     fk = "st::ops::fused_kmean_ann::(anonymous namespace)::"
     bs = "st::ops::bloom_search::(anonymous namespace)::"
     at = "void at::native::"
     scorer = [
-        ev("_codesigned_probe_score_kernel", 100.0),
         ev(f"void {fk}process_cluster<signed char, c10::Half, 128, true, int, false>", 25.0),
         ev(f"void {fk}process_cluster_remaining<signed char, c10::Half, 128, true>", 4.6),
         ev(f"{fk}generate_remaining_payload_kernel", 8.5),
@@ -345,20 +343,19 @@ def test_kernel_scopes_split_the_full_sum_like_for_like():
 
 
 @pytest.mark.gpu
-def test_profile_once_records_the_triton_bloom_kernels():
+def test_profile_once_records_the_triton_clause_kernels():
     g = torch.Generator(device="cuda").manual_seed(0)
     embs = nn.functional.normalize(torch.randn(4096, 128, generator=g, device="cuda"), dim=1)
     q = nn.functional.normalize(torch.randn(16, 128, generator=g, device="cuda"), dim=1)
-    m = SilverTorch(
-        k=100, n_lists=64, n_probe=8, filter_mode="bloom", m_bits=512, k_hash=5, n_iter=3,
-        backend="triton",
-    )  # fmt: skip
-    m.register_index(embs, torch.randint(0, 50, (4096, 1, 2), generator=g, device="cuda"))
+    f = ExactAttributeFilter(backend="triton")
+    f.register_index(torch.randint(0, 50, (4096, 1, 2), generator=g, device="cuda"))
+    m = LiNRV1(k=100, filter=f, backend="triton")
+    m.register_index(embs)
     q_attrs = torch.randint(0, 50, (16, 1), generator=g, device="cuda")
     with torch.inference_mode():
-        prof = bench.profile_once(lambda: m(q, q_attrs), top=64)
+        prof = bench.profile_once(lambda: m(q, m.prepare_queries(q_attrs)), top=64)
     names = {e["kernel"] for e in prof["kernels"]}
-    assert {"probe_ids_kernel", "_codesigned_probe_score_kernel"} <= names
+    assert any("clause_mask" in n for n in names), names
     assert not any(bench.SENTINEL in n for n in names)
     # top 64 covers every kernel of this call, so the list and the sums agree
     assert prof["kernels_us"] == pytest.approx(sum(e["us"] for e in prof["kernels"]))
@@ -413,7 +410,7 @@ def test_setup_seeds_and_pins_precision():
 
 
 def test_inductor_cache_is_keyed_by_code_version_even_when_given():
-    """H-INDCACHE: two code_versions, two cache dirs, under the default root and under a
+    """Two code_versions, two cache dirs, under the default root and under a
     caller-set directory alike (the caller's dir gets the code_version appended)."""
     a = bench.inductor_cache_dir("0123abcd", None)
     b = bench.inductor_cache_dir("files:4567ef", None)

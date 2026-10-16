@@ -1,41 +1,19 @@
 #!/usr/bin/env -S uv run --script
-"""End-to-end ETL for the OpenAlex filter-bench dataset (roadmap E3, the OpenAlex fallback of
-the Semantic Scholar SPECTER2 slice).
-
-Source: the OpenAlex quarterly snapshot on public S3, anonymous, CC0 —
-``s3://openalex/data/parquet/works/updated_date=*/part_*.parquet``, listed by
-``data/parquet/manifest.json`` (written last; present = release complete). The parquet copy is
-read rather than the ``data/jsonl/`` one because it allows column projection: the columns below
-are a fraction of the bytes, and no record is JSON-parsed except the abstracts that are kept.
-Measured sizes and rates are in docs/system/datasets.md § openalex.
+"""The OpenAlex ETL (docs/system/datasets.md § openalex): the quarterly snapshot's parquet works
+on public S3, streamed with column projection, hash-sampled, encoded with nomic-embed-text-v1.5
+at 768 dims.
 
 Subcommands::
 
-    plan            Dry run: manifest totals, projected bytes from every file footer, filter
-                    rates on a seeded sample of row groups → --sample-rate, disk and wall time.
-    download        Pin the release: fetch manifest.json into _raw/openalex/.
-    convert         **Streaming**: every works file of the pinned manifest, projected columns,
-                    row group by row group → filter (year, English, type, flags, hash sample,
-                    abstract present) → _raw/openalex/staging/<date>_<part>.parquet.
-                    Resumable per file; the snapshot is never landed.
-    prep            staging/ → item_id_map.json, papers.parquet (the N smallest work-id hashes),
-                    heldout.parquet + queries.parquet + qrels.parquet (held-out papers, their
-                    in-catalog references as relevance).
-    encode_text     nomic-embed-text-v1.5 at its native 768 dims, "search_document: " prefix →
-                    content_d768/text_emb_shard_NNN.pt + shard_index.json. Resumable per shard.
-    reshard         Instead of encode_text for a smaller catalog of the same staging: gather
-                    its items' vectors from a larger encoded catalog (--from-dir), bit for bit.
-    encode_queries  Same encoder, "search_query: " prefix → content_d768/query_emb.pt.
-    attrs           item_attrs_narrow.pt [N, 5, 4], clause_is_reverse_narrow.pt, vocabs,
-                    eval_split.parquet.
-    all             download → convert → prep → encode_text → encode_queries → attrs.
-
-Layout (under hub.data_root(): $RETRIEVE_DATA_ROOT, default evaluation/data)::
-
-    data/_raw/openalex/manifest.json        the pinned release
-    data/_raw/openalex/staging/             filtered, hash-sampled rows per source file
-    data/openalex/                          the bench-side output dir
-"""
+    plan            dry run: totals, projected bytes, filter rates on a sample → --sample-rate
+    download        pin the release (manifest.json)
+    convert         streaming filter of every works file → _raw/openalex/staging/, resumable
+    prep            staging/ → item_id_map, papers, heldout + queries + qrels
+    encode_text     content_d768/text_emb_shard_NNN.pt + shard_index.json, resumable
+    reshard         a smaller catalog's vectors gathered from a larger encoded one (--from-dir)
+    encode_queries  content_d768/query_emb.pt
+    attrs           item_attrs_narrow.pt [N, 5, 4], clause_is_reverse_narrow.pt, vocabs, eval_split
+    all             download → convert → prep → encode_text → encode_queries → attrs"""
 
 from __future__ import annotations
 
@@ -105,9 +83,7 @@ A_MAX_NARROW = 4
 CLAUSE_NAMES = ["field", "earlier_era", "subfield", "source", "is_oa"]
 CLAUSE_IS_REVERSE = [False, False, False, True, False]
 
-# Clauses are equality-only, so "item year < query year" is encoded over eras: an item of era b
-# lists b+1 .. last in its C1 slots and a query sends its own era, which passes exactly the
-# items of strictly earlier eras. That needs len(ERA_NAMES) - 1 == A_MAX_NARROW slots.
+# "item year < query year" over eras: an item of era b lists b+1 .. last in its C1 slots
 ERA_EDGES = [2010, 2015, 2019, 2022]
 ERA_NAMES = ["2000-2009", "2010-2014", "2015-2018", "2019-2021", ">=2022"]
 
@@ -356,8 +332,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     sample_rate = min(1.0, args.keep_items * (1 + args.margin) / est_eligible)
     staged_rows = est_eligible * sample_rate
     staged_bpr = sum(s["staged_bytes"] for s in samples) / kept
-    # Threads share the GIL with the abstract parsing, so this understates `convert`'s spawned
-    # processes several-fold (research/artifacts/e3-openalex/stream_probe.py measures those).
+    # threads share the GIL with the abstract parsing: convert spawns processes instead
     mbps = sample_bytes / t_wall / 1e6
     cpu_per_row = stage_cpu / rows  # at sample rate 1; the real run parses fewer abstracts
     report = {
@@ -899,8 +874,7 @@ def cmd_attrs(args: argparse.Namespace) -> int:
     )
     (output / "era_vocab.json").write_text(json.dumps({"edges": ERA_EDGES, "names": ERA_NAMES}))
 
-    # Query side: every value is the held-out paper's own, so "same field, earlier era, same
-    # subfield, not the query's venue"; C4 asks for open-access items.
+    # the query side is the held-out paper's own values; C4 asks for open-access items
     heldout = pl.read_parquet(output / "heldout.parquet")
     qa = np.stack(
         [

@@ -1,13 +1,10 @@
-"""What a record *is* (docs/system/evaluation.md § Output): the schema version, the key
-block, the resume key, the JSONL append with its ``fsync``, the samples sidecar,
-``read_records`` (one torn trailing line tolerated) and ``aggregate`` — one row per ``(record,
-perf entry)`` as ``results.parquet`` for ``report.py``. A record older than schema 3 has no
-``inputs``; :func:`inputs_of` supplies it.
-"""
+"""What a record is (docs/system/evaluation.md § Output): the key, the JSONL append and read,
+the flat columns and ``results.parquet``."""
 
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 import math
 import os
@@ -36,26 +33,20 @@ KEY_FIELDS = (
     "params",
     "seed",
 )
-# Record scalars and env fields that go into results.parquet next to the key block.
 _RECORD_COLUMNS = (
     "status", "path", "n_items", "n_queries", "n_kept", "n_queries_heldout", "n_queries_oracle",
-    "n_targets_in_filter", "pass_rate", "bloom_fp_rate", "k_max", "build_s", "index_mib",
+    "n_targets_in_filter", "pass_rate", "k_max", "build_s", "index_mib",
     "filter_mib", "candidate_pool", "pool_passing_mean", "unstable", "memory_reserved_mib",
     "elapsed_s", "schema_version", "stage", "error", "partial_reasons", "seed_scope", "per_query",
 )  # fmt: skip
-# results.parquet is shipped as a paper artifact, so it has to carry why a row is incomplete,
-# not only that it is: `stage`/`error` on a failure, `partial_reasons` on a narrowed cell,
-# `schema_version` because records of several schemas can share one file.
-_ENV_COLUMNS = (
+ENV_COLUMNS = (
     "code_version", "commit", "dirty", "gpu", "sm_mhz_load", "clocks_drift", "git_branch",
     "frac_windows_below_max",
 )  # fmt: skip
-# window_medians_ms stays (perf_window_medians_ms): the bootstrap CIs resample it
 _PERF_SKIP = ("window_sm_mhz", "kernels")
 
 
-# Before schema 3 goodreads ran on gSASRec and the text datasets' content_dir never changed;
-# other checkpoint datasets (kuairand's E4 cell, yambda's retired suite) have no identity left.
+# the one encoder every schema-2 goodreads record ran on
 _LEGACY_CHECKPOINTS = {"goodreads": "gsasrec-d{dim}-drop0.5-id"}
 _CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
@@ -80,8 +71,7 @@ def key_block(rec: dict[str, Any]) -> dict[str, Any]:
 
 
 def resume_key(key: dict[str, Any], code_version: str) -> str:
-    """Canonical JSON of ``Job.key(params)`` plus the library's ``code_version``:
-    a kernel change invalidates a cell instead of silently reusing it."""
+    """Canonical JSON of the key block plus the library's ``code_version``."""
     return json.dumps({**key, "code_version": code_version}, sort_keys=True, separators=(",", ":"))
 
 
@@ -95,6 +85,14 @@ def record_path(out_dir: Path, job) -> Path:
 
 def samples_path(path: Path) -> Path:
     return Path(path).with_suffix(".samples.jsonl")
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _clean(o: Any) -> Any:
@@ -124,16 +122,26 @@ def append_record(path: Path, rec: dict[str, Any]) -> None:
         os.fsync(f.fileno())
 
 
+def retired(rec: dict[str, Any]) -> bool:
+    """A record (or sample line) of a bloom cell of an algo other than SilverTorch: LiNR's and
+    the postfilter's bloom cells left the study and every reader skips them. Also drops the
+    retired ``bloom_fp_rate`` field in place."""
+    rec.pop("bloom_fp_rate", None)
+    return rec.get("filter_kind") == "bloom" and rec.get("algo") not in (None, "silvertorch")
+
+
 def read_records(path: Path) -> list[dict[str, Any]]:
-    """Every record in ``path``. A malformed *last* line — the cell in flight when the process
-    died — is logged and dropped; a malformed line anywhere else is corruption and raises."""
+    """Every record in ``path`` but the :func:`retired` ones; a torn last line (the cell in
+    flight at a crash) is dropped, a malformed line anywhere else raises."""
     out: list[dict[str, Any]] = []
     if not path.exists():
         return out
     lines = [ln for ln in path.read_text().splitlines() if ln.strip()]
     for i, line in enumerate(lines):
         try:
-            out.append(json.loads(line))
+            rec = json.loads(line)
+            if not retired(rec):
+                out.append(rec)
         except json.JSONDecodeError as exc:
             if i == len(lines) - 1:
                 logger.warning("{}: torn trailing line ignored ({})", path, exc)
@@ -147,11 +155,16 @@ def read_keys(path: Path) -> dict[str, str]:
     return {record_key(rec): rec.get("status", "ok") for rec in read_records(path)}
 
 
-def _row(rec: dict[str, Any], entry: dict[str, Any] | None) -> dict[str, Any]:
-    row: dict[str, Any] = key_block(rec)
-    row["params"] = json.dumps(rec["params"], sort_keys=True)
+def key_columns(rec: dict[str, Any]) -> dict[str, Any]:
+    """The key block as table columns: ``params`` as canonical JSON."""
+    return {**key_block(rec), "params": json.dumps(rec["params"], sort_keys=True)}
+
+
+def record_columns(rec: dict[str, Any]) -> dict[str, Any]:
+    """The flat columns of one record: key block, scalars, env fields, quality."""
+    row = key_columns(rec)
     row.update({c: rec.get(c) for c in _RECORD_COLUMNS})
-    row.update({f"env_{c}": rec["env"].get(c) for c in _ENV_COLUMNS})
+    row.update({f"env_{c}": rec["env"].get(c) for c in ENV_COLUMNS})
     row["quality_source_seed"] = (rec.get("quality_source") or {}).get("seed")
     row["interleave_group"] = (rec.get("interleave") or {}).get("group")
     row["interleave_position"] = (rec.get("interleave") or {}).get("position")
@@ -162,6 +175,12 @@ def _row(rec: dict[str, Any], entry: dict[str, Any] | None) -> dict[str, Any]:
     for m, v in q.items():
         if not isinstance(v, dict):
             row[f"quality_{m}"] = v
+    return row
+
+
+def perf_columns(entry: dict[str, Any] | None) -> dict[str, Any]:
+    """The flat ``perf_*`` columns of one perf entry (none for a record without perf)."""
+    row: dict[str, Any] = {}
     for m, v in (entry or {}).items():
         if m == "kernel_scopes":
             for scope, d in v.items():
@@ -170,6 +189,14 @@ def _row(rec: dict[str, Any], entry: dict[str, Any] | None) -> dict[str, Any]:
         elif m not in _PERF_SKIP:
             row[f"perf_{m}"] = v
     return row
+
+
+def write_table(rows: list[dict[str, Any]], out: Path) -> Path:
+    """Rows to parquet: the column set is their union, types are inferred per column, so a
+    column mixing types across rows fails here rather than in a table."""
+    cols = list(dict.fromkeys(c for r in rows for c in r))
+    pq.write_table(pa.table({c: [r.get(c) for r in rows] for c in cols}), out)
+    return out
 
 
 def record_files(results_dir: Path) -> list[Path]:
@@ -190,13 +217,13 @@ def latest(results_dir: Path) -> list[dict[str, Any]]:
 
 def aggregate(results_dir: Path, out: Path | None = None) -> Path:
     """``<results_dir>/results.parquet``: :func:`latest`, one row per perf entry (one row with
-    null perf columns when the record has none). ``params`` is a JSON string; column types
-    are inferred, so a column mixing types across records fails here rather than in a table."""
-    out = out or Path(results_dir) / "results.parquet"
-    rows = [_row(rec, e) for rec in latest(results_dir) for e in (rec.get("perf") or [None])]
-    cols = list(dict.fromkeys(c for r in rows for c in r))
-    pq.write_table(pa.table({c: [r.get(c) for r in rows] for c in cols}), out)
-    return out
+    null perf columns when the record has none)."""
+    rows = [
+        record_columns(rec) | perf_columns(e)
+        for rec in latest(results_dir)
+        for e in (rec.get("perf") or [None])
+    ]
+    return write_table(rows, out or Path(results_dir) / "results.parquet")
 
 
 def read_table(path: Path) -> list[dict[str, Any]]:

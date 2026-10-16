@@ -1,17 +1,6 @@
-"""HuggingFace I/O: the repo registry (``EVAL_REPOS`` / ``RAW_REPOS``), the download / upload
-helpers every ETL module and the trainer share, ``data_root()``, and the ``eval-data fetch``
-/ ``publish`` / ``publish-checkpoint`` commands. All local paths resolve under one root.
-
-Layout:
-
-    $RETRIEVE_DATA_ROOT/                    (default evaluation/data)
-    ├── <dataset>/                          eval inputs from pinkmeme/eval-<dataset>
-    │   ├── content/, content_d64/, ...
-    │   ├── item_id_map.json, eval_split.parquet, item_attrs_narrow.pt, ...
-    │   ├── checkpoints/<ckpt_id>/          model checkpoints under the same repo
-    │   └── gt/                             local-only oracle cache (recomputed)
-    └── _raw/<source>/                      upstream raw HF reads
-"""
+"""HuggingFace I/O for datasets and checkpoints (docs/system/datasets.md § HuggingFace I/O):
+the repo registry, ``data_root()``, the download / upload helpers and the ``eval-data``
+fetch / publish / publish-checkpoint commands."""
 
 from __future__ import annotations
 
@@ -25,30 +14,23 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 from huggingface_hub.utils import HfHubHTTPError
 from loguru import logger
 
-# Registry
-
 EVAL_REPOS: dict[str, str] = {
     "arxiv-papers": "pinkmeme/eval-arxiv-papers",
     "yambda-500m": "pinkmeme/eval-yambda-500m",
     "yambda-5b": "pinkmeme/eval-yambda-5b",
     "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
-    "yfcc10m": "pinkmeme/eval-yfcc10m",
     "pubmed": "pinkmeme/eval-pubmed",
     "kuairand": "pinkmeme/eval-kuairand",
     "openalex": "pinkmeme/eval-openalex",
     "laion30m": "pinkmeme/eval-laion30m",
 }
 
-# Upstream raw repos kept here only so their local target dirs are centralized.
-RAW_REPOS: dict[str, tuple[str, str]] = {
-    # source -> (repo_id, repo_type)
+RAW_REPOS: dict[str, tuple[str, str]] = {  # source -> (repo_id, repo_type)
     "arxiv": ("open-index/open-arxiv", "dataset"),
     "yambda": ("yandex/yambda", "dataset"),
 }
 
-# What we *don't* want in the per-dataset eval repo. Excludes training inputs,
-# intermediate ETL artifacts, backup files, recomputable caches, and the
-# `checkpoints/` subtree (which is uploaded separately by upload_checkpoint()).
+# never in a per-dataset eval repo: training inputs, ETL intermediates, caches, checkpoints
 EVAL_IGNORE_PATTERNS: list[str] = [
     "train.parquet",
     "val.parquet",
@@ -74,24 +56,16 @@ EVAL_IGNORE_PATTERNS: list[str] = [
     ".git/**",
 ]
 
-# `{encoder}-ep{N}-{metric}{X}.pt` (`gsasrec-ep…` on the published runs) is saved at the
-# best val epoch and then copied to `best_model.pt` at training end — same bytes, twice the
-# storage. Skip the epoch-tagged copy by default; pass `include_epoch_snapshots=True` to keep it.
+# the epoch-tagged best is the same bytes as best_model.pt
 EPOCH_SNAPSHOT_PATTERN = "*-ep*.pt"
 
-# Always-skip files in checkpoint dirs (run output or resume-only state, not
-# the trained checkpoint itself). _resume.pt carries optimizer state and can
-# be tens of GB, larger than the checkpoint it resumes; encoded_queries_v2.pt is training.encode's
-# cache, keyed on checkpoint mtime, not portable to a fresh copy.
+# _resume.pt is optimizer state (tens of GB); encoded_queries_v2.pt is keyed on the mtime
 CKPT_ALWAYS_IGNORE: list[str] = [
     "evaluate.json",
     "benchmark.json",
     "_resume.pt",
     "encoded_queries_v2.pt",
 ]
-
-
-# Path helpers
 
 
 def _repo_root() -> Path:
@@ -132,9 +106,6 @@ def _require_dataset(dataset: str) -> str:
         raise ValueError(f"Unknown dataset {dataset!r}. Known: {avail}") from e
 
 
-# Downloads
-
-
 def download_eval_dataset(
     dataset: str,
     *,
@@ -142,12 +113,8 @@ def download_eval_dataset(
     include_checkpoints: bool = False,
     target: Path | None = None,
 ) -> Path:
-    """Pull the eval-input files for `dataset` from HF.
-
-    `dims=["d64", "d128"]` restricts content/* downloads to those dims (and the
-    default `content/` is always included). `include_checkpoints=True` also
-    pulls everything under `checkpoints/`.
-    """
+    """Pull ``dataset``'s eval inputs; ``dims`` restricts the ``content_d*`` directories,
+    ``include_checkpoints`` adds ``checkpoints/``."""
     repo_id = _require_dataset(dataset)
     local = (target or eval_dir(dataset)).resolve()
     local.mkdir(parents=True, exist_ok=True)
@@ -232,13 +199,9 @@ def download_raw_file(source: str, filename: str) -> Path:
     )
 
 
-# Uploads
-
-
 def _ignored(rel: str, name: str, patterns: list[str]) -> bool:
-    """Match `rel` (posix relative path) against fnmatch patterns. Handles
-    `prefix/**` as a directory-prefix exclusion since fnmatch itself doesn't
-    support `**`. Also matches plain filename patterns against `name`."""
+    """``rel`` against the fnmatch patterns, ``prefix/**`` as a directory prefix (fnmatch has no
+    ``**``), plain patterns also against the file name."""
     for pat in patterns:
         if pat.endswith("/**"):
             prefix = pat[:-3]
@@ -358,8 +321,7 @@ def upload_checkpoint(
     write_card: bool = True,
     dry_run: bool = False,
 ) -> None:
-    """Upload a single checkpoint directory to `checkpoints/<ckpt_id>/` in the
-    per-dataset eval repo. Repo is created if it doesn't exist."""
+    """Upload one checkpoint directory to ``checkpoints/<ckpt_id>/`` of the dataset's repo."""
     repo_id = _require_dataset(dataset)
     src = (source or ckpt_dir(dataset, ckpt_id)).resolve()
     if not src.is_dir():
@@ -416,9 +378,6 @@ def upload_checkpoint(
     logger.success(
         "Uploaded https://huggingface.co/datasets/{}/tree/main/checkpoints/{}", repo_id, ckpt_id
     )
-
-
-# ``eval-data`` subcommands
 
 
 @click.command()

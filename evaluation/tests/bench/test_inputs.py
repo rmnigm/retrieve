@@ -7,11 +7,11 @@ their meta sidecars, ``heldout.parquet``, ``item_attrs_narrow.pt``,
 end to end: fp16 → fp32 + normalisation, the −1 shift of
 held-out ids, the prefix assertion, the eval_split row-count check against the *full* split,
 and ``users_limit`` applied once to queries / targets / attrs together. Then ``sweep_qa``
-(the old ``build_sweep_qa`` semantics), ``build_filters`` keyed by *filter* backend on the
+``build_filters`` keyed by *filter* backend on the
 torch path, ``exact_filter``, and the fixed-seed ``query_pool``. The SASRec path needs a
 checkpoint and is exercised in C4.
 
-The legacy ``[N+1, …]`` layout (roadmap A1's ``df6db40``): the writer's ``legacy=True``
+The legacy ``[N+1, …]`` layout: the writer's ``legacy=True``
 prepends the padding rows, and a legacy load must equal the modern one tensor for tensor;
 any other row-count disagreement between ``item_attrs_narrow`` and the item embeddings
 raises at load. The pad-row rule itself is ``tests/eval_datasets/test_layout.py``.
@@ -28,7 +28,7 @@ from conftest import write_tiny_dataset  # pytest puts this directory on sys.pat
 from bench import inputs as data
 from bench import oracle
 from bench.config import Dataset
-from retrieve import BloomFilter, ExactAttributeFilter
+from retrieve import ExactAttributeFilter
 
 N, U, D, C = 12, 6, 8, 2
 
@@ -186,27 +186,21 @@ def test_sweep_qa_masks_inactive_clauses_and_skips_dead_rows():
 
 def test_build_filters_keyed_by_filter_backend(tmp_path):
     inp = data.load_inputs(_write_dataset(tmp_path), torch.device("cpu"))
-    assert (
-        data.build_filters("none", inp, ["triton", "torch"], bloom={"m_bits": 64, "k_hash": 3})
-        == {}
-    )
-    mods = data.build_filters("clause", inp, ["torch"], bloom={"m_bits": 64, "k_hash": 3})
+    assert data.build_filters("none", inp, ["triton", "torch"]) == {}
+    assert data.build_filters("bloom", inp, ["triton", "torch"]) == {}  # SilverTorch's own
+    mods = data.build_filters("clause", inp, ["torch"])
     assert set(mods) == {"torch"} and isinstance(mods["torch"], ExactAttributeFilter)
     qa = torch.tensor([[0, -1], [-1, 1]])
     mask = mods["torch"].evaluate_mask(qa)
     assert mask[0].tolist() == [(i % 3 == 0) for i in range(N)]  # clause 0 = 0
     assert mask[1].tolist() == [(i % 2 != 1) for i in range(N)]  # clause 1 is reverse: != 1
     assert data.exact_filter("clause", mods, inp, "torch") is mods["torch"]
-    bl = data.build_filters("bloom", inp, ["torch"], bloom={"m_bits": 64, "k_hash": 3})
-    assert isinstance(bl["torch"], BloomFilter) and bl["torch"].m_bits == 64
-    ex = data.exact_filter("bloom", bl, inp, "torch")
-    assert isinstance(ex, ExactAttributeFilter) and ex is not bl["torch"]
+    ex = data.exact_filter("bloom", {}, inp, "torch")
+    assert isinstance(ex, ExactAttributeFilter) and ex is not mods["torch"]
     assert data.exact_filter("none", {}, inp, "torch") is None
     # official → triton filter backend (O §6.2), deduplicated across cell backends; the
     # Triton module registers on CPU (no kernel until evaluate), so this is a CPU check.
-    tri = data.build_filters(
-        "clause", inp, ["triton", "official"], bloom={"m_bits": 64, "k_hash": 3}
-    )
+    tri = data.build_filters("clause", inp, ["triton", "official"])
     assert set(tri) == {"triton"} and isinstance(tri["triton"], ExactAttributeFilter)
     assert data.exact_filter("clause", tri, inp, "official") is tri["triton"]
 
@@ -228,7 +222,7 @@ def test_query_pool_is_seeded_and_skips_masked_rows(tmp_path):
     assert torch.equal(pool, again)
     other, _ = data.query_pool(inp, qa_s, skip, bs=2, seed=8, n_pool=50, device=torch.device("cpu"))
     assert not torch.equal(pool, other)
-    # Same draw as the old harness at the same seed (torch.randint over kept rows).
+    # torch.randint over the kept rows at the seed
     g = torch.Generator().manual_seed(7)
     keep = (~skip).nonzero().reshape(-1)
     rows = keep[torch.randint(0, keep.numel(), (50, 2), generator=g).reshape(-1)]

@@ -6,30 +6,15 @@
 #   "polars>=1.0",
 # ]
 # ///
-"""End-to-end mirror of the UCSD Book Graph (a.k.a. UCSD Goodreads) dataset.
+"""The UCSD Book Graph (Goodreads) ETL (docs/system/datasets.md § goodreads).
 
-Subcommands:
-  download   Pull top-level files via HTTPS into raw/. Resumable via Range
-             header. Writes raw/MANIFEST.txt with sha256s.
-  convert    Stream raw → ZSTD parquet under processed/. Idempotent.
-  prep       processed/ → yambda-format trainer inputs (train/val/test/item_id_map).
-  attrs      Build narrow + wide attribute tensors + eval_split for the filter bench.
-  all        download → convert.
+Subcommands::
 
-Examples::
-
-    uv run eval-data goodreads all
-    uv run eval-data goodreads download --force goodreads_books.json.gz
-    uv run eval-data goodreads prep \\
-      --processed-dir ~/datasets/goodreads-ucsd/processed \\
-      --output-dir data/goodreads/work-id
-
-Layout::
-
-    ~/datasets/goodreads-ucsd/
-    ├── raw/         <- mirror destination for source files + MANIFEST.txt
-    └── processed/   <- parquet outputs + logs
-"""
+    download   the source files into raw/ (resumable; raw/MANIFEST.txt with sha256s)
+    convert    raw → ZSTD parquet under processed/
+    prep       processed/ → trainer inputs (train / val / test parquet, item_id_map)
+    attrs      narrow + wide attribute tensors and eval_split for the filter bench
+    all        download → convert"""
 
 from __future__ import annotations
 
@@ -365,10 +350,7 @@ def cmd_all(args) -> int:
     return cmd_convert(args)
 
 
-# ----- prep ------------------------------------------------------------------
-#
-# processed/ -> yambda-shaped trainer inputs. Output file list and semantics:
-# docs/system/datasets.md § goodreads.
+# prep: processed/ -> yambda-shaped trainer inputs (docs/system/datasets.md § goodreads)
 
 
 def cmd_prep(args) -> int:
@@ -392,9 +374,7 @@ def cmd_prep(args) -> int:
 
     # ---- step 1-3: scan, filter is_read, parse date_added ----
     print("STEP scan + filter is_read + parse date_added", flush=True)
-    # user_id in the JSON-dedup variant is a 32-char hex string (the CSV variant
-    # has an int map but we don't use it). Keep it as-is — downstream code only
-    # uses it for grouping/joining, not arithmetic.
+    # user_id is a 32-char hex string here; only grouped and joined on, never arithmetic
     inter = pl.scan_parquet(str(interactions_path)).select(
         pl.col("user_id"),
         pl.col("book_id").cast(pl.Int64),
@@ -437,11 +417,7 @@ def cmd_prep(args) -> int:
     inter = inter.filter(pl.col("dt").is_not_null() & (pl.col("dt").dt.year() >= 2007))
     inter = inter.select("user_id", "book_id", "ts")
 
-    # ---- step 4: book_id → work_id ----
-    # In `goodreads_books.parquet`, both book_id and work_id are strings (some
-    # empty). The interactions side has book_id as int. Filter empties, cast
-    # both to Int64 (strict=False makes any leftover non-numeric → null), then
-    # drop nulls so the join key types match.
+    # book_id -> work_id: both strings in the books parquet, book_id int on the interactions side
     print("STEP join book_id → work_id", flush=True)
     books = (
         pl.scan_parquet(str(books_path))
@@ -518,10 +494,7 @@ def cmd_prep(args) -> int:
         json.dump({str(k): v for k, v in item_id_to_idx.items()}, f)
     print(f"  wrote item_id_map.json ({len(item_id_to_idx)} entries)", flush=True)
 
-    # ---- step 7: group + sequence per user ----
-    # Compute test_timestamp on the still-flat df (cheap — one quantile pass)
-    # before we throw it away. Stream the groupby so we don't hold both the
-    # flat df and the grouped seq in memory at once.
+    # test_timestamp from the flat frame (one quantile pass); the groupby streams
     test_timestamp = int(df["ts"].quantile(0.96))
     log["test_timestamp_unix"] = test_timestamp
     print(f"STEP group + sequence per user (test_timestamp={test_timestamp})", flush=True)
@@ -549,13 +522,8 @@ def cmd_prep(args) -> int:
     # ---- step 8: time-split via shared util ----
     print("STEP time-split (sequential_split_train_val_test)", flush=True)
 
-    # drop_non_train_items=False mirrors yambda.preprocess. Setting it True
-    # triggers a polars `is_in(<imploded set>)` *inside* a `list.eval(arg_where)`
-    # per user — polars re-evaluates the imploded set per row and the prep
-    # process hits the 129 GB cgroup limit. Items only seen in val/test are
-    # still present in `item_id_map.json` (built from the full post-5-core
-    # frame), so the trainer can score them; they just have unsupervised input
-    # embeddings, which is what yambda also accepts.
+    # drop_non_train_items=False as in yambda.preprocess: True costs a per-row is_in inside
+    # list.eval and runs out of memory; the trainer accepts items seen only in val / test
     seq_lf = seq.rename({"user_id": "uid"}).lazy()
     train_lf, val_lf, test_lf = sequential_split_train_val_test(
         seq_lf,
@@ -565,11 +533,7 @@ def cmd_prep(args) -> int:
         drop_non_train_items=False,
     )
 
-    # ---- step 9: compose train/val/test parquets (yambda layout) ----
-    # Collect train/val/test eagerly first — once the time-split chain has run,
-    # operating on small DataFrames (one row per user) is cheap. Doing the
-    # joins lazily through the streaming engine triggered list-op explosions
-    # past the 129 GB cgroup limit.
+    # eager here: the lazy joins through the streaming engine exploded past the memory limit
     print("STEP compose train/val/test parquets", flush=True)
     train_df = train_lf.select(
         "uid",
@@ -641,11 +605,7 @@ def cmd_prep(args) -> int:
     return 0
 
 
-# ----- attrs -----------------------------------------------------------------
-#
-# Per-work narrow + wide attribute tensors for the filter bench, from `prep`
-# outputs + the catalog parquets. Input/output file list, tensor shapes, and the
-# reverse-clause convention: docs/system/datasets.md § goodreads.
+# attrs: narrow + wide tensors for the filter bench (docs/system/datasets.md § goodreads)
 
 # 10 fixed buckets in goodreads_book_genres_initial. Order is the dense id.
 GENRE_KEYS = [
@@ -664,8 +624,7 @@ GENRE_KEYS = [
 # 5 buckets for `format`. Index = dense id.
 FORMAT_BUCKETS = ["paperback", "hardcover", "ebook", "audio", "other"]
 
-# Wide-shelf blocklist: shelves that say "I want to read this", "I own this",
-# or "this is a book", carrying no topical signal.
+# shelves with no topical signal ("to-read", "owned", "books")
 SHELF_BLOCKLIST = frozenset(
     {
         "to-read",
@@ -891,8 +850,7 @@ def cmd_attrs(args) -> int:
 
     # ---- per-book attribute frame ------------------------------------------
     print("STEP per-book narrow attrs", flush=True)
-    # Pre-build replace-tables as small DataFrames for join (faster than
-    # replace_strict on 830k+ keys).
+    # replace tables as small frames for a join: faster than replace_strict on 830k keys
     auth_remap = pl.DataFrame(
         {"author_id_str": author_ids_str, "author_id": list(range(len(author_ids_str)))},
         schema={"author_id_str": pl.Utf8, "author_id": pl.Int64},
@@ -951,8 +909,7 @@ def cmd_attrs(args) -> int:
         .filter(pl.col("book_id").is_not_null())
         .join(book_to_work, on="book_id", how="inner")
     )
-    # `genres` column is a struct with the 10 keys above (counts may be null).
-    # Unnest → long-form (book_id, item_id, genre_name, count) → top-4.
+    # genres is a struct of the 10 keys above -> long form -> top-4
     genres = genres.unnest("genres")
     genre_value_cols = [c for c in genres.columns if c not in ("book_id", "item_id")]
     glong = genres.unpivot(
@@ -979,11 +936,7 @@ def cmd_attrs(args) -> int:
 
     # ---- per-work narrow aggregation --------------------------------------
     print("STEP per-work narrow aggregation", flush=True)
-    # Group editions by item_id; aggregate per-clause.
-    # C0 genre: union top-4 across editions, sum counts per genre, take top-4 by total.
-    # C1 lang / C2 format / C3 year: mode (most-common non-`-1` value), break ties by first.
-    # C4 author: union top-2 across editions, take 2 by in-catalog frequency rank
-    #   (already encoded — lower id = more frequent).
+    # per work: C0 genre = top-4 by summed count; C1-C3 = mode; C4 author = 2 by frequency rank
 
     # genre roll-up
     g_explode = (
@@ -999,8 +952,7 @@ def cmd_attrs(args) -> int:
         .agg(pl.col("genre_ids").head(4).alias("c0_genre"))
     )
 
-    # author roll-up: union, dedup, sort by author_id asc (smaller id = more-frequent),
-    # take 2.
+    # authors: union, dedup, the two smallest ids (more frequent)
     a_explode = (
         pb.select("item_id", "author_ids")
         .explode("author_ids")
@@ -1013,8 +965,7 @@ def cmd_attrs(args) -> int:
         .agg(pl.col("author_ids").head(2).alias("c4_author"))
     )
 
-    # lang/format/year mode: count occurrences of each non-`-1` value per work,
-    # take the value with the highest count (ties: smallest id).
+    # lang / format / year: the most common non--1 value per work, ties to the smallest id
     def _mode_perwork(df: pl.DataFrame, value_col: str, out_name: str) -> pl.DataFrame:
         nz = df.filter(pl.col(value_col) != -1)
         if nz.height == 0:
@@ -1036,8 +987,7 @@ def cmd_attrs(args) -> int:
 
     # ---- assemble per-work narrow tensor ----------------------------------
     print("STEP assemble item_attrs_narrow", flush=True)
-    # Start from a frame of every catalog item_id (so works with no editions
-    # in-catalog still get a row of -1s — should be 0 in practice).
+    # every catalog item_id gets a row, works without in-catalog editions all -1
     all_items = pl.DataFrame({"item_id": list(range(1, n_items + 1))}, schema={"item_id": pl.Int64})
     narrow = (
         all_items.join(g_per_work, on="item_id", how="left")
@@ -1100,8 +1050,7 @@ def cmd_attrs(args) -> int:
 
     # ---- wide shelves ------------------------------------------------------
     print("STEP wide shelves (per-book filter + per-work top-32)", flush=True)
-    # Explode popular_shelves struct per book; apply blocklist + regex drops;
-    # parse count → int. Then aggregate to per-work sum, take top-32 by sum.
+    # popular_shelves per book -> blocklist + regex drops -> per-work sum, top-32
     shelves_long = (
         books.select("item_id", "popular_shelves")
         .explode("popular_shelves")
@@ -1115,9 +1064,7 @@ def cmd_attrs(args) -> int:
         )
         .select("item_id", "name", "count")
     )
-    # Apply Python predicate via map_elements — the regex+blocklist is awkward
-    # to express purely in polars.  ~5M rows after explode; ~30 s on the user's
-    # box, fine for one-shot.
+    # the regex + blocklist predicate is awkward in polars; about 5 M rows, one-shot
     shelves_long = (
         shelves_long.with_columns(
             pl.col("name").map_elements(_shelf_keep, return_dtype=pl.Boolean).alias("keep")
@@ -1125,8 +1072,7 @@ def cmd_attrs(args) -> int:
         .filter(pl.col("keep"))
         .drop("keep")
     )
-    # lower-case the surviving names (blocklist matched lowercase but the raw
-    # name might mix case; canonicalize for the per-work group-by).
+    # the blocklist matched lowercase; canonicalise for the per-work group-by
     shelves_long = shelves_long.with_columns(pl.col("name").str.to_lowercase().alias("name"))
 
     # per-work total per shelf-name → top-32 by count
@@ -1135,8 +1081,7 @@ def cmd_attrs(args) -> int:
         .agg(pl.col("count").sum().alias("count"))
         .sort(["item_id", "count", "name"], descending=[False, True, False])
     )
-    # Build wide-shelf vocab from the union of all per-work top-32 names
-    # (sorted by global aggregated count desc; 0-indexed dense ids).
+    # the wide-shelf vocab: the union of the per-work top-32, by aggregated count
     work_shelf_top = work_shelf.group_by("item_id", maintain_order=True).agg(
         pl.col("name").head(WIDE_BAG_SIZE).alias("names"),
         pl.col("count").head(WIDE_BAG_SIZE).alias("counts"),

@@ -1,13 +1,6 @@
-"""``eval-data synth-filter``: the synthetic selectivity attrs (docs/system/datasets.md
-§ Synthetic selectivity attrs). Uniform: one ``u_i ~ U(0, 1)`` per catalog item, in item-row
-order; item ``i`` passes the clause of rate ``p`` iff ``u_i < p``, so pass sets nest across
-rates. ``--correlated``: per rate a coarse spherical k-means with ``round(1/p)`` centroids; the
-item's value is its cluster, the query's its nearest centroid (by inner product, the k-means's
-own rule), so the pass set sits around the query.
-Draws: draw ``d`` uses seed ``SEED + d`` and writes its own files (``layout.synth_draw_name``:
-draw 0 keeps the plain names, draw d > 0 adds ``_s<d>``), so the draws sit side by side.
-Written beside the dataset's real attrs, never over them: ``item_attrs_narrow.pt`` keys every
-existing oracle and record through its digest."""
+"""``eval-data synth-filter``: the synthetic selectivity attrs, uniform or correlated, one file
+set per draw, written beside the real attrs (docs/system/datasets.md § Synthetic selectivity
+attrs)."""
 
 from __future__ import annotations
 
@@ -49,9 +42,8 @@ def synth_flags(u: torch.Tensor, rates: Sequence[float]) -> torch.Tensor:
 
 
 def build(data_dir: Path, rates: Sequence[float] = RATES, draw: int = 0) -> dict:
-    """Write draw ``draw``'s synth files into ``data_dir`` (the query side, all ones, is shared by
-    every draw); N is the real attrs' row count with the legacy pad row dropped
-    (``layout.load_item_attrs``'s N), U the full ``eval_split`` rows."""
+    """Write draw ``draw``'s uniform synth files into ``data_dir``; the all-ones query side is
+    shared by every draw."""
     data_dir, seed = Path(data_dir), SEED + draw
     at = partial(layout.synth_draw_name, draw=draw)
     real = torch.load(str(data_dir / "item_attrs_narrow.pt"), weights_only=True, mmap=True)
@@ -92,9 +84,8 @@ def _pass_stats(x: torch.Tensor) -> dict:
 def build_correlated(
     data_dir: Path, content_dir: Path, rates: Sequence[float] = CORR_RATES, draw: int = 0
 ) -> dict:
-    """Write draw ``draw``'s three correlated files into ``data_dir`` from the item and query
-    embeddings the harness loads (``layout.load_text_items`` / ``load_text_queries`` of
-    ``content_dir``); a query's pass rate is its cluster's size over N."""
+    """Write draw ``draw``'s correlated files into ``data_dir`` from the embeddings the harness
+    loads; a query's pass rate is its cluster's size over N."""
     data_dir, content_dir, seed = Path(data_dir), Path(content_dir), SEED + draw
     at = partial(layout.synth_draw_name, draw=draw)
     items = layout.load_text_items(content_dir, torch.device("cpu"))
@@ -156,9 +147,7 @@ def build_correlated(
 def synth_filter(
     dataset: str, rates: str | None, draw: int, correlated: bool, dim: int, config_dir: Path
 ) -> None:
-    """Write item_attrs_synth.pt, synth_u.pt, query_attrs_synth.pt and synth_filter.json, or
-    with --correlated item_attrs_corr.pt, query_attrs_corr.pt and synth_corr.json (draw d > 0:
-    each name with _s<d>, the shared query_attrs_synth.pt aside)."""
+    """Write the uniform synth files, or with --correlated the correlated ones, for one draw."""
     raw = yaml.safe_load((config_dir / f"{dataset}.yaml").read_text())
     data_dir = Path(raw["data_dir"])
     if not data_dir.is_absolute():

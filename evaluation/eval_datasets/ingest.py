@@ -1,26 +1,5 @@
-"""``eval-data ingest``: a staged text-shape dataset, and its ``config/<name>.yaml``, from
-vectors and attribute tables, with no per-dataset ETL (docs/system/datasets.md § Adding a
-dataset; retrieve/docs/adding-a-dataset.md).
-
-Inputs:
-
-- **item vectors**: one or more ``.npy`` files ``[n_i, D]`` (fp16 or fp32), concatenated in
-  the order given. Each is L2-normalised in fp32 and stored fp16 as
-  ``content_d<D>/text_emb_shard_NNN.pt``, the sharded layout.
-- **item attributes**: a parquet file, row ``i`` = item ``i``. There is one column per
-  attribute, of any scalar type or a list of one. Each column is dictionary-coded (codes by
-  count, descending) into ``item_attrs_narrow.pt [N, C, A]``, where ``A`` is the longest list.
-  A null is ``-1``.
-- **query vectors**: one ``.npy`` ``[U, D]``. **Query attributes**: a parquet file with the
-  same columns (scalars only), coded with the items' vocabulary; a value no item has is
-  ``-1``, which turns that clause off for that query.
-- **targets** (optional): ``.npy`` ``[U]`` 0-indexed item rows. Without them, each query's
-  target is its exact unfiltered top-1 item (yfcc10m's convention).
-
-A clause is ``NAME[=COLUMN][!]``: ``COLUMN`` defaults to ``NAME``, and ``!`` makes the clause
-reverse (passes items *without* the query's value). A sweep is ``NAME=CLAUSE,CLAUSE``; the
-yaml's bloom block is every sweep with no reverse clause.
-"""
+"""``eval-data ingest``: a staged text-shape dataset and its ``config/<name>.yaml`` from
+vectors and attribute tables (docs/system/datasets.md § Adding a dataset)."""
 
 from __future__ import annotations
 
@@ -52,8 +31,7 @@ def parse_clause(spec: str) -> tuple[str, str, bool]:
 
 
 def nearest_items(items, queries, *, item_chunk: int = 2_000_000, query_batch: int = 256):
-    """``(ids [U] 0-indexed, scores [U])``: each query's exact top-1 item by inner product in
-    fp32, equal scores to the lowest id."""
+    """Each query's exact top-1 item by fp32 inner product, equal scores to the lowest id."""
     ids = torch.empty(queries.shape[0], dtype=torch.long)
     best = torch.empty(queries.shape[0], dtype=torch.float32)
     for qs in range(0, queries.shape[0], query_batch):
@@ -125,8 +103,7 @@ def ingest(
     users_limit: int = 10_000,
     device: str = "cpu",
 ) -> list[str]:
-    """Stage ``name`` and write ``config_dir/<name>.yaml``; returns ``validate_layout``'s
-    problems (empty = ok)."""
+    """Stage ``name`` and write its config; returns ``validate_layout``'s problems."""
     t0 = time.monotonic()
     out = Path(output_dir) if output_dir else data_root() / name
     specs = [parse_clause(c) for c in clauses]

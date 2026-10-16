@@ -1,4 +1,4 @@
-"""CPU-only tests for ``eval-data ingest`` (roadmap H-ADDDATA): the clause spec, the exact
+"""CPU-only tests for ``eval-data ingest``: the clause spec, the exact
 top-1 target, and a tiny dataset ingested from npy + parquet that passes ``validate_layout``
 and loads through the harness's readers."""
 

@@ -192,7 +192,8 @@ now on; the [roadmap](roadmap.md) holds the steps.
   probe-scorer tile skipping) land, pass their gates and are merged before
   any campaign cell runs. Then the code is frozen at one tag,
   `campaign-v2`, whose library tree hash is the campaign's code_version,
-  recorded in [`evaluation/campaign.yaml`](../evaluation/campaign.yaml). Allowed before the freeze:
+  recorded in the campaign manifest of the time (retired with the paper exhibits; the
+  merged tables carry each record's `code_version`). Allowed before the freeze:
   profiling, unit and parity tests, smoke cells into scratch trees (no
   campaign records). Not allowed during the campaign: feature or
   optimization work. A correctness bug found mid-campaign stops all runs;

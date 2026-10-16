@@ -18,17 +18,9 @@ def synthesize_qa_narrow(
     narrow_t: torch.Tensor,
     n_clauses: int,
 ) -> torch.Tensor:
-    """Build per-user `query_attrs_narrow` of shape `[n_users, n_clauses]`.
-
-    For each clause `c`, take the first non-pad value of
-    `narrow_t[target - 1, c, :]` (i.e. the most-frequent or first-listed
-    attribute the held-out target carries). Users with `target <= 0`
-    (no held-out item) get all `-1`.
-
-    ``narrow_t`` is the ``[N, n_clauses, A]`` 0-indexed dense item-attr
-    tensor (row ``i`` = item_id ``i + 1``). ``target_first[u]`` is a
-    1-indexed item_id (matching ``item_id_map.json``).
-    """
+    """``query_attrs_narrow [n_users, n_clauses]``: per clause the first non-pad value of the
+    held-out target's row of ``narrow_t`` (``target_first`` is 1-indexed); all ``-1`` without
+    a target."""
     n_users = len(target_first)
     qa = narrow_t.new_full((n_users, n_clauses), -1).long()
     for u, tgt in enumerate(target_first):
@@ -49,16 +41,9 @@ def sample_rare_biased_wide(
     wide_global_freq: list[int] | np.ndarray,
     seed: int,
 ) -> tuple[np.ndarray, np.ndarray, int, int]:
-    """Sample 1-shelf rare and 2-shelf (common+rare) wide attrs per user.
-
-    Returns `(qa_wide_1, qa_wide_2, n_drop_1, n_drop_2)`.
-
-    1-shelf: ``p ∝ 1/sqrt(global_freq)`` — biases toward rare shelves so the
-    filter is selective.
-    2-shelf: one common (``p ∝ sqrt(freq)``) and one rare (``p ∝ 1/sqrt(freq)``
-    among the remaining bag entries). Both `-1` if the bag is empty / has
-    only a single entry / target is missing.
-    """
+    """Per user one rare shelf (``p ∝ 1/sqrt(freq)``) and one common + one rare shelf
+    (``p ∝ sqrt(freq)`` then ``1/sqrt(freq)``) out of the target's bag; ``-1`` without a bag.
+    Returns ``(qa_wide_1, qa_wide_2, n_drop_1, n_drop_2)``."""
     rng = np.random.default_rng(seed)
     n_users = len(target_first)
     freq_np = np.asarray(wide_global_freq, dtype=np.int64)
@@ -67,8 +52,6 @@ def sample_rare_biased_wide(
     n_drop_1 = 0
     n_drop_2 = 0
     wide_np = wide_t.numpy()
-    # ``wide_t`` is ``[N, 1, BAG]`` 0-indexed dense; ``tgt`` is a 1-indexed
-    # item_id, so index at ``tgt - 1``.
     for u, tgt in enumerate(target_first):
         if tgt <= 0:
             n_drop_1 += 1
@@ -101,8 +84,7 @@ def sample_rare_biased_wide(
 
 
 def pmid_hash(pmids: np.ndarray, seed: int) -> np.ndarray:
-    """splitmix64's finaliser over the ids, keyed by ``seed`` — a fixed, order-free
-    pseudo-random rank per id (uint64). Used by ``select_pmids``."""
+    """splitmix64's finaliser over the ids, keyed by ``seed``: an order-free rank per id."""
     with np.errstate(over="ignore"):
         z = np.asarray(pmids, dtype=np.uint64) + np.uint64(seed + 1) * np.uint64(0x9E3779B97F4A7C15)
         z = (z ^ (z >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
@@ -111,11 +93,8 @@ def pmid_hash(pmids: np.ndarray, seed: int) -> np.ndarray:
 
 
 def select_pmids(pmids: np.ndarray, keep_items: int | None, seed: int = 0) -> np.ndarray:
-    """``[len(pmids)]`` bool: the ``keep_items`` ids with the smallest ``pmid_hash`` (ties on
-    the id itself), or everything when ``keep_items`` is ``None`` / not smaller than the
-    catalog. The choice depends only on the id set and the seed — not on shard order, chunking
-    or which shards have been fetched — so a resumed or re-sharded run keeps the same items,
-    spread uniformly over the catalog instead of being its oldest prefix."""
+    """``[len(pmids)]`` bool: the ``keep_items`` ids with the smallest ``pmid_hash``, so the
+    choice depends on the id set and the seed only, never on shard order."""
     n = int(pmids.shape[0])
     if keep_items is None or keep_items >= n:
         return np.ones(n, dtype=bool)

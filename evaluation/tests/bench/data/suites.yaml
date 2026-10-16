@@ -7,7 +7,7 @@ quality:
   arms:
     - {algo: linr_v1_filter_mask, backends: [triton, torch]}   # collapses to one cuBLAS job
     - {algo: linr_v3, backends: [triton, torch]}
-    - {algo: silvertorch, backends: [triton, torch, official]}
+    - {algo: silvertorch, backends: [official, official-fork]}
 filter:
   datasets: [mini]
   filter_kinds: [clause, bloom]
@@ -18,22 +18,23 @@ filter:
   arms:
     - {algo: linr_v2, backends: [triton, torch]}
     - {algo: linr_v3, backends: [torch], sweeps: [c0]}
-    - {algo: silvertorch, backends: [triton]}
+    - {algo: silvertorch, backends: [official-fork]}
     - {algo: silvertorch, backends: [official], filter_kinds: [bloom]}
 deep:
   datasets: [mini]
   dims: [32]
-  filter_kinds: [bloom]
+  filter_kinds: [clause, bloom]
   ks: [10]
   batch_sizes: [1]
   seeds: [0, 1]
   arms:
     - algo: silvertorch
-      backends: [triton]
+      backends: [official-fork]
+      filter_kinds: [bloom]
       build: {n_lists: [8]}
       query: {n_probe: [4, 16, 64]}
       datasets: {mini: {build: {n_lists: [8, 64]}}}
-    - {algo: linr_v3, backends: [torch], query: [{candidate_pool: 20}, {candidate_pool: 40}]}
+    - {algo: linr_v3, backends: [torch], filter_kinds: [clause], sweeps: [c0], query: [{candidate_pool: 20}, {candidate_pool: 40}]}
   bloom: {m_bits: 128}
 codesign:
   datasets: [mini]
@@ -59,7 +60,7 @@ bad_params:
   ks: [10]
   batch_sizes: [1]
   arms:   # n_probe is a query param → ConfigError
-    - {algo: silvertorch, backends: [triton], build: {n_probe: [4]}}
+    - {algo: silvertorch, backends: [official], build: {n_probe: [4]}}
 widths:
   datasets: [mini]
   dims: [32]
@@ -69,9 +70,9 @@ widths:
   ks_by_sweep: {mini: {c0c1: [10]}}
   seeds_by_sweep: {mini: {c0c1: [0, 2]}}
   arms:
-    - {algo: silvertorch, backends: [triton], filter_kinds: [bloom], build: {m_bits: [64, 256]}}
-    - {algo: silvertorch, backends: [triton], filter_kinds: [clause]}
-    - {algo: silvertorch, backends: [torch], build: {compile: [max-autotune]}}
+    - {algo: silvertorch, backends: [official-fork], filter_kinds: [bloom], build: {m_bits: [64, 256]}}
+    - {algo: silvertorch, backends: [official-fork], filter_kinds: [clause]}
+    - {algo: linr_v1_filter_mask, backends: [torch], build: {compile: [max-autotune]}}
     - {algo: linr_v3, backends: [triton], query: {candidate_pool_frac: [0.1]}}
     - {algo: linr_v2, backends: [torch], datasets: {}}   # an empty slot runs nowhere
 bloom: {m_bits: 64, k_hash: 3}

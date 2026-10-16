@@ -1,4 +1,4 @@
-"""CPU-only tests for the KuaiRand-27K loader (roadmap E4): a six-video, two-user tarball in
+"""CPU-only tests for the KuaiRand-27K loader: a six-video, two-user tarball in
 the upstream member layout, run through ``convert`` -> ``prep`` -> ``attrs``, with every
 output value written out by hand."""
 

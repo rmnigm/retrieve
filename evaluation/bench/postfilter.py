@@ -1,9 +1,4 @@
-"""The generic-torch baseline (research/decisions.md § Harness; docs/system/evaluation.md
-§ The postfilter baseline): what a practitioner writes without a retrieval library. Dense
-scoring over the whole item table, ``torch.topk(alpha * k)``, the filter checked on those
-candidates only, the first ``k`` survivors kept in rank order, short rows padded with the
-``-1`` / ``-inf`` sentinel. Scoring is LiNR V1's (fp16 table, fp32 scores), so the two differ
-only in where the filter runs."""
+"""The generic-torch baseline (docs/system/evaluation.md § The postfilter baseline)."""
 
 from __future__ import annotations
 

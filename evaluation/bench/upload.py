@@ -1,22 +1,5 @@
-"""``bench upload`` / ``bench fetch`` — a results tree to and from a HuggingFace dataset repo.
-
-The storage policy this implements is the "Results storage" section of
-``docs/system/evaluation.md``: a results tree is local, gitignored working state while a
-campaign runs (resume reads its JSONL, never the network) and **the Hub is where it is kept**
-— the per-cell JSONL records, their ``*.samples.jsonl`` sidecars and the ``results.parquet``
-aggregate, which :func:`upload` regenerates from the records before listing the tree.
-``results/_parity/*.npz`` and ``results/_logs/`` go **nowhere** — scratch, rewritten by every
-run, skipped by the ``_``-prefix rule in :func:`files`.
-
-One invocation publishes one ``--path-in-repo`` subtree and writes two generated files:
-``<prefix>/MANIFEST.json`` — that subtree's provenance *plus a sha256 per file*, so the round
-trip is checkable — and a root ``README.md`` rebuilt from every manifest in the repo.
-**The citability verdict is ``report.provenance``, the same function ``bench report`` uses**
-(CLAUDE.md rule 2), so a file fetched from the Hub in six months carries the same NOT CITABLE
-reasons the tables would have carried. ``--gate`` cannot override the evidence, only the
-default. **Private by default** — going public is roadmap F4's decision, not this command's.
-:func:`fetch` is the way back: one subtree, checked against its manifest, into a results tree.
-"""
+"""``bench upload`` / ``bench fetch``: a results tree to and from the HuggingFace results repo
+(docs/system/evaluation.md § Results storage)."""
 
 from __future__ import annotations
 
@@ -31,6 +14,7 @@ import click
 from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download, snapshot_download
 
 from bench import records
+from bench.records import sha256
 from bench.report import provenance
 
 EVAL_DIR = Path(__file__).resolve().parents[1]
@@ -40,8 +24,7 @@ GENERATED = ("MANIFEST.json", "README.md")
 
 
 def files(results: Path) -> list[Path]:
-    """Every file to publish: the tree minus anything under a ``_``-prefixed path part
-    (``_logs/``, ``_parity/``) and minus what a previous upload generated."""
+    """Every file to publish: the tree minus ``_``-prefixed paths and the generated files."""
     return sorted(
         p
         for p in results.rglob("*")
@@ -52,25 +35,15 @@ def files(results: Path) -> list[Path]:
 
 
 def _source(results: Path) -> str:
-    """The tree's path relative to the repository root — an absolute worktree path on a
-    rented box is not provenance anyone can use in six months."""
+    """The tree's path relative to the repository root, not the box's absolute path."""
     for d in (results, *results.parents):
         if (d / ".git").exists():
             return results.relative_to(d).as_posix()
     return str(results)
 
 
-def sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def manifest(results: Path, listing: list[Path], prefix: str, gate: str | None) -> dict:
-    """The subtree's provenance and per-file checksums. The records are read out of the
-    ``<suite>/*.jsonl`` record files being uploaded, so the verdict describes what goes up."""
+    """The subtree's provenance (over the records being uploaded) and per-file checksums."""
     rec_files = set(records.record_files(results))
     recs = [r for p in listing if p in rec_files for r in records.read_records(p)]
     return {
@@ -107,8 +80,7 @@ def readme(manifests: list[dict]) -> str:
     """The repo's front page, generated from the manifests — never hand-written prose."""
     ms = sorted(manifests, key=lambda m: m["path_in_repo"])
     out = [
-        # front matter: the records are ragged JSONL, not a browsable dataset — the viewer
-        # would only fail at parsing them, and without it the Hub warns about a bare card.
+        # the viewer would fail on ragged JSONL; without a card the Hub warns
         "---",
         "viewer: false",
         "tags: [benchmark-results, torchretrieve]",
@@ -195,8 +167,7 @@ def _at(prefix: str, rel: str) -> str:
 
 
 def _other_manifests(api, repo_id: str, prefix: str) -> list[dict]:
-    """The manifests already in the repo, minus the one this upload replaces: the root README
-    is rebuilt from all of them, so it describes the repo and not just today's subtree."""
+    """The manifests already in the repo, minus the one this upload replaces."""
     out = []
     for f in api.list_repo_files(repo_id=repo_id, repo_type="dataset"):
         if not f.endswith("MANIFEST.json") or f.rpartition("/")[0] == prefix:
@@ -298,7 +269,8 @@ def upload(repo_id, results, prefix, gate, private, do_verify, dry_run) -> None:
     help="the results tree to fetch into",
 )
 def fetch(repo_id, prefix, results) -> None:
-    """Download one published subtree into a results tree, checked against its manifest."""
+    """Download one published subtree into a results tree, checked against its manifest, which
+    is kept beside the files (``bench merge`` reads it; a re-upload skips it)."""
     results = (results if results.is_absolute() else EVAL_DIR / results).resolve()
     prefix = prefix.strip("/")
     with tempfile.TemporaryDirectory(prefix="bench-fetch-") as tmp:
@@ -309,6 +281,9 @@ def fetch(repo_id, prefix, results) -> None:
             raise click.ClickException("download does not match its manifest:\n" + "\n".join(bad))
         clash = [f["path"] for f in man["files"] if (results / f["path"]).is_file()
                  and sha256(results / f["path"]) != f["sha256"]]  # fmt: skip
+        other = results / "MANIFEST.json"
+        if other.is_file() and json.loads(other.read_text())["path_in_repo"] != prefix:
+            clash.append("MANIFEST.json (another subtree's: one fetched tree holds one subtree)")
         if clash:
             raise click.ClickException(
                 f"{results} already holds different copies of: {', '.join(clash)}"
@@ -317,5 +292,6 @@ def fetch(repo_id, prefix, results) -> None:
             dst = results / f["path"]
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(local / f["path"], dst)
+        shutil.copyfile(local / "MANIFEST.json", results / "MANIFEST.json")
     click.echo(f"{man['n_files']} files, {man['n_records']} record(s) from {repo_id}/{prefix} "
                f"-> {results}; " + ("CITABLE" if man["citable"] else "NOT CITABLE"))  # fmt: skip

@@ -1,18 +1,7 @@
-"""The on-disk dataset layout as code (docs/system/datasets.md § On-disk layout): the readers
-the harness uses, the checks they carry, ``apply_users_limit`` (one prefix over every
-query-side tensor) and ``validate_layout`` (``bench check``). ``eval_datasets/etl/*`` write
-this layout; nothing here imports the harness or the trainer.
-
-Two item layouts are accepted, not assumed (roadmap A1): the modern ``[N, …]`` 0-indexed one
-and the pre-``3b1b5b3`` 1-indexed ``[N+1, …]`` one with a training-side padding row at index
-0 — what the copies published on the Hub still are. ``drop_legacy_padding_row`` recognises
-that row by its content (all-zero for an embedding matrix, all ``-1`` for an attribute tensor)
-and drops it; ``check_items_aligned`` then requires the attrs to describe exactly the items.
-Held-out target ids are 1-indexed item ids on disk in both layouts, so the ``-1`` shift is the
-same in both; what the drop fixes is the *rows* those ids index. On the text path attrs and
-embeddings agree with each other either way and only the targets would be off by one —
-``cos(query, target)`` 0.99 → 0.62, no error — which is why the drop is loud.
-"""
+"""The on-disk dataset layout as code (docs/system/datasets.md § On-disk layout the harness
+expects): the readers, their checks, ``apply_users_limit`` and ``validate_layout``. Two item
+layouts are accepted: the ``[N, …]`` one and the published ``[N+1, …]`` one with a padding row
+at index 0, recognised by its content and dropped."""
 
 from __future__ import annotations
 
@@ -37,8 +26,8 @@ _SYNTH_DRAW = re.compile(r"item_attrs_synth(?:_s(\d+))?\.pt")
 
 
 def synth_draw_name(name: str, draw: int) -> str:
-    """Draw ``draw``'s copy of a synth file: draw 0 keeps ``name`` (its digest keys every earlier
-    record), draw d > 0 is ``<stem>_s<d><suffix>``."""
+    """Draw ``draw``'s copy of a synth file: draw 0 keeps ``name``, draw d > 0 is
+    ``<stem>_s<d><suffix>``."""
     p = Path(name)
     return name if draw == 0 else f"{p.stem}_s{draw}{p.suffix}"
 
@@ -50,8 +39,7 @@ def synth_draws(data_dir: Path) -> list[int]:
 
 
 def atomic_write(path: Path, write: Callable[[BinaryIO], None]) -> None:
-    """``write(fh)`` into ``<path>.tmp``, fsync, ``os.replace``: a crash mid-save leaves the old
-    file or nothing, never a torn one. The tmp file is removed on failure."""
+    """``write(fh)`` into ``<path>.tmp``, fsync, ``os.replace``: never a torn file."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -66,13 +54,9 @@ def atomic_write(path: Path, write: Callable[[BinaryIO], None]) -> None:
         raise
 
 
-# ----- items --------------------------------------------------------------------------------
-
-
 def drop_legacy_padding_row(t: torch.Tensor, *, kind: str, what: str) -> torch.Tensor:
-    """Drop row 0 of a pre-``3b1b5b3`` ``[N+1, …]`` tensor when its content says it is the
-    padding row (``kind="emb"``: all-zero; ``kind="attrs"``: all ``-1``); anything else is
-    returned untouched, so a modern tensor whose row 0 is a real item is never shortened."""
+    """Drop row 0 of a published ``[N+1, …]`` tensor when its content is the padding row
+    (``emb``: all zero; ``attrs``: all ``-1``); anything else is returned untouched."""
     if kind not in ("emb", "attrs"):
         raise ValueError(f"kind must be 'emb' or 'attrs', got {kind!r}")
     if t.ndim == 0 or t.shape[0] == 0:
@@ -91,8 +75,8 @@ def drop_legacy_padding_row(t: torch.Tensor, *, kind: str, what: str) -> torch.T
 
 
 def check_items_aligned(n_items: int, n_attrs: int, *, what: str) -> None:
-    """Row ``i`` of the attrs and of the embeddings is item id ``i+1``; a mismatch is a filter
-    mask scoring every query against the wrong items, so it fails here naming both counts."""
+    """Row ``i`` of the attrs and of the embeddings is the same item; a mismatch would score
+    every query against the wrong items."""
     if n_attrs != n_items:
         raise RuntimeError(
             f"{what} has {n_attrs} rows but there are {n_items} items: the filter mask would "
@@ -103,11 +87,9 @@ def check_items_aligned(n_items: int, n_attrs: int, *, what: str) -> None:
 
 
 def prefix_problem(meta: Path, expected: str) -> str | None:
-    """The prefix policy, in one place: a ``*.meta.json`` sidecar must carry a ``prefix`` key
-    equal to the nomic prefix the harness expects **or explicitly ``null``** — the encoder has
-    no prefix concept (YFCC's CLIP descriptors, MedCPT's precomputed vectors), a declared fact
-    rather than an omission. A sidecar *without* the key is a problem: it cannot be told apart
-    from a forgotten prefix. Returns the message, or ``None`` when the sidecar is fine."""
+    """A ``*.meta.json`` sidecar must carry ``prefix`` equal to the expected nomic prefix or
+    explicitly ``null`` (an encoder without prefixes); a sidecar without the key cannot be told
+    apart from a forgotten prefix. Returns the problem, or ``None``."""
     with open(meta) as f:
         payload = json.load(f)
     if "prefix" not in payload:
@@ -119,8 +101,7 @@ def prefix_problem(meta: Path, expected: str) -> str | None:
 
 
 def assert_prefixes(content_dir: Path) -> None:
-    """Catch silent nomic prefix swaps (they cost 5–15 % arxiv recall with no error); a
-    ``prefix: null`` sidecar passes (``prefix_problem``)."""
+    """Raise on a prefix problem: a swapped nomic prefix costs recall with no error."""
     for name, expected in (("text_emb", EXPECTED_DOC_PREFIX), ("query_emb", EXPECTED_QUERY_PREFIX)):
         meta = content_dir / f"{name}.meta.json"
         if not meta.exists():
@@ -132,8 +113,8 @@ def assert_prefixes(content_dir: Path) -> None:
 
 
 def assert_not_normalised(content_dir: Path) -> None:
-    """A ``normalize: false`` dataset must not read vectors an ETL already L2-normalised: that
-    would score cosine while the config says dot product, with no error."""
+    """A ``normalize: false`` dataset must not read L2-normalised vectors: that would score
+    cosine while the config says dot product."""
     for name in ("text_emb", "query_emb"):
         meta = json.loads((content_dir / f"{name}.meta.json").read_text())
         if meta.get("normalization") != "none":
@@ -146,10 +127,8 @@ def assert_not_normalised(content_dir: Path) -> None:
 def load_sharded(
     shard_index: Path, device: torch.device, *, normalize: bool = False, float32: bool = False
 ) -> torch.Tensor:
-    """``content/text_emb_shard_*.pt`` → one ``[N, D]`` tensor on device, in the shards' dtype,
-    or fp32 with ``float32`` (and L2-normalised with ``normalize``, which implies it), shard by
-    shard — the peak is then the fp32 matrix plus one shard, not the three whole-matrix copies
-    of ``.float()`` + ``F.normalize``."""
+    """The shards as one ``[N, D]`` tensor on device, converted and normalised shard by shard so
+    the peak is the fp32 matrix plus one shard."""
     with open(shard_index) as f:
         idx = json.load(f)
     n, d = int(idx["n_items"]), int(idx["dim"])
@@ -170,9 +149,8 @@ def load_sharded(
 def load_text_items(
     content_dir: Path, device: torch.device, *, normalize: bool = True
 ) -> torch.Tensor:
-    """``[N, D]`` fp32 item embeddings of a pre-encoded text layout, L2-normalised unless the
-    dataset scores raw dot products (``normalize: false``, PubMed MedCPT); the pad row of a
-    legacy file is dropped *before* normalisation; the prefix sidecars asserted first."""
+    """``[N, D]`` fp32 item embeddings, L2-normalised unless ``normalize`` is false, the legacy
+    pad row dropped first, the prefix sidecars asserted."""
     assert_prefixes(content_dir)
     if not normalize:
         assert_not_normalised(content_dir)
@@ -194,9 +172,8 @@ def load_text_items(
 def load_text_queries(
     data_dir: Path, content_dir: Path, dim: int, *, normalize: bool = True
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """``(queries [U, D] fp32, normalised as the items are, targets [U, 1] 0-indexed,
-    n_targets [U])`` from ``query_emb.pt`` + ``heldout.parquet`` (whose 1-indexed ``item_id``
-    is shifted ``-1``)."""
+    """``(queries [U, D], targets [U, 1] 0-indexed, n_targets [U])`` from ``query_emb.pt`` and
+    ``heldout.parquet`` (1-indexed on disk)."""
     heldout = pl.read_parquet(data_dir / "heldout.parquet")
     targets = torch.tensor(heldout["item_id"].to_list(), dtype=torch.long).unsqueeze(-1) - 1
     queries = torch.load(str(content_dir / "query_emb.pt"), map_location="cpu")
@@ -211,9 +188,7 @@ def load_text_queries(
 
 
 def load_query_attrs(path: Path, n_queries: int) -> torch.Tensor:
-    """``[U, C]`` int64 query attrs aligned 1:1 with the *full* test split — checked here,
-    before any trim: ``query_attrs_narrow`` of ``eval_split.parquet``, or a ``.pt`` tensor
-    (``filters.query_attrs``, the synthetic attrs)."""
+    """``[U, C]`` int64 query attrs aligned with the full test split, checked before any trim."""
     if Path(path).suffix == ".pt":
         qa = torch.load(str(path), map_location="cpu", weights_only=True).long()
     else:
@@ -239,8 +214,8 @@ def check_synth_rates(attrs: Path) -> None:
 def load_item_attrs(
     attrs: Path, reverse: Path | None, n_items: int, device: torch.device
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
-    """``(item_attrs [N, C, A], clause_is_reverse [C] | None)`` on device, the legacy pad row
-    dropped and the row count checked against ``n_items``."""
+    """``(item_attrs [N, C, A], clause_is_reverse [C] | None)`` on device, aligned with the
+    items."""
     item_attrs = torch.load(str(attrs), map_location=device, weights_only=True)
     item_attrs = drop_legacy_padding_row(item_attrs, kind="attrs", what=attrs.name)
     check_items_aligned(n_items, int(item_attrs.shape[0]), what=attrs.name)
@@ -249,16 +224,11 @@ def load_item_attrs(
 
 
 def apply_users_limit(n: int | None, *tensors: torch.Tensor | None) -> tuple:
-    """The one ``users_limit`` site: the first ``n`` rows of every query-side tensor (prefix,
-    not sample — §2.2). ``None`` entries pass through; a limit at or above the split is
-    a no-op."""
+    """The one ``users_limit`` site: the first ``n`` rows of every query-side tensor (§2.2)."""
     if n is None or not tensors or tensors[0] is None or n >= tensors[0].shape[0]:
         return tensors
     logger.info("users_limit={}: keeping the first {} of {} queries", n, n, tensors[0].shape[0])
     return tuple(t[:n] if t is not None else None for t in tensors)
-
-
-# ----- validate_layout ----------------------------------------------------------------------
 
 
 def _rows(path: Path, kind: str) -> int:
@@ -268,9 +238,7 @@ def _rows(path: Path, kind: str) -> int:
 
 def validate_layout(data_dir: Path, content_dir: Path | None = None) -> list[str]:
     """Every way a dataset directory can be wrong for the harness, as messages (empty = ok):
-    the files each shape needs, the nomic prefix sidecars, and the row alignments the readers
-    above enforce — items vs attrs, queries vs held-out vs ``eval_split``. ``content_dir`` set
-    = the text shape; unset = the sequential shape (``test.parquet`` + a checkpoint)."""
+    the files each shape needs, the prefix sidecars, the row alignments the readers enforce."""
     data_dir = Path(data_dir)
     problems: list[str] = []
     n_items = n_queries = None
