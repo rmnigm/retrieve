@@ -16,7 +16,7 @@
 #   filter is not in the study and runs nowhere (LiNR arms are clause only). The FR records of these suites carry
 #   `official`, Meta's code as published, which left the workspace at RENAME (records keep their names).
 #   One backend per algo (`triton`) except the C3 torch arms.
-# - No openalex, no bs 8, no k 500.
+# - No bs 8, no k 500.
 
 # Kept sweeps (one high pass rate, one low, one conjunctive / reverse), from measured pass rates:
 # arxiv c3_nversions 0.444, c0_maincat 0.136, all4 0.0094; pubmed c0_mesh 0.0002,

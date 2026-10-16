@@ -224,8 +224,8 @@ The rules the final run was planned and run under.
   descriptors are not trained for inner product; every YFCC result is
   unusable), OpenAlex and Semantic Scholar SPECTER2 (same N, width and
   domain as PubMed), Amazon Reviews 2023, Cohere Wikipedia, yambda-5b and
-  KuaiRand-27K. Their ETLs and configs stay in the code; they are in no
-  suite.
+  KuaiRand-27K. None of them has code in the harness (user, 2026-10-17)
+  or a suite.
 - **Yambda-500m in, unfiltered** (user, 2026-10-13): how recall against the
   exact top-k tracks end-task recall (held-out Listen+ events) across dims;
   SilverTorch adapted only, an `n_lists` / `n_probe` sweep at d64 / d128 /
@@ -273,9 +273,6 @@ encoder behind the sequential benchmarks.
   yambda-500m `sasrec-ssm-logq-d{dim}`. The golden baseline stays on
   `gsasrec-d128-drop0.5-id`, because it compares two harnesses on fixed
   inputs.
-- **KuaiRand is final at d64, refit on train + val** (`train_on_val=true`),
-  because next-day clicks drift ([temporal drift](validation.md#kuairand-temporal-drift));
-  it is a trainer result only.
 - **Out of scope:** a LLaMA block, row-wise Adagrad, a bf16 table,
   FuXi-style channels and multi-GPU training.
 

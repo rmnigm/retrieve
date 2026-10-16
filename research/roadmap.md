@@ -53,9 +53,6 @@ this page. Step names are stable identifiers used in commits.
 - **`.git` history size.** Results files left `HEAD`, but their bytes stay
   in history; shrinking `.git` needs a history rewrite (`git filter-repo`),
   which forces every clone and worktree to re-sync.
-- **Dropped datasets' code.** The ETLs, configs and tests of datasets out
-  of the study (KuaiRand, OpenAlex, yambda-5b, YFCC-10M's leftovers) stay in
-  the harness until the user decides whether the release keeps them.
 
 ## The queue
 

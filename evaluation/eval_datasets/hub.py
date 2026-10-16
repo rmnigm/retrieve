@@ -17,11 +17,8 @@ from loguru import logger
 EVAL_REPOS: dict[str, str] = {
     "arxiv-papers": "pinkmeme/eval-arxiv-papers",
     "yambda-500m": "pinkmeme/eval-yambda-500m",
-    "yambda-5b": "pinkmeme/eval-yambda-5b",
     "goodreads-work-id": "pinkmeme/eval-goodreads-work-id",
     "pubmed": "pinkmeme/eval-pubmed",
-    "kuairand": "pinkmeme/eval-kuairand",
-    "openalex": "pinkmeme/eval-openalex",
     "laion30m": "pinkmeme/eval-laion30m",
 }
 

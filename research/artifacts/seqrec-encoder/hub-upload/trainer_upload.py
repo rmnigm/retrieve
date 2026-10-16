@@ -6,7 +6,6 @@ from huggingface_hub import HfApi
 JOBS = [
     ("pinkmeme/eval-goodreads-work-id", Path("/data/goodreads-work-id/trainer"), None),
     ("pinkmeme/eval-yambda-500m", Path("/data/yambda-500m/trainer"), None),
-    ("pinkmeme/eval-kuairand", Path("/data/kuairand"), ["train.parquet", "val.parquet", "prep_log.json"]),
 ]
 dry = "--dry-run" in sys.argv
 api = HfApi()

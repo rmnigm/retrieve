@@ -198,7 +198,7 @@ not for the paper; the choice stands.
 
 ### Trainer inputs with `timestamps` (data gates, not citable)
 
-The trainer-input ETLs (yambda, goodreads, kuairand) write a `timestamps`
+The trainer-input ETLs (yambda, goodreads) write a `timestamps`
 column next to `item_ids` ([datasets](../docs/system/datasets.md#yambda);
 [artifacts](artifacts/seqrec-encoder/etl-timestamps/)).
 
@@ -209,7 +209,7 @@ column next to `item_ids` ([datasets](../docs/system/datasets.md#yambda);
 | yambda `timestamps` | **passes**: lengths equal to `item_ids`, non-decreasing | seconds since the anonymized Yambda epoch |
 | goodreads `item_id_map.json` | **passes**: sha256-equal to the Hub copy (797,084 items) | |
 | goodreads `test.parquet` vs the Hub copy | **fails bit-exact; every difference is a timestamp tie** (38,924 of 313,178 rows) | `sort(["user_id", "ts"])` breaks no ties. Not fixed: a tiebreak would move the output off the Hub copy |
-| goodreads and KuaiRand `timestamps` | **pass**: unix seconds, lengths equal, non-decreasing | |
+| goodreads `timestamps` | **pass**: unix seconds, lengths equal, non-decreasing | |
 
 ## Seqrec encoder
 
@@ -227,7 +227,6 @@ The published gSASRec checkpoint of the same D, re-scored on the same
 |---|---|---|---|
 | yambda-500m | 0.0846 / 0.1563 ([gate A](artifacts/seqrec-encoder/gate-a/)) | 0.0811 / 0.1486 ([gate A](artifacts/seqrec-encoder/gate-a/)) | 0.0814 / 0.1398 ([E0b](artifacts/seqrec-encoder/e0b-yambda-d256-bar/)) |
 | goodreads-work-id | 0.0350 / 0.1486 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0361 / 0.1480 ([E0](artifacts/seqrec-encoder/e0-goodreads-bars/)) | 0.0354 / 0.1472 ([E0c](artifacts/seqrec-encoder/e0c-goodreads-d256-bar/)) |
-| KuaiRand | none: no published KuaiRand-27K checkpoint; calibrated against most-popular lists ([temporal drift](#kuairand-temporal-drift)) | not run | not run |
 
 ### Final models (the E1c recipe)
 
@@ -242,22 +241,9 @@ logQ: the trainer's defaults. Only D, epochs, patience and eval cadence vary.
 | [goodreads d64](artifacts/seqrec-encoder/e3-goodreads-d64-sasrec-ssm-logq/) | 0.0381 | 0.1447 | 0.0695 | 0.1232 | +0.0031 / **−0.0039** | 16 (0.0402) | 49.4 | 6.7 |
 | [goodreads d128](artifacts/seqrec-encoder/g128-sasrec-ssm-logq/) | 0.0410 | 0.1518 | 0.0736 | 0.1577 | **+0.0049 / +0.0038** | 34 (0.0440) | 59.0 | 8.1 |
 | [goodreads d256](artifacts/seqrec-encoder/g256-sasrec-ssm-logq/) | 0.0418 | 0.1530 | 0.0743 | 0.1616 | **+0.0064 / +0.0058** | 13 (0.0463) | 80.3 | 11.0 |
-| [KuaiRand d64](artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/), train + val, 4 epochs | 0.0276 | 0.0063 | 0.0197 | 0.0009 | no bar; val-day most-popular 0.0314 / 0.0073 | fixed 4 epochs | 260.8 | 62.7 |
-| [KuaiRand d64, train only](artifacts/seqrec-encoder/k64-sasrec-ssm-logq/) (drift evidence) | 0.0046 | 0.0016 | 0.0040 | 0.0006 | as above | 3 (0.0232) | 249.4 | 62.6 |
-| KuaiRand d128 | not run: OOM in backward ([probe](artifacts/seqrec-encoder/k128-probe-oom/README.md)) | | | | | | | |
 
 Against the success rule ([decisions](decisions.md#sequential-encoder)): five
 of six beat the bar on both metrics; goodreads d64 misses on R@100.
-
-### KuaiRand: temporal drift
-
-From the [diagnosis](artifacts/seqrec-encoder/k64-diagnosis/README.md) of the
-train-only k64. Next-day clicks follow trending items: 47.6 % of test
-targets were clicked on the val day, 42.3 % in neither train nor the val
-day. logQ subtracts all-time train popularity, the wrong prior for a later
-day; the train-only model is one day stale on val and two on test. Training
-on the val day (the refit) reaches 6.0× / 3.9× the train-only model, still
-12 % / 14 % below the val day's most-popular list.
 
 ### Recipe search (yambda-500m d64)
 

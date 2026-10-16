@@ -34,8 +34,6 @@ yet validated, not citable). Which older records this invalidates:
 |---|---|---|---|
 | `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-goodreads-work-id` `checkpoints/` |
 | `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `pinkmeme/eval-yambda-500m` `checkpoints/`; yambda-500m is in the study, unfiltered |
-| `kuairand.yaml` | `sasrec-ssm-logq-d64-trainval` | 64 | not kept anywhere (user); KuaiRand is out of the study ([refit command.sh](../../research/artifacts/seqrec-encoder/k64-refit-sasrec-ssm-logq/command.sh)) |
-| `yambda-5b.yaml` | `gsasrec-d{dim}` | 64, 128 | not kept anywhere: `pinkmeme/eval-yambda-5b` was deleted by the user (2026-10-15); out of the study, no E1c model trained |
 
 Each E1c dir holds `best_model.pt`, `item_embs.pt`, `config.json`,
 `item_id_map.json`, `eval_quality.json`, `train_metrics.json` and a short
@@ -58,9 +56,6 @@ use `gsasrec-d128-drop0.5-id`.
 |---|---|
 | `pinkmeme/eval-goodreads-work-id` | `gsasrec-d{64,128,256}-drop0.5-id` |
 | `pinkmeme/eval-yambda-500m` | `gsasrec-d{64,128,256}-drop0.5` |
-
-KuaiRand's gSASRec `gsasrec-d128-shared` was deleted from the Hub (user);
-nothing reproduces the one filter cell made with it.
 
 The yambda-500m ones as recorded at training time (Listen+, full-catalog
 ranking against all 1,866,170 items, no history masking, the
@@ -234,13 +229,10 @@ The registry lives in
 | Dataset key | HF repo (dataset type) |
 |---|---|
 | `yambda-500m` | `pinkmeme/eval-yambda-500m` |
-| `yambda-5b` | `pinkmeme/eval-yambda-5b` |
 | `goodreads-work-id` | `pinkmeme/eval-goodreads-work-id` |
 | `arxiv-papers` | `pinkmeme/eval-arxiv-papers` |
-| `kuairand` | `pinkmeme/eval-kuairand` |
-
-The `yambda-5b` and `kuairand` repos were deleted by the user (2026-10-15): their keys remain
-in the registry but resolve to nothing.
+| `pubmed` | `pinkmeme/eval-pubmed` |
+| `laion30m` | `pinkmeme/eval-laion30m` |
 
 A given checkpoint then lands at
 `pinkmeme/eval-<dataset>/tree/main/checkpoints/<ckpt-id>/` rather than its

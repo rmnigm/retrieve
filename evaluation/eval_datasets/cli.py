@@ -19,8 +19,6 @@ ETL = {
     "yambda": "yambda",
     "synth-arxiv": "synth_arxiv",
     "pubmed": "pubmed",
-    "kuairand": "kuairand",
-    "openalex": "openalex",
     "laion": "laion",
 }
 

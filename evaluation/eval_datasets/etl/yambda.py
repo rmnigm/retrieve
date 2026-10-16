@@ -194,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sp_pp = sub.add_parser("prep", help="download + preprocess into trainer-format parquets")
-    sp_pp.add_argument("--variant", choices=["50m", "500m", "5b"], required=True)
+    sp_pp.add_argument("--variant", choices=["50m", "500m"], required=True)
     sp_pp.add_argument("--interaction", choices=["listens"], default="listens")
     sp_pp.add_argument("--output-dir", type=str, required=True)
     sp_pp.add_argument("--max-seq-len", type=int, default=200)

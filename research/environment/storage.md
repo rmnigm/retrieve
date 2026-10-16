@@ -87,8 +87,7 @@ The private Hub quota is not exposed by the API; it measures between ~95.8
 and 116 GB. Deleting a path frees no private quota until the repo's history
 is squashed (`HfApi().super_squash_history`): usage after the results
 cleanup was 95.76 GB. Current files in the dataset repos (measured
-2026-10-15, after the YFCC legs and `chains/` left `pinkmeme/eval-results` and
-`pinkmeme/eval-yfcc10m`, `eval-yambda-5b` and `eval-kuairand` were deleted):
+2026-10-15):
 55.8 GB — `eval-yambda-500m` 19.6, `eval-pubmed` 17.2, `eval-goodreads-work-id`
 9.7, `eval-results` 6.3, `eval-arxiv-papers` 3.1 GB; the rest under 0.01 GB.
 
@@ -180,12 +179,6 @@ Size the pod's disks for these at `pod.sh up` (`--disk`, `--volume`):
   layout plus 0.4 GB of PMID lists kept in `_raw/`, and 57 min of
   download-bound `convert` with MEDLINE streaming beside it
   ([datasets](../../docs/system/datasets.md#disk-budget-and-the-slice)).
-- **OpenAlex (out of the study, [decisions](../decisions.md#datasets)) only fits as a stream.** The works snapshot is 707 GB of
-  parquet and is never landed: `openalex convert` reads 297 GB of projected
-  columns over S3 (572 s at 64 workers) and stages the filtered, hash-sampled
-  rows (16 GB). The 10 M catalog is ~23 GB (papers 6.3, fp16 items 15, attrs
-  1.5); the superseded 15 M catalog it was resharded from is 34 GB more while
-  it is kept ([datasets](../../docs/system/datasets.md#budget)).
 
 ## Persistence
 
