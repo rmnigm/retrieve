@@ -4,7 +4,7 @@ parity suite scores the kernels against. Plain functions, no registration; ``tor
 traces through them."""
 
 from retrieve.ops.reference.clause_compact import clause_compact
-from retrieve.ops.reference.clause_mask import clause_mask, clause_mask_packed, clause_mask_scores
+from retrieve.ops.reference.clause_mask import clause_mask, clause_mask_scores
 from retrieve.ops.reference.fused_masked_knn_topk import fused_masked_knn_topk
 from retrieve.ops.reference.gemv_scores import gemv_scores
 from retrieve.ops.reference.oporp_1bit_match_topk import (
@@ -15,7 +15,6 @@ from retrieve.ops.reference.oporp_1bit_match_topk import (
 __all__ = [
     "clause_compact",
     "clause_mask",
-    "clause_mask_packed",
     "clause_mask_scores",
     "fused_masked_knn_topk",
     "gemv_scores",

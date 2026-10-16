@@ -1,24 +1,15 @@
-"""Meta's official SilverTorch ops (``torch.ops.st.*``) as the reference backend.
+"""Meta's SilverTorch ops, adapted (``torch.ops.st.*``; the workspace member ``silvertorch/``,
+Meta's `meta-recsys/silvertorch <https://github.com/meta-recsys/silvertorch>`_ at ``21aa35e``
+with the changes listed in its ``CHANGES.md``), behind one adapter: ``SilverTorch(backend="cuda")``
+keeps our phase 1 (k-means, int8 quantization, probe selection) and runs phases 2+3 as one
+``st::search`` call; the upstream-shaped ops (``fused_kmean_ann``, the bloom index build and
+searches, the expression parser) are wrapped here for the gates and for Meta's own modules
+(``retrieve.modules.official``). Loader, ``OfficialConfig`` and the upstream constants live in
+this package; the op wrappers in ``adapter`` are re-exported below. ``retrieve.ops.official.st``
+is ``torch.ops.st`` once loaded (docs/system/kernels.md § Meta's ops, "Ops called").
 
-``SilverTorch(backend="official")`` keeps our phase 1 (k-means, int8 quantization, probe
-selection) and routes Algorithm 1 phases 2+3 to the ops of
-`meta-recsys/silvertorch <https://github.com/meta-recsys/silvertorch>`_ (pinned at
-``21aa35e``; docs/system/kernels.md § official). This package is the
-whole adapter: the availability probe, ``OfficialConfig`` and the upstream constants here;
-attribute → feature / expression mapping, mask packing and the eager scoring wrappers whose
-outputs go through the same ``masked_topk`` epilogue as every other backend in ``adapter``
-(re-exported below). ``retrieve.ops.official.st`` is ``torch.ops.st`` once loaded.
-
-``backend="official-fork"`` runs the adapter on our fork of those ops (``official-fork/``,
-package ``silvertorch_fork``, ``torch.ops.stfork.*``): the upstream-shaped ops under the same
-schemas, plus the fork's own (``search``, the whole forward after phase 1; the prepared bloom
-searches; ``probe_prep``; ``official-fork/CHANGES.md``); both load in one process.
-
-The op schemas the adapter matches: docs/system/kernels.md § official, "Ops called".
-
-On ``official`` everything here is **eager only**: each upstream op syncs the host, so there is
-no ``torch.compile`` / CUDA-graph path and the layer refuses to compile it. The fork's ops do
-not sync and have shape functions, so ``official-fork`` captures and compiles.
+The adapted ops do not sync the host and have shape functions, so the ``cuda`` forward captures
+into a CUDA graph and compiles (docs/system/kernels.md § cuda).
 """
 
 from __future__ import annotations
@@ -29,21 +20,14 @@ from typing import Literal
 
 import torch
 
-from retrieve.interfaces import OFFICIAL_BACKENDS, OfficialBackend
-
 BitOrder = Literal["high_first", "low_first"]
 ScorePath = Literal["int32", "fp16"]
-BloomPath = Literal["partial", "full"]
 BloomWidth = Literal["configured", "upstream"]
 
-# backend -> (package, op namespace)
-PACKAGES: dict[str, tuple[str, str]] = {
-    "official": ("silvertorch", "st"),
-    "official-fork": ("silvertorch_fork", "stfork"),
-}
+PACKAGE, NAMESPACE = "silvertorch", "st"
 
 # The scorer reads doc ``d`` of a ``filtering_bit_mask`` / partial column mask at bit
-# ``63 - d % 64`` of word ``d // 64`` (kernels.md § official, "Bit order — measured, high-first").
+# ``63 - d % 64`` of word ``d // 64`` (kernels.md § Meta's ops, "Bit order — measured, high-first").
 MASK_BIT_ORDER: BitOrder = "high_first"
 
 # ``bloom_index_search_batch(return_bool_mask=False)`` packs from bit 63 downwards
@@ -66,33 +50,29 @@ REQUIRED_OPS = (
     "parse_expression_query_batch",
     "bloom_index_search_batch",
     "bloom_index_search_batch_return_partial_response",
+    "search",
 )
 
 
 class OfficialMissing(ImportError):
-    """The official package cannot run here: not installed, or no CUDA device. Distinct
+    """The ``silvertorch`` package cannot run here: not installed, or no CUDA device. Distinct
     from a plain ``ImportError``, which means it *is* installed and its extension is
     broken — tests skip on the former and fail on the latter (``require_official``)."""
 
 
 @dataclass(frozen=True)
 class OfficialConfig:
-    """Knobs of the official backend that have no counterpart on the other backends.
+    """Knobs of ``SilverTorch`` that have no counterpart on the other modules.
 
-    - ``score_path``: ``"int32"`` → ``divisor_for_int8=-1``, the raw int32 dot, host
-      epilogue ``(dot·q_scale)·global_scale`` **bit-identical** to Triton / torch (the
-      parity path); ``"fp16"`` → ``divisor_for_int8 = divisor`` (a power of two
-      chosen so ``127²·D / divisor ≤ 65504``), the kernel writes ``fp16(dot / divisor)``
-      — the instantiation Meta ships for int8 serving, hence the timed path.
+    - ``score_path``: ``"int32"`` → ``divisor_for_int8=-1``, the raw int32 dot, epilogue
+      ``(dot·q_scale)·global_scale`` **bit-identical** to the torch oracle (the parity path);
+      ``"fp16"`` → ``divisor_for_int8 = divisor`` (a power of two chosen so ``127²·D / divisor ≤
+      65504``), the kernel writes ``fp16(dot / divisor)`` — the instantiation Meta ships for int8
+      serving, hence the timed path.
     - ``divisor``: ``None`` → :func:`default_divisor` of the index width.
-    - ``bloom_path``: ``"partial"`` → ``bloom_index_search_batch_return_partial_response``
-      over the probed clusters + ``fused_kmean_ann_with_partial_masks`` (the paper's
-      co-design, default); ``"full"`` → ``bloom_index_search_batch(return_bool_mask=False)``
-      over all ``N`` + ``fused_kmean_ann(filtering_bit_mask=…)`` (the S9 ablation). On
-      ``"official-fork"`` only ``"partial"`` (the fork evaluates the bloom over the probed
-      clusters only; ``SilverTorch`` refuses ``"full"`` there).
     - ``b_multiplier``: bloom width per bundle = ``max_terms_per_doc · k · b_multiplier``
-      bits per doc (``bloom_indexer.cpp:52-66``); must be ``> 1.0``.
+      bits per doc (``bloom_indexer.cpp:52-66``); must be ``> 1.0``. Read when ``bloom_width`` is
+      ``"upstream"``.
     - ``n_stored_hashes``: raw murmur hashes precomputed per query term at parse time (the
       ops' ``hash_k`` argument — renamed here because the library-wide ``k_hash`` is the
       *search* ``k``, ``SilverTorch.k_hash``); the search ANDs the first ``k`` *distinct*
@@ -103,36 +83,30 @@ class OfficialConfig:
     - ``max_sub_queries``: parser fan-out bound per AND/OR node (semantics unchanged).
     - ``fast_build``: the CUDA builder's single-pass signature-free build (ignored by the
       CPU builder).
-    - ``bloom_width``: ``"upstream"`` → each 2048-doc bundle ``max_terms · k · b_multiplier``
-      bits wide per doc; ``"configured"`` → ``m_bits`` bits per doc in every bundle (the adapted
-      code, CHANGES.md C12; the layer's ``m_bits`` is then required). ``None`` → the backend's
-      own: ``"upstream"`` on ``official`` (its only width), ``"configured"`` on ``official-fork``.
-    - ``recheck``: test the bloom's survivors exactly (the adapted code, CHANGES.md C13): bloom ∧
-      exact is
-      the exact filter, so no false positive is returned and the bloom only spares the exact
-      test its failing docs; the layer then keeps the exact attrs beside the bloom index.
-      ``None`` → the backend's own: off on ``official`` (Meta's bloom, false positives
-      included), on for ``official-fork``.
+    - ``bloom_width``: ``"configured"`` (default) → ``m_bits`` bits per doc in every bundle
+      (CHANGES.md C12; the layer's ``m_bits`` is then required); ``"upstream"`` → Meta's width,
+      each 2048-doc bundle ``max_terms · k · b_multiplier`` bits per doc (``m_bits`` ignored).
+    - ``recheck``: test the bloom's survivors exactly (CHANGES.md C13; default on): bloom ∧ exact
+      is the exact filter, so no false positive is returned and the bloom only spares the exact
+      test its failing docs; the layer then keeps the exact attrs beside the bloom index. Off:
+      Meta's bloom semantics, false positives included.
 
     The expression parse is query preparation: ``SilverTorch.prepare_queries`` runs it once
     per batch, outside ``forward``."""
 
     score_path: ScorePath = "fp16"
     divisor: int | None = None
-    bloom_path: BloomPath = "partial"
     b_multiplier: float = 10.0
     build_k: int | None = None
     max_sub_queries: int = 5
     fast_build: bool = False
     n_stored_hashes: int = 7
-    bloom_width: BloomWidth | None = None
-    recheck: bool | None = None
+    bloom_width: BloomWidth = "configured"
+    recheck: bool = True
 
     def __post_init__(self) -> None:
         if self.score_path not in ("int32", "fp16"):
             raise ValueError(f"score_path must be 'int32' or 'fp16', got {self.score_path!r}")
-        if self.bloom_path not in ("partial", "full"):
-            raise ValueError(f"bloom_path must be 'partial' or 'full', got {self.bloom_path!r}")
         if self.divisor is not None and (
             self.divisor <= 0 or (self.divisor & (self.divisor - 1)) != 0
         ):
@@ -147,91 +121,72 @@ class OfficialConfig:
             raise ValueError(f"build_k must be in [1, {MAX_SEARCH_K}], got {self.build_k}")
         if self.max_sub_queries <= 0:
             raise ValueError(f"max_sub_queries must be positive, got {self.max_sub_queries}")
-        if self.bloom_width not in (None, "configured", "upstream"):
+        if self.bloom_width not in ("configured", "upstream"):
             raise ValueError(
                 f"bloom_width must be 'configured' or 'upstream', got {self.bloom_width!r}"
             )
-
-    def width_for(self, backend: OfficialBackend) -> BloomWidth:
-        """The bloom width this config gives ``backend``: its own default when unset; Meta's
-        ``official`` build has only the upstream one."""
-        if backend == "official":
-            if self.bloom_width == "configured":
-                raise ValueError("bloom_width='configured' needs backend='official-fork'")
-            return "upstream"
-        return self.bloom_width or "configured"
-
-    def recheck_for(self, backend: OfficialBackend) -> bool:
-        """Whether ``backend`` rechecks the bloom's survivors exactly under this config."""
-        if backend == "official":
-            if self.recheck:
-                raise ValueError("recheck=True needs backend='official-fork'")
-            return False
-        return True if self.recheck is None else self.recheck
 
 
 DEFAULT_CONFIG = OfficialConfig()
 
 
-_LOAD_MEMO: dict[str, object] = {}
+_LOAD_MEMO: list = []
 
 
-def _try_load(backend: OfficialBackend):
+def _try_load():
     """One import attempt; returns the op namespace or the exception to memoize."""
-    package, namespace = PACKAGES[backend]
     if not torch.cuda.is_available():
         return OfficialMissing(
-            "torch reports no CUDA device; the official SilverTorch backend runs its "
-            "scorer on CUDA only (the CPU reference ops are not oracles)."
+            "torch reports no CUDA device; SilverTorch runs its scorer on CUDA only (the "
+            "extension's CPU reference ops are not oracles)."
         )
     try:
-        importlib.import_module(f"{package}.ops._load_ops")  # registers torch.ops.<namespace>.*
+        importlib.import_module(f"{PACKAGE}.ops._load_ops")  # registers torch.ops.st.*
     except ModuleNotFoundError as e:
-        if (e.name or "").split(".")[0] == package:
+        if (e.name or "").split(".")[0] == PACKAGE:
             return OfficialMissing(
-                f"{package} is not installed; sync the `official` extra "
-                f"(`uv sync --extra official`). Underlying error: {e}"
+                f"{PACKAGE} is not installed; sync the workspace member (`uv sync "
+                f"--all-packages`). Underlying error: {e}"
             )
-        failure = ImportError(f"{package} import failed on a dependency:\n{e}")
+        failure = ImportError(f"{PACKAGE} import failed on a dependency:\n{e}")
         failure.__cause__ = e
         return failure
     except ImportError as e:
         # The package is importable but its `_C` is not: the extension did not build. That
         # is a real failure, not an absent optional dependency.
         failure = ImportError(
-            f"{package} is installed but its C++/CUDA extension failed to load "
+            f"{PACKAGE} is installed but its C++/CUDA extension failed to load "
             f"(build against the running torch with `--no-build-isolation`):\n{e}"
         )
         failure.__cause__ = e
         return failure
-    ops = getattr(torch.ops, namespace)
+    ops = getattr(torch.ops, NAMESPACE)
     missing = [name for name in REQUIRED_OPS if not hasattr(ops, name)]
     if missing:
         return ImportError(
-            f"{package} loaded but torch.ops.{namespace} lacks {missing}; the source does "
-            "not match the one this adapter was written against (21aa35e)."
+            f"{PACKAGE} loaded but torch.ops.{NAMESPACE} lacks {missing}; the source does "
+            "not match the one this adapter was written against (silvertorch/CHANGES.md)."
         )
     return ops
 
 
-def ensure_loaded(backend: OfficialBackend = "official"):
-    """Load ``backend``'s ops (memoized) and return their namespace, ``torch.ops.st`` or
-    ``torch.ops.stfork``.
+def ensure_loaded():
+    """Load the ops (memoized) and return their namespace, ``torch.ops.st``.
 
     Raises :class:`OfficialMissing` when the package cannot run here and a plain
     ``ImportError`` when it is present but broken."""
-    if backend not in _LOAD_MEMO:
-        _LOAD_MEMO[backend] = _try_load(backend)
-    ops = _LOAD_MEMO[backend]
+    if not _LOAD_MEMO:
+        _LOAD_MEMO.append(_try_load())
+    ops = _LOAD_MEMO[0]
     if isinstance(ops, BaseException):
         raise ops
     return ops
 
 
-def is_available(backend: OfficialBackend = "official") -> bool:
-    """True iff ``backend``'s ops load here (flattens "missing" and "broken")."""
+def is_available() -> bool:
+    """True iff the ops load here (flattens "missing" and "broken")."""
     try:
-        ensure_loaded(backend)
+        ensure_loaded()
     except ImportError:
         return False
     return True
@@ -240,8 +195,6 @@ def is_available(backend: OfficialBackend = "official") -> bool:
 def __getattr__(name: str):
     if name == "st":
         return ensure_loaded()
-    if name == "stfork":
-        return ensure_loaded("official-fork")
     raise AttributeError(f"module 'retrieve.ops.official' has no attribute {name!r}")
 
 
@@ -281,9 +234,8 @@ __all__ = [
     "DEFAULT_CONFIG",
     "MASK_BIT_ORDER",
     "MAX_SEARCH_K",
-    "OFFICIAL_BACKENDS",
-    "PACKAGES",
-    "OfficialBackend",
+    "NAMESPACE",
+    "PACKAGE",
     "OfficialConfig",
     "OfficialMissing",
     "attrs_to_features",

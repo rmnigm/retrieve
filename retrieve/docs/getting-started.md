@@ -26,9 +26,8 @@ toolchain, so there are no prebuilt CUDA wheels to match. You need:
 
 The LiNR modules and the filters accept `backend="torch"` and run without Triton (still on GPU);
 their default is `backend="triton"`. `SilverTorch` runs Meta's official SilverTorch code, adapted
-(`backend="official-fork"`, the default) or as published (`backend="official"`), and needs the
-`official` extra: `pip install torchretrieve[official]` builds Meta's extension and ours against
-your CUDA toolkit ([modules](modules.md#silvertorch)).
+(`backend="cuda"`, its only backend): the `silvertorch` package, a dependency built from source
+against your CUDA toolkit at install ([modules](modules.md#silvertorch)).
 
 The package has two public layers and two helper namespaces:
 
@@ -64,7 +63,7 @@ smaller than `k`), trailing slots are padded with `id = -1` and `score = -inf`.
 ## Example: SilverTorch (IVF + INT8 ANN)
 
 `SilverTorch` is the scalable default: an IVF index over INT8-quantized embeddings, scored by
-Meta's fused probe+score op. Good for large `N`. Needs the `official` extra.
+Meta's fused probe+score op. Good for large `N`.
 
 ```python
 import torch

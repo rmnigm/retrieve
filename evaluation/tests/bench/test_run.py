@@ -1,7 +1,7 @@
 """CPU end-to-end tests for ``bench.run`` on the tiny fixture of
 ``conftest.py``: ``backend="torch"``, both modes — ``graph`` needs CUDA, so on this box every
 graph entry is the null entry with ``reason: cuda_unavailable`` (the exact path the
-``official`` backend takes on the A100; capture itself is C4's gate) — shrunken latency
+``cuda`` backend takes on the A100; capture itself is C4's gate) — shrunken latency
 windows.
 
 Checked: the JSONL record schema (H §3.2 + §8.2 amendments: key block, ``schema_version``,
@@ -398,7 +398,7 @@ class _Prepared(torch.nn.Module):
     """A module with a query-prep step, as ``SilverTorch``: counts its preps and records what each
     forward received."""
 
-    backend = "official"
+    backend = "cuda"
 
     def __init__(self) -> None:
         super().__init__()
@@ -442,15 +442,15 @@ def test_perf_prepares_the_pool_before_timing_and_records_it(tiny_configs, monke
 
 def test_eager_only_partial_is_per_job(tiny_configs, tmp_path, monkeypatch):
     """Roadmap H6: an eager-only run marks a capturable module's record ``partial`` for
-    ``modes`` and not an ``official`` one, whose graph entry is ``not_capturable`` anyway.
-    Both run the torch path underneath; the ``official`` build is flagged uncapturable."""
+    ``modes`` and not an uncapturable one, whose graph entry is ``not_capturable`` anyway.
+    Both run the torch path underneath; the ``cuda``-labelled build is flagged uncapturable."""
     job = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=[NONE_SWEEP])[0]
-    jobs = [dataclasses.replace(job, backend=b) for b in ("triton", "official")]
+    jobs = [dataclasses.replace(job, backend=b) for b in ("triton", "cuda")]
     real_build = run.build_module
 
     def build(job, *a, **kw):
         m = real_build(dataclasses.replace(job, backend="torch"), *a, **kw)
-        if job.backend == "official":
+        if job.backend == "cuda":
             m.capturable = False
         return m
 
@@ -460,7 +460,7 @@ def test_eager_only_partial_is_per_job(tiny_configs, tmp_path, monkeypatch):
     recs = {r["backend"]: r for r in _records(out / "e2e" / "tiny-d64.jsonl")}
     assert recs["triton"]["status"] == "partial"
     assert recs["triton"]["partial_reasons"] == ["modes"]
-    assert recs["official"]["status"] == "ok" and recs["official"]["partial_reasons"] is None
+    assert recs["cuda"]["status"] == "ok" and recs["cuda"]["partial_reasons"] is None
 
 
 def test_append_record_writes_valid_json_for_non_finite_and_tensors(tmp_path):
@@ -667,7 +667,7 @@ class _Tied(torch.nn.Module):
 
 def test_canonical_ids_hash_ignores_the_order_of_tied_ids():
     """Follow-up 1: a tied pair in two orders hashes differently exactly (``ids_sha256``, the
-    eager-vs-graph gate) and equal canonically (``ids_sha256_canon``, official vs Triton:
+    eager-vs-graph gate) and equal canonically (``ids_sha256_canon``, cuda vs Triton:
     rows re-ordered by score desc, then id asc); a real id difference changes both."""
     pool = torch.zeros(10, 2, 8)
     a, b = run.ids_sha256(_Tied(False), pool, None), run.ids_sha256(_Tied(True), pool, None)
@@ -883,7 +883,7 @@ def test_parity_spill_holds_int32_ids_past_2_24_and_flags_a_shape_mismatch(tiny_
     z = np.load(spill)
     assert z["ids"].dtype == np.int32 and z["scores"].dtype == np.float32
     assert torch.equal(torch.from_numpy(z["ids"]).long(), ids)
-    other = dataclasses.replace(job, backend="official")
+    other = dataclasses.replace(job, backend="cuda")
     out = run.parity(tmp_path, other, {}, ids, sc, [2, 3])
     assert out["parity"] == "vs_torch" and out["jaccard_vs_first@3"] == 1.0
     assert out["score_max_abs_diff"] == 0.0
@@ -893,12 +893,12 @@ def test_parity_spill_holds_int32_ids_past_2_24_and_flags_a_shape_mismatch(tiny_
 
 
 def test_score_path_arms_share_the_triton_parity_spill(tiny_configs, tmp_path):
-    """h2h's official arms carry ``score_path`` in ``params``; the spill hash drops it with
+    """h2h's cuda arms carry ``score_path`` in ``params``; the spill hash drops it with
     ``backend``, so they compare against the triton reference instead of each writing one."""
     job = _jobs(tiny_configs, algos=["linr_v1_filter_mask"], sweeps=["c0"])[0]
     ids, sc = torch.tensor([[0, 1], [2, 3]]), torch.tensor([[1.0, 0.5], [0.9, 0.1]])
     assert run.parity(tmp_path, job, {}, ids, sc, [2])["parity"] == "reference"
-    off = dataclasses.replace(job, backend="official")
+    off = dataclasses.replace(job, backend="cuda")
     for sp in ("fp16", "int32"):
         out = run.parity(tmp_path, off, {"score_path": sp}, ids, sc, [2])
         assert out["parity"] == "vs_torch" and out["jaccard_vs_first@2"] == 1.0

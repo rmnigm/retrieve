@@ -56,7 +56,7 @@ RUN uv python install ${PYTHON_VERSION} \
     && uv sync --frozen --python ${PYTHON_VERSION} --no-install-workspace \
         --all-packages --all-groups --no-install-package silvertorch \
     && MAX_JOBS=${MAX_JOBS} uv sync --frozen --python ${PYTHON_VERSION} --no-install-workspace \
-        --all-packages --all-groups --extra official \
+        --all-packages --all-groups \
     && uv cache clean \
     && /venvs/retrieve/bin/python -c "import torch, triton, silvertorch; print(torch.__version__, triton.__version__)"
 

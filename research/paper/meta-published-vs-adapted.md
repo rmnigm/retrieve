@@ -4,7 +4,7 @@ created: 2026-10-11
 updated: 2026-10-12
 type: comparison
 tags: [paper]
-sources: [official-fork/, research/validation.md, research/artifacts/hub-index.md, research/paper/reproduction-deviations.md]
+sources: [silvertorch/, research/validation.md, research/artifacts/hub-index.md, research/paper/reproduction-deviations.md]
 ---
 
 # Meta's SilverTorch: as published vs adapted
@@ -22,7 +22,7 @@ sources: [official-fork/, research/validation.md, research/artifacts/hub-index.m
 > and why, grouped by the defect in the published code each change removes,
 > and the parity gate that holds the adapted code to the published code.
 > The per-change list (files, mechanism, commit) has one home,
-> [`official-fork/CHANGES.md`](../../official-fork/CHANGES.md); it is not restated here.
+> [`silvertorch/CHANGES.md`](../../silvertorch/CHANGES.md); it is not restated here.
 > Meta's code as published is the reference column of this page, not an arm
 > of the study. The comparison the study makes is SilverTorch (adapted)
 > against LiNR ([claims](claims.md)).
@@ -32,15 +32,19 @@ sources: [official-fork/, research/validation.md, research/artifacts/hub-index.m
 | part | whose | notes |
 |---|---|---|
 | base | Meta: `meta-recsys/silvertorch`, vendored unmodified at `21aa35e`, then synced to upstream `main` at `22c2007` | `22c2007` is one upstream commit (CCCL 3 compatibility in the bloom indexer); on CUDA 12.8 it compiles to the same path as `21aa35e` |
-| changes | ours, each a row of `official-fork/CHANGES.md` with a gate | [§2](#2-what-the-adaptation-changed) |
+| changes | ours, each a row of `silvertorch/CHANGES.md` with a gate | [§2](#2-what-the-adaptation-changed) |
 | licence | Apache-2.0, as upstream: Meta's `LICENSE` verbatim, every upstream header kept, a "Modified by the retrieve authors" line in each changed file (§4(b)); upstream ships no `NOTICE` | [release §2](release-and-licenses.md#2-third-party-code) |
 | phase 1 (k-means, int8 global codes, top-`n_probe` probe selection) and query preparation | ours, shared with `backend="official"` | the same index and the same probes in both columns of this page |
 | the reference | `backend="official"`: Meta's code as published at `21aa35e`, built `-O3` (host code; the shipped `setup.py` builds it at `-O0`, [OF-11](reproduction-deviations.md#5-deviations-in-metas-released-code-against-metas-paper), bit-identical outputs) | the two load in one process (`torch.ops.st.*` and `torch.ops.stfork.*`), so parity and interleaved timing compare them in one process |
 
-In code the adapted version is still the `official-fork/` workspace
-member, package `silvertorch_fork`, `backend="official-fork"`; roadmap
-[RENAME](../roadmap.md#5-rename-the-adapted-backend-becomes-silvertorchs-default)
-gives it SilverTorch's default backend name.
+In code the adapted version is the `silvertorch/` workspace member under
+Meta's own names, package `silvertorch`, ops `torch.ops.st.*`,
+`SilverTorch(backend="cuda")`, its only backend (RENAME, 2026-10-16). The
+gates below were measured while it was `official-fork/` (`silvertorch_fork`,
+`torch.ops.stfork.*`), loading beside Meta's code as published
+(`backend="official"`); the published code left the workspace at RENAME and
+its last parity run against the adapted code (T1 / T6 / C13 bit-exact at
+int32) stands behind the git tag `meta-published-parity-final`.
 
 ## 2. What the adaptation changed
 

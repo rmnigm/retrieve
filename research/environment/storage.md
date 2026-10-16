@@ -129,7 +129,7 @@ export HF_HOME=/scratch/hf
 reloads the pod env file, which sets `UV_PROJECT_ENVIRONMENT=/venvs/retrieve`, so an exported
 override does not survive.
 - A git worktree with its own venv must sync directly:
-  `UV_PROJECT_ENVIRONMENT=/venvs/<name> uv sync --all-packages --all-groups --extra official`.
+  `UV_PROJECT_ENVIRONMENT=/venvs/<name> uv sync --all-packages --all-groups`.
 - Otherwise it re-points the shared venv's editable installs at the worktree.
 - Never print the pod env file to check this. It holds live tokens (AGENTS.md rule 9).
 

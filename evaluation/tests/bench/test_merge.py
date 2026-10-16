@@ -14,7 +14,7 @@ from bench import merge, records
 
 ENV = {"code_version": "cv", "commit": "0000000", "git_branch": "HEAD", "gpu": "cpu",
        "host": "box-a", "started": "2026-10-14T10:00:00+00:00", "dirty": False,
-       "official_build": {"so_sha256": "ab", "so_bytes": 1}}  # fmt: skip
+       "silvertorch_build": {"so_sha256": "ab", "so_bytes": 1}}  # fmt: skip
 KEY = {"dataset": "goodreads", "dim": 128, "inputs": "sasrec-ssm-logq-d128", "suite": "filter",
        "filter_kind": "clause", "sweep": "c0_genre", "algo": "linr_v2", "backend": "triton",
        "params": {}, "seed": 0}  # fmt: skip
@@ -90,7 +90,7 @@ def test_accept_rule_tables_and_manifest(trees, tmp_path):
     recs = records.read_table(out / "records.parquet")
     assert len(recs) == 9 and list(recs[0])[:3] == ["subtree", "cell", "accepted"]
     assert "bloom_fp_rate" not in recs[0] and not any(r["filter_kind"] == "bloom" for r in recs)
-    assert "env_official_build_so_sha256" in recs[0] and "env_official_build" not in recs[0]
+    assert "env_silvertorch_build_so_sha256" in recs[0] and "env_silvertorch_build" not in recs[0]
     by = {(r["subtree"], r["seed"], r["status"], r["line"]): r for r in recs}
     acc = {k: v["accepted"] for k, v in by.items()}
     assert acc == {
@@ -106,7 +106,7 @@ def test_accept_rule_tables_and_manifest(trees, tmp_path):
     x = by["leg-s0-rerun", 0, "ok", 1]
     assert (x["env_host"], x["env_started"]) == ("box-a", "2026-10-14T12:00:00+00:00")
     assert x["tag"] is None  # commit 0000000 is at no tag of this checkout
-    assert x["oracle_recall@100"] == 0.9 and x["env_official_build_so_sha256"] == "ab"
+    assert x["oracle_recall@100"] == 0.9 and x["env_silvertorch_build_so_sha256"] == "ab"
     assert x["env_code_version"] == "cv" and x["cell"] == by["leg-s0", 0, "ok", 1]["cell"]
     assert json.loads(x["params"]) == {} and x["file"] == "filter/goodreads-d128.jsonl"
     timings = records.read_table(out / "timings.parquet")

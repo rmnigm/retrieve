@@ -12,7 +12,7 @@ sources: [retrieve/src/retrieve/modules/filters.py, retrieve/src/retrieve/functi
 This repo reproduces two retrieval papers: SilverTorch (IVF + INT8 ANN with a bloom or exact
 attribute filter inline) at
 [retrieve/src/retrieve/modules/silvertorch.py](../../retrieve/src/retrieve/modules/silvertorch.py),
-on Meta's official code, adapted (its bloom is Meta's bundle bloom with a configured width and an
+on Meta's official code, adapted (`backend="cuda"`; its bloom is Meta's bundle bloom with a configured width and an
 exact recheck, its exact mode runs inside Meta's search op;
 [decisions](../../research/decisions.md#goal-and-scheduling)); and LiNR (V1 fp16 dense / V2 sparse
 pre-filter / V3 1-bit OPORP) at

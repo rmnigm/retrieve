@@ -274,6 +274,11 @@ def _merge(base: Any, override: Any) -> Any:
 
 def _check_params(where: str, algo: str, fk: str, backend: str, build: dict, query) -> None:
     """The params that mean something on one arm only (raising, never ignored)."""
+    if "bloom_path" in build:
+        raise ConfigError(
+            f"{where}: bloom_path left with Meta's code as published (RENAME); SilverTorch "
+            "evaluates the bloom over the probed clusters only"
+        )
     try:
         official_config(algo, fk, backend, build)
     except ValueError as e:

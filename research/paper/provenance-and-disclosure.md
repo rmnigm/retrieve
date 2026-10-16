@@ -50,10 +50,10 @@ datasets.
 | PyTorch | **2.10.0+cu128** (the wheel is built against CUDA 12.8) |
 | Triton | **3.6.0** |
 | CUDA toolkit | **12.8** (`nvcc` 12.8.93) from the pod image ([`infra/runpod/Dockerfile`](../../infra/runpod/Dockerfile)), matching the wheel's CUDA 12.8 |
-| Meta's SilverTorch, adapted (the study's arm) | the `official-fork/` workspace member (`silvertorch-fork`, ops `torch.ops.stfork.*`): Meta's code vendored at `21aa35e`, synced to upstream `22c2007`, with our changes listed in its `CHANGES.md`; built `-O3`; review ACCEPT at `1f6fed8` ([meta-published-vs-adapted](meta-published-vs-adapted.md)) |
-| Meta's SilverTorch as published (the parity reference) | `silvertorch` **1.0.0** at commit **`21aa35e28b6dd9a91e9ee35efb0857715e86bda7`** (`meta-recsys/silvertorch`, Apache-2.0), installed through the repo's `official` extra. Build: **2 m 17 s**, `ninja`, 10 translation units, `TORCH_CUDA_ARCH_LIST="8.0"`, `MAX_JOBS=32` |
+| Meta's SilverTorch, adapted (the study's arm) | the `silvertorch/` workspace member (package `silvertorch`, ops `torch.ops.st.*`; `official-fork/` / `silvertorch-fork` / `stfork` until RENAME): Meta's code vendored at `21aa35e`, synced to upstream `22c2007`, with our changes listed in its `CHANGES.md`; built `-O3`; review ACCEPT at `1f6fed8` ([meta-published-vs-adapted](meta-published-vs-adapted.md)) |
+| Meta's SilverTorch as published (the parity reference) | `silvertorch` **1.0.0** at commit **`21aa35e28b6dd9a91e9ee35efb0857715e86bda7`** (`meta-recsys/silvertorch`, Apache-2.0), installed through the repo's `official` extra until RENAME, when it left the workspace (tag `meta-published-parity-final` holds the last parity run). Build: **2 m 17 s**, `ninja`, 10 translation units, `TORCH_CUDA_ARCH_LIST="8.0"`, `MAX_JOBS=32` |
 | linter | `ruff` **0.15.6** |
-| environment manager | one `uv` workspace, one lockfile. **`uv sync --extra official --all-packages`** — the plain `--extra official` at the workspace root *uninstalls* `pytest`, which lives in the members' `dev` groups |
+| environment manager | one `uv` workspace, one lockfile. **`uv sync --all-packages`** — `--all-packages` keeps `pytest`, which lives in the members' `dev` groups (until RENAME Meta's published extension needed `--extra official`) |
 | our code | the library is pinned per record by `env.code_version`, the **git tree hash of `retrieve/src/retrieve`**, alongside `env.commit`, `env.git_branch` and two dirtiness flags (§3) |
 
 Build friction worth disclosing, because a reader reproducing the "official"
@@ -247,7 +247,7 @@ dataset ([deviations HB-2](reproduction-deviations.md#6-deviations-of-our-harnes
 ## 8. Reproducing the environment
 
 ```bash
-uv sync --extra official --all-packages   # workspace + Meta's ops; --all-packages keeps pytest
+uv sync --all-packages   # workspace incl. Meta's code, adapted; --all-packages keeps pytest
 uv run --directory retrieve pytest tests/ -x -q             # library suite, GPU
 cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest tests/ -q   # harness suite, CPU-only by construction
 ```

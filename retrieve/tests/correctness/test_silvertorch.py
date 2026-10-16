@@ -1,9 +1,8 @@
-"""SilverTorch correctness: IVF + INT8 ANN with the optional bloom / exact filter, on both
-official backends (``official``: Meta's code as published; ``official-fork``: the adapted code).
-Fixtures shrink the paper's eval (D=128, K=2048, n_probe=64) to sizes that fit on one GPU.
-Every cell skips when the ``official`` extra is not installed and fails when the package is
-present but broken. The bit-exact gates between the two backends and against an independent
-oracle live in ``tests/parity/test_official.py``.
+"""SilverTorch correctness: IVF + INT8 ANN with the optional bloom / exact filter on Meta's
+SilverTorch code, adapted (``backend="cuda"``). Fixtures shrink the paper's eval (D=128, K=2048,
+n_probe=64) to sizes that fit on one GPU. Every cell skips when the ``silvertorch`` extension is
+not installed and fails when the package is present but broken. The bit-exact gates against an
+independent oracle live in ``tests/parity/test_official.py``.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ import pytest
 import torch
 
 from retrieve.indexing.quantize import quantize_int8_global
-from retrieve.interfaces import OFFICIAL_BACKENDS
+from retrieve.interfaces import SILVERTORCH_BACKENDS
 from retrieve.modules.knn import FullScanKNN
 from retrieve.modules.silvertorch import (
     OfficialConfig,
@@ -39,13 +38,8 @@ N_LISTS, N_PROBE = 64, 8
 M_BITS, K_HASH = 512, 5
 C, A_MAX = 2, 2
 
-BACKENDS = list(OFFICIAL_BACKENDS)
+BACKENDS = list(SILVERTORCH_BACKENDS)
 INT32 = OfficialConfig(score_path="int32")
-
-
-def _m_bits(backend: str) -> int | None:
-    """Meta's own width on ``official`` (``m_bits`` optional), the configured width otherwise."""
-    return None if backend == "official" else M_BITS
 
 
 @pytest.fixture(scope="module")
@@ -58,13 +52,13 @@ def data():
 
 
 def _build(with_attrs: bool, data, backend: str, **overrides):
-    require_official(backend)
+    require_official()
     kw = {
         "k": K,
         "n_lists": N_LISTS,
         "n_probe": N_PROBE,
         "filter_mode": "bloom",
-        "m_bits": _m_bits(backend),
+        "m_bits": M_BITS,
         "k_hash": K_HASH,
         "n_iter": 3,
         "backend": backend,
@@ -76,7 +70,7 @@ def _build(with_attrs: bool, data, backend: str, **overrides):
 
 
 def _build_no_bloom(data, backend: str, **overrides):
-    require_official(backend)
+    require_official()
     kw = {"k": K, "n_lists": N_LISTS, "n_probe": N_PROBE, "n_iter": 3, "backend": backend}
     kw.update(overrides)
     m = SilverTorch(**kw)
@@ -85,7 +79,7 @@ def _build_no_bloom(data, backend: str, **overrides):
 
 
 def _build_exact(data, backend: str, clause_is_reverse=None, **overrides):
-    require_official(backend)
+    require_official()
     kw = {
         "k": K,
         "n_lists": N_LISTS,
@@ -166,17 +160,11 @@ class TestShape:
         assert m.clause_is_reverse.dtype == torch.bool
         assert m.clause_is_reverse.shape == (C,)
         assert not hasattr(m, "bloom_index")
-        if backend == "official":
-            # The attrs live in the cluster-sorted doc space, like the codes.
-            assert m.item_clause_attrs.dtype == torch.long
-            assert m.item_clause_attrs.shape == (N, C, A_MAX)
-            assert torch.equal(m.item_clause_attrs, data["attrs"][m.sort_perm])
-        else:
-            # The adapted code's clause-major int32 slots (kernels.md § official-fork).
-            assert m.item_clause_attrs.dtype == torch.int32
-            assert m.item_clause_attrs.shape[1] == N
-            assert m.clause_slots.shape == (C + 1,)
-            assert int(m.clause_slots[-1]) == m.item_clause_attrs.shape[0]
+        # The clause-major int32 slots over the cluster-sorted docs (kernels.md § cuda).
+        assert m.item_clause_attrs.dtype == torch.int32
+        assert m.item_clause_attrs.shape[1] == N
+        assert m.clause_slots.shape == (C + 1,)
+        assert int(m.clause_slots[-1]) == m.item_clause_attrs.shape[0]
 
 
 class TestParamValidation:
@@ -203,9 +191,9 @@ class TestParamValidation:
             SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="invalid")  # type: ignore[arg-type]
 
     def test_unknown_backend_rejected(self):
-        """``SilverTorchBackend`` is the two official backends; the deleted ``triton`` / ``torch``
-        values raise like any other string."""
-        for backend in ("triton", "torch", "cuda"):
+        """``SilverTorchBackend`` is ``cuda``; the deleted ``triton`` / ``torch`` / ``official`` /
+        ``official-fork`` values raise like any other string."""
+        for backend in ("triton", "torch", "official", "official-fork"):
             with pytest.raises(ValueError, match="unknown backend"):
                 SilverTorch(k=5, n_lists=8, n_probe=4, backend=backend)  # type: ignore[arg-type]
 
@@ -218,7 +206,7 @@ class TestParamValidation:
             m2.register_index(data["embs"])
 
     def test_prepared_filter_without_filter_rejected(self, data):
-        m = _build_no_bloom(data, "official-fork")
+        m = _build_no_bloom(data, "cuda")
         qa = torch.zeros(B, 1, dtype=torch.long, device="cuda")
         with pytest.raises(ValueError, match="prepare_queries needs"):
             m.prepare_queries(qa)
@@ -302,46 +290,16 @@ class TestEquivalence:
         assert torch.allclose(ex_sorted, nb_sorted, atol=1e-3)
 
 
-class TestCrossBackend:
-    """The adapted code and the published code agree through the whole layer on ``none`` /
-    ``exact`` at int32: scores ``torch.equal``, ids up to ties (the same index on both, since
-    ``KMeans.fit`` is reproducible). ``test_official.py`` T1 / T6 are the op-level gates and run
-    the transplanted-index version."""
-
-    @staticmethod
-    def _pair(build, **kw):
-        require_official("official")
-        require_official("official-fork")
-        return build(backend="official-fork", official=INT32, **kw), build(
-            backend="official", official=INT32, **kw
-        )
-
-    def test_no_filter(self, data):
-        fork, pub = self._pair(lambda **kw: _build_no_bloom(data, **kw))
-        ids_f, sc_f = fork(data["query"])
-        ids_p, sc_p = pub(data["query"])
-        assert torch.equal(sc_f, sc_p)
-        assert_ids_equal_up_to_ties(ids_f, ids_p, sc_p)
-
-    @pytest.mark.parametrize("reverse", [False, True])
-    def test_with_exact(self, data, reverse):
-        rev = torch.tensor([True, False], dtype=torch.bool, device="cuda") if reverse else None
-        fork, pub = self._pair(lambda **kw: _build_exact(data, clause_is_reverse=rev, **kw))
-        ids_f, sc_f = fork(data["query"], fork.prepare_queries(data["q_attrs"]))
-        ids_p, sc_p = pub(data["query"], pub.prepare_queries(data["q_attrs"]))
-        assert torch.equal(sc_f, sc_p)
-        assert_ids_equal_up_to_ties(ids_f, ids_p, sc_p)
-
+class TestScorePath:
     def test_default_fp16_ranks_like_int32(self, data):
-        """Each backend's default fp16 path against its own int32 path: id sets at
-        ``atol=rtol=1e-3`` (T2 bounds the fp16 rounding at 2^-10 relative)."""
-        for backend in BACKENDS:
-            fp16 = _build_exact(data, backend=backend)
-            int32 = _build_exact(data, backend=backend, official=INT32)
-            ids_h, sc_h = fp16(data["query"], fp16.prepare_queries(data["q_attrs"]))
-            ids_i, sc_i = int32(data["query"], int32.prepare_queries(data["q_attrs"]))
-            for b in range(B):
-                assert_topk_id_sets_match(ids_h, sc_h, ids_i, sc_i, b, atol=1e-3, rtol=1e-3)
+        """The default fp16 path against the int32 path: id sets at ``atol=rtol=1e-3`` (T2 bounds
+        the fp16 rounding at 2^-10 relative). The bit-exact gates are ``test_official.py``'s."""
+        fp16 = _build_exact(data, backend="cuda")
+        int32 = _build_exact(data, backend="cuda", official=INT32)
+        ids_h, sc_h = fp16(data["query"], fp16.prepare_queries(data["q_attrs"]))
+        ids_i, sc_i = int32(data["query"], int32.prepare_queries(data["q_attrs"]))
+        for b in range(B):
+            assert_topk_id_sets_match(ids_h, sc_h, ids_i, sc_i, b, atol=1e-3, rtol=1e-3)
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -522,7 +480,7 @@ class TestBuilder:
     def _builder(backend, filter_mode, **overrides):
         kw = {"k": K, "n_lists": N_LISTS, "n_probe": N_PROBE, "n_iter": 3, "backend": backend}
         if filter_mode == "bloom":
-            kw.update(m_bits=_m_bits(backend), k_hash=K_HASH)
+            kw.update(m_bits=M_BITS, k_hash=K_HASH)
         kw.update(filter_mode=filter_mode, **overrides)
         return SilverTorchBuilder(**kw)
 
@@ -535,7 +493,7 @@ class TestBuilder:
     @pytest.mark.parametrize("backend", BACKENDS)
     @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
     def test_state_dict_reproduces_a_fresh_build(self, data, backend, filter_mode):
-        require_official(backend)
+        require_official()
         src = self._fresh(data, backend, filter_mode)
         twin = self._builder(backend, filter_mode).set_state_dict(src.state_dict()).build()
         again = self._fresh(data, backend, filter_mode)
@@ -552,25 +510,25 @@ class TestBuilder:
         assert_ids_equal_up_to_ties(ids_t, ids_a, sc_a)
 
     def test_chain(self, data):
-        require_official("official-fork")
+        require_official()
         rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
         m = (
             SilverTorchBuilder(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3, filter_mode="exact")
             .set_item_embeddings(data["embs"])
             .set_item_attributes(data["attrs"], rev)
-            .set_backend("official-fork", official=INT32)
+            .set_backend("cuda", official=INT32)
             .set_device(torch.device("cuda"))
             .build()
         )
-        assert isinstance(m, SilverTorch) and m.backend == "official-fork"
+        assert isinstance(m, SilverTorch) and m.backend == "cuda"
         assert m.filter_mode == "exact" and m.official is INT32
         assert torch.equal(m.clause_is_reverse, rev)
         ids, _ = m(data["query"], m.prepare_queries(data["q_attrs"]))
         assert ids.shape == (B, K)
 
     def test_build_needs_exactly_one_source(self, data):
-        require_official("official-fork")
-        b = self._builder("official-fork", "none")
+        require_official()
+        b = self._builder("cuda", "none")
         with pytest.raises(ValueError, match="exactly one"):
             b.build()
         b.set_item_embeddings(data["embs"]).set_state_dict({})
@@ -583,7 +541,7 @@ class TestKMeansInit:
     ([decisions](research/decisions.md § Library): every recorded number was taken on it)."""
 
     def test_default_is_random(self):
-        require_official("official-fork")
+        require_official()
         assert SilverTorch(k=1, n_lists=1, n_probe=1).kmeans_init == "random"
 
     @pytest.mark.parametrize("backend", BACKENDS)
@@ -602,7 +560,7 @@ class TestKMeansInit:
 class TestEdgeCases:
     def test_n_lists_equals_n(self, data, backend):
         """Degenerate clustering (one item per cluster); full probe → recall ≈ 1."""
-        require_official(backend)
+        require_official()
         small_n = 256
         embs = data["embs"][:small_n]
         m = SilverTorch(k=K, n_lists=small_n, n_probe=small_n, n_iter=2, backend=backend)
@@ -617,9 +575,9 @@ class TestEdgeCases:
 
 
 class TestFewSurvivorsSentinel:
-    """``-inf`` slots carry the ``-1`` id on both backends (``interfaces.py`` names ``-1 / -inf``
-    as the paired "no item" sentinels), so on a row with fewer than K survivors the backends'
-    ``ids`` tensors compare directly. The index is built so the survivor count is known: one
+    """``-inf`` slots carry the ``-1`` id (``interfaces.py`` names ``-1 / -inf`` as the paired "no
+    item" sentinels), so on a row with fewer than K survivors the ``ids`` tensors compare
+    directly. The index is built so the survivor count is known: one
     clause, one attribute slot, a value carried by exactly five items, and a query row asking
     for a value no item carries."""
 
@@ -636,7 +594,7 @@ class TestFewSurvivorsSentinel:
         return {"embs": embs, "attrs": attrs, "q_attrs": q_attrs, "query": make_query(3, D)}
 
     def _build_few(self, few, filter_mode, backend):
-        require_official(backend)
+        require_official()
         kw = {
             "k": self.K_SMALL,
             "n_lists": 8,
@@ -647,7 +605,7 @@ class TestFewSurvivorsSentinel:
             "official": INT32,
         }
         if filter_mode == "bloom":
-            kw.update(m_bits=_m_bits(backend), k_hash=K_HASH)
+            kw.update(m_bits=M_BITS, k_hash=K_HASH)
         m = SilverTorch(**kw)
         m.register_index(few["embs"], few["attrs"])
         return m
@@ -667,12 +625,3 @@ class TestFewSurvivorsSentinel:
         if filter_mode == "exact":
             assert bool(dead[2].all()), "row 2 should have no survivors at all"
             assert torch.equal(ids[2], torch.full_like(ids[2], -1))
-
-    def test_adapted_ids_match_published_without_normalisation(self, few):
-        """The two backends' exact-mode ids compare directly, the ``-1`` tails included."""
-        fork = self._build_few(few, "exact", "official-fork")
-        pub = self._build_few(few, "exact", "official")
-        ids_f, sc_f = fork(few["query"], fork.prepare_queries(few["q_attrs"]))
-        ids_p, sc_p = pub(few["query"], pub.prepare_queries(few["q_attrs"]))
-        assert torch.equal(sc_f, sc_p)
-        assert_ids_equal_up_to_ties(ids_f, ids_p, sc_f)

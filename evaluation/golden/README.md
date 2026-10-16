@@ -81,9 +81,11 @@ SilverTorch backends of the time. **That is void**, per H's amendment of
 reference backend (`backend="official"`) and those two backends were
 deleted at B4 once the official parity gate (B2) was green. A golden
 column for a backend that no longer exists would be checked against
-nothing, so it was not produced. The backend axis of the v2 harness is
-`triton | torch | official`; `official` gets its own gate in C4 (jaccard
-≥ 0.99 vs `triton` on one goodreads cell), not a golden comparison here.
+nothing, so it was not produced. The backend axis of the v2 harness was
+`triton | torch | official` (today `triton | torch | cuda`: Meta's code,
+adapted, under its own names since RENAME); `official` got its own gate in
+C4 (jaccard ≥ 0.99 vs `triton` on one goodreads cell), not a golden
+comparison here.
 
 ## Exact commands
 

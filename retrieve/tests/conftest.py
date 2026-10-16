@@ -36,15 +36,14 @@ def pytest_collection_modifyitems(config, items):
                 it.add_marker(skip)
 
 
-def require_official(backend: str = "official") -> None:
-    """Gate the calling test on Meta's official SilverTorch ops (``torch.ops.st.*``,
-    the ``official`` extra), or on our fork of them (``backend="official-fork"``,
-    ``torch.ops.stfork.*``). Two ways it can be absent, and the split is the point:
+def require_official() -> None:
+    """Gate the calling test on the ``silvertorch`` extension (Meta's SilverTorch ops, adapted;
+    ``torch.ops.st.*``). Two ways it can be absent, and the split is the point:
 
     - **Not runnable here** (``silvertorch`` not installed, or no CUDA device) →
-      ``skip``. The suite is expected to run on boxes without the extra.
+      ``skip``. The suite is expected to run on boxes without the extension.
     - **Installed but broken** (``silvertorch`` imports but ``silvertorch._C`` failed
-      to build / load, or the pinned sha lacks an op the adapter calls) → ``fail``
+      to build / load, or the build lacks an op the adapter calls) → ``fail``
       with the loader's message. A build failure that silently skipped would look
       green on the first GPU run.
 
@@ -52,13 +51,13 @@ def require_official(backend: str = "official") -> None:
     from retrieve.ops.official import OfficialMissing, ensure_loaded
 
     try:
-        ensure_loaded(backend)
+        ensure_loaded()
     except OfficialMissing as e:
-        pytest.skip(f"official SilverTorch backend unavailable: {e}")
+        pytest.skip(f"silvertorch unavailable: {e}")
     except ImportError as e:
         pytest.fail(
-            f"{backend}: the package is installed but its ops failed to load — this is a "
-            f"real failure, not a skip:\n{e}",
+            f"silvertorch is installed but its ops failed to load — this is a real failure, "
+            f"not a skip:\n{e}",
             pytrace=False,
         )
 

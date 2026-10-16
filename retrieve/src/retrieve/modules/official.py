@@ -1,7 +1,7 @@
 """Meta's own modules (``silvertorch.modules``: ``BloomIndexSearchModule``,
-``FilterQueryParserModule`` and their builders), re-exported on first access once the official
-extension loads; without the ``official`` extra the access raises ``OfficialMissing`` with the
-install hint. ``SilverTorch(backend="official")`` does not go through these — it calls the ops
+``FilterQueryParserModule`` and their builders), re-exported on first access once the
+``silvertorch`` extension loads; without the package the access raises ``OfficialMissing`` with
+the install hint. ``SilverTorch`` does not go through these — it calls the ops
 (``retrieve.ops.official``) directly."""
 
 from __future__ import annotations

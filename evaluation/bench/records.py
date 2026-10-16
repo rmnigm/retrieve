@@ -122,11 +122,18 @@ def append_record(path: Path, rec: dict[str, Any]) -> None:
         os.fsync(f.fileno())
 
 
+# RENAME (roadmap §5): the adapted SilverTorch was `official-fork` when the study's records were
+# written; `official` (Meta's code as published, no longer in the workspace) keeps its label.
+RENAMED_BACKENDS = {"official-fork": "cuda"}
+
+
 def retired(rec: dict[str, Any]) -> bool:
     """A record (or sample line) of a bloom cell of an algo other than SilverTorch: LiNR's and
     the postfilter's bloom cells left the study and every reader skips them. Also drops the
-    retired ``bloom_fp_rate`` field in place."""
+    retired ``bloom_fp_rate`` field in place and maps a renamed backend to its current name."""
     rec.pop("bloom_fp_rate", None)
+    if "backend" in rec:
+        rec["backend"] = RENAMED_BACKENDS.get(rec["backend"], rec["backend"])
     return rec.get("filter_kind") == "bloom" and rec.get("algo") not in (None, "silvertorch")
 
 

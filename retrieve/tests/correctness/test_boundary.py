@@ -1,7 +1,6 @@
 """The library side of the library / harness contract (docs/system/architecture.md): for each
-algo-level module (``SilverTorch`` on the adapted code, ``LiNRV1``–``LiNRV3`` on ``triton`` and
-``torch``) on a tiny index, the properties the harness measures through. ``official`` is covered
-where the contract names it (``capturable``, ``DISPATCH``); its forward syncs by design."""
+algo-level module (``SilverTorch`` on ``cuda``, ``LiNRV1``–``LiNRV3`` on ``triton`` and ``torch``)
+on a tiny index, the properties the harness measures through."""
 
 from __future__ import annotations
 
@@ -21,14 +20,14 @@ from retrieve import (
     SilverTorchBuilder,
     modules as modules_pkg,
 )
-from retrieve.interfaces import DISPATCH, OFFICIAL_BACKENDS
+from retrieve.interfaces import DISPATCH, SILVERTORCH_BACKENDS
 from tests.conftest import make_attrs, make_index, make_query, make_query_attrs, require_official
 from tests.parity.conftest import assert_ids_equal_up_to_ties
 
 N, D, B, K = 512, 64, 8, 16
 LINR = [LiNRV1, LiNRV2, LiNRV3]
 LINR_BACKENDS = ["triton", "torch"]
-CASES = [(cls, b) for cls in LINR for b in LINR_BACKENDS] + [(SilverTorch, "official-fork")]
+CASES = [(cls, b) for cls in LINR for b in LINR_BACKENDS] + [(SilverTorch, "cuda")]
 ST = {"k": K, "n_lists": 8, "n_probe": 4, "n_iter": 2, "filter_mode": "exact"}
 V3 = {"candidate_pool": 64, "seed": 1}
 
@@ -45,7 +44,7 @@ def data():
 
 def _builder(cls, backend):
     if cls is SilverTorch:
-        require_official(backend)
+        require_official()
         return SilverTorchBuilder(**ST, backend=backend)
     kw = V3 if cls is LiNRV3 else {}
     b = LiNRBuilder(cls.__name__[-2:].lower(), k=K, backend=backend, **kw)
@@ -63,7 +62,7 @@ def _build(cls, backend, data):
 
 class _Shapes(TorchDispatchMode):
     """Records the output shape of every op a forward dispatches. Custom ops are opaque here:
-    it sees a ``retrieve::`` / ``stfork::`` call and its outputs, not the kernel's own buffers."""
+    it sees a ``retrieve::`` / ``st::`` call and its outputs, not the kernel's own buffers."""
 
     def __init__(self):
         super().__init__()
@@ -146,25 +145,19 @@ class TestPerClass:
         assert m.capturable is True
 
 
-def test_capturable_is_false_on_official():
-    require_official()
-    assert SilverTorch(k=1, n_lists=1, n_probe=1, backend="official").capturable is False
-
-
 def test_dispatch_names_every_class_and_backend():
     assert {cls.__name__ for cls in LINR} | {"SilverTorch"} <= set(DISPATCH)
     for name, row in DISPATCH.items():
         assert isinstance(getattr(modules_pkg, name), type), name
-        assert list(row) == ["triton", "torch", *OFFICIAL_BACKENDS]
+        assert list(row) == ["triton", "torch", *SILVERTORCH_BACKENDS]
         for backend in LINR_BACKENDS:
             assert row[backend] in ("triton", "torch", "cublas", None)
-    assert OFFICIAL_BACKENDS == ("official", "official-fork")
-    for ob in OFFICIAL_BACKENDS:
-        assert DISPATCH["SilverTorch"][ob] == ob
-        for cls in LINR:
-            assert DISPATCH[cls.__name__][ob] is None
-            with pytest.raises(ValueError, match="unknown backend"):
-                cls(k=K, filter=ExactAttributeFilter(), backend=ob)
+    assert SILVERTORCH_BACKENDS == ("cuda",)
+    assert DISPATCH["SilverTorch"]["cuda"] == "cuda"
+    for cls in LINR:
+        assert DISPATCH[cls.__name__]["cuda"] is None
+        with pytest.raises(ValueError, match="unknown backend"):
+            cls(k=K, filter=ExactAttributeFilter(), backend="cuda")
     for backend in LINR_BACKENDS:
         assert DISPATCH["SilverTorch"][backend] is None
         with pytest.raises(ValueError, match="unknown backend"):
@@ -176,7 +169,7 @@ def test_dispatch_names_every_class_and_backend():
 
 class TestQueryParams:
     def test_silvertorch_n_probe_revalidates(self, data):
-        m = _build(SilverTorch, "official-fork", data)
+        m = _build(SilverTorch, "cuda", data)
         with pytest.raises(ValueError, match="cannot exceed n_lists"):
             m.set_query_params(n_probe=9)
         m.k = int(m.cluster_sizes.topk(8).values.sum()) + 1  # one past the 8-probe width
@@ -198,7 +191,7 @@ class TestQueryParams:
 
 
 def test_build_timings(data):
-    m = _build(SilverTorch, "official-fork", data)
+    m = _build(SilverTorch, "cuda", data)
     assert list(m.build_timings) == ["kmeans_s", "assemble_s", "quantize_s", "filter_s"]
     assert all(isinstance(v, float) and v >= 0 for v in m.build_timings.values())
     assert m.build_timings["kmeans_s"] > 0

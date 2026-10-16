@@ -18,7 +18,7 @@ from retrieve import (
     SilverTorch,
 )
 from retrieve.interfaces import DISPATCH as LIBRARY_DISPATCH
-from retrieve.interfaces import OFFICIAL_BACKENDS, FilterModule
+from retrieve.interfaces import SILVERTORCH_BACKENDS, FilterModule
 
 ALGOS: dict[str, type[nn.Module]] = {
     "linr_v1_filter_mask": LiNRV1,
@@ -29,17 +29,18 @@ ALGOS: dict[str, type[nn.Module]] = {
 }
 DISPATCH = {
     **LIBRARY_DISPATCH,
-    "Postfilter": {"triton": None, "torch": "cublas", "official": None, "official-fork": None},
+    "Postfilter": {"triton": None, "torch": "cublas", "cuda": None},
 }
 FILTER_KINDS = ("none", "clause", "bloom")
-BACKENDS = ("triton", "torch", *OFFICIAL_BACKENDS)
+BACKENDS = ("triton", "torch", *SILVERTORCH_BACKENDS)
 FILTER_MODE = {"none": "none", "clause": "exact", "bloom": "bloom"}  # filter_kind → filter_mode
 SILVERTORCH_DEFAULTS = {"n_lists": 1024, "n_probe": 24, "n_iter": 10}
 BLOOM_DEFAULTS = {"m_bits": 1024, "k_hash": 5}
+SILVERTORCH_PARAMS = ("score_path", "recheck")  # build params that become the OfficialConfig
 
 
 def filter_backend(backend: str) -> str:
-    return "triton" if backend in OFFICIAL_BACKENDS else backend
+    return "triton" if backend in SILVERTORCH_BACKENDS else backend
 
 
 def _path(algo: str, filter_kind: str, backend: str) -> str | None:
@@ -65,31 +66,21 @@ def is_valid_combo(algo: str, params: dict[str, Any]) -> bool:
 def official_config(
     algo: str, filter_kind: str, backend: str, params: dict[str, Any]
 ) -> OfficialConfig | None:
-    """``bloom_path`` / ``score_path`` / ``recheck`` as an ``OfficialConfig``, ``None`` when all
-    are absent; each key raises on an arm where it means nothing (docs/system/evaluation.md
-    § Algorithms and the `PATHS` table)."""
-    kw = {k: params[k] for k in ("bloom_path", "score_path", "recheck") if k in params}
+    """``score_path`` / ``recheck`` as an ``OfficialConfig``, ``None`` when both are absent; each
+    key raises on an arm where it means nothing (docs/system/evaluation.md § Algorithms and the
+    `PATHS` table)."""
+    kw = {k: params[k] for k in SILVERTORCH_PARAMS if k in params}
     if not kw:
         return None
-    if "bloom_path" in kw and (
-        (algo, filter_kind) != ("silvertorch", "bloom") or backend not in OFFICIAL_BACKENDS
-    ):
+    if algo != "silvertorch" or backend not in SILVERTORCH_BACKENDS:
         raise ValueError(
-            f"bloom_path applies to silvertorch/bloom on the official backends only, got "
-            f"{algo}/{filter_kind}/{backend}"
+            f"{' / '.join(kw)} applies to silvertorch on {SILVERTORCH_BACKENDS} only, got "
+            f"{algo}/{backend}"
         )
-    if "score_path" in kw and (algo != "silvertorch" or backend not in OFFICIAL_BACKENDS):
+    if "recheck" in kw and filter_kind != "bloom":
         raise ValueError(
-            f"score_path applies to silvertorch on the official backends only, got {algo}/{backend}"
-        )
-    if "recheck" in kw and (
-        (algo, filter_kind) != ("silvertorch", "bloom")
-        or backend not in OFFICIAL_BACKENDS
-        or (backend == "official" and kw["recheck"])
-    ):
-        raise ValueError(
-            f"recheck applies to silvertorch/bloom on official-fork (false only on official), got "
-            f"{algo}/{filter_kind}/{backend} recheck={kw['recheck']}"
+            f"recheck applies to silvertorch/bloom only, got {algo}/{filter_kind}/{backend} "
+            f"recheck={kw['recheck']}"
         )
     return OfficialConfig(**kw)
 
@@ -139,7 +130,7 @@ def build(
         mode = FILTER_MODE[filter_kind]
         bloom = BLOOM_DEFAULTS if mode == "bloom" else {}
         official = official_config(algo, filter_kind, backend, p)
-        for key in ("bloom_path", "score_path", "recheck"):
+        for key in SILVERTORCH_PARAMS:
             p.pop(key, None)
         module = SilverTorch(
             k=k, filter_mode=mode, seed=seed, backend=backend, official=official,
@@ -167,6 +158,6 @@ def compile_module(module: nn.Module, mode: str) -> nn.Module:
     """``nn.Module.compile`` in place; ``max-autotune`` replays inductor's own CUDA graphs, so
     the module is marked uncapturable (docs/system/evaluation.md § Compiled arms)."""
     module.compile(mode=mode)
-    cls = type(module)  # SilverTorch's capturable is a read-only property: override per instance
+    cls = type(module)  # SilverTorch's capturable is a class attribute: override per instance
     module.__class__ = type(cls.__name__, (cls,), {"capturable": False})
     return module

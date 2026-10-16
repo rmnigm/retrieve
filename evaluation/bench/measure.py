@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-import importlib.metadata
 import importlib.util
 import json
 import os
@@ -128,21 +127,11 @@ def _nvidia_smi(query: str) -> list[str] | None:
     return [v.strip() for v in out.strip().split(",")]
 
 
-def official_commit() -> str | None:
-    """The installed ``silvertorch``'s git commit (PEP 610 ``direct_url.json``), else ``None``."""
-    try:
-        dist = importlib.metadata.distribution("silvertorch")
-    except importlib.metadata.PackageNotFoundError:
-        return None
-    direct = json.loads(dist.read_text("direct_url.json") or "{}")
-    return direct.get("vcs_info", {}).get("commit_id")
-
-
 # written beside the extension by a build recipe that changes Meta's compiler defaults
-OFFICIAL_BUILD_FLAGS = "_build_flags.json"
+BUILD_FLAGS_FILE = "_build_flags.json"
 
 
-def official_build(package: str = "silvertorch") -> dict[str, Any] | None:
+def silvertorch_build(package: str = "silvertorch") -> dict[str, Any] | None:
     """The extension ``package`` would load, found without importing it: path, sha256, size
     and its build flags; ``None`` when the package is absent."""
     spec = importlib.util.find_spec(package)
@@ -150,7 +139,7 @@ def official_build(package: str = "silvertorch") -> dict[str, Any] | None:
         return None
     pkg = Path(next(iter(spec.submodule_search_locations)))
     so = next(iter(sorted(pkg.glob("_C*.so"))), None)
-    flags = pkg / OFFICIAL_BUILD_FLAGS
+    flags = pkg / BUILD_FLAGS_FILE
     return {
         "so_path": so and str(so),
         "so_sha256": so and hashlib.sha256(so.read_bytes()).hexdigest(),
@@ -170,9 +159,7 @@ def provenance() -> dict[str, Any]:
         "cuda": torch.version.cuda,
         "torch": torch.__version__,
         "triton": triton.__version__,
-        "official_commit": official_commit(),
-        "official_build": official_build(),
-        "official_fork_build": official_build("silvertorch_fork"),
+        "silvertorch_build": silvertorch_build(),
         "commit": _git("rev-parse", "--short", "HEAD"),
         "dirty": subtree_dirty(),
         "repo_dirty": repo_dirty(),

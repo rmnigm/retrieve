@@ -310,7 +310,7 @@ def parity(
 ) -> dict[str, Any]:
     """The parity spill (§2.4): write the reference when absent, else compare against it."""
     key = {k: v for k, v in job.key(params).items() if k != "backend"}
-    # score_path picks the official kernel's epilogue, a backend knob: its arms share a spill
+    # score_path picks Meta's scorer's epilogue, a backend knob: its arms share a spill
     key["params"] = {k: v for k, v in key["params"].items() if k != "score_path"}
     h = hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode()).hexdigest()[:20]
     ref = Path(out_dir) / "_parity" / parity_group(job.dataset, job.dim, job.algo) / f"{h}.npz"

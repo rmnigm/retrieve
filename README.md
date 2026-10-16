@@ -4,7 +4,7 @@ GPU retrieval framework for recommender systems (PyTorch + Triton). My master's 
 
 The library half is the package `torchretrieve` (not yet published on PyPI; release is roadmap F4); this repo also holds the training / evaluation harness used in the thesis.
 
-**The study.** A reproducibility study of two industrial GPU retrieval papers: **SilverTorch** (Meta), run as Meta's official SilverTorch code adapted by us (improvements listed in its CHANGES file, each gated bit-exact against the published code), against **LiNR** (LinkedIn) V1–V3, implemented here from the paper's text. Our earlier Triton reimplementation of SilverTorch is not part of the paper or of the released code ([decisions](research/decisions.md#goal-and-scheduling)).
+**The study.** A reproducibility study of two industrial GPU retrieval papers: **SilverTorch** (Meta), run as Meta's official SilverTorch code adapted by us (improvements listed in its CHANGES file, each gated bit-exact against the published code before it left the workspace), against **LiNR** (LinkedIn) V1–V3, implemented here from the paper's text. Our earlier Triton reimplementation of SilverTorch is not part of the paper or of the released code ([decisions](research/decisions.md#goal-and-scheduling)).
 
 ## Layout
 
@@ -12,9 +12,7 @@ This repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/worksp
 
 - [`retrieve/`](retrieve/) — the library: kernels, modules, correctness tests. Package `torchretrieve` (not yet on PyPI); imports as `retrieve`.
 - [`evaluation/`](evaluation/) — training and benchmark harness; depends on `retrieve` editable. Not published.
-- [`official-fork/`](official-fork/) — our fork of Meta's `meta-recsys/silvertorch` (Apache-2.0, Meta's licence and headers kept; changes in [`official-fork/CHANGES.md`](official-fork/CHANGES.md)): package `silvertorch_fork`, ops `torch.ops.stfork.*`, installed by the `official` extra beside the pinned upstream.
-
-A third member, `official-fork/` — Meta's official SilverTorch code, adapted (Apache-2.0, Meta's licence and headers kept) — joins when its review accepts (roadmap META-FORK).
+- [`silvertorch/`](silvertorch/) — Meta's official SilverTorch code (`meta-recsys/silvertorch`), adapted (Apache-2.0, Meta's licence and headers kept; changes in [`silvertorch/CHANGES.md`](silvertorch/CHANGES.md)): package `silvertorch`, ops `torch.ops.st.*`, a dependency of `retrieve/`. Meta's code as published is not in the workspace (its last parity run against the adapted code: tag `meta-published-parity-final`).
 
 Datasets, virtual environments and campaign scratch live *outside* the repo, on
 the GPU pod's container disk (pods are launched with [`infra/runpod/pod.sh`](infra/runpod/pod.sh)) — see [`docs/system/storage.md`](docs/system/storage.md)
@@ -38,7 +36,7 @@ Source-only distribution — Triton kernels JIT-compile on first call. Requires 
 For working on the library or running the evaluation harness:
 
 ```bash
-uv sync --extra official --all-packages   # from this directory — populates ./.venv with both packages installed editable, Meta's official extension and our adapted copy of it (`official-fork/`), and pytest (in the members' dev groups)
+uv sync --all-packages   # from this directory — populates ./.venv with the three members installed editable (the `silvertorch/` extension builds from source) and pytest (in the members' dev groups)
 ```
 
 After `uv sync`, run from anywhere in the workspace:

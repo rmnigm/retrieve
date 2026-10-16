@@ -49,7 +49,7 @@ retrieve/tests/
 │   ├── test_op_boundary.py         (every Triton op rejects a non-contiguous item table with `ValueError`)
 │   ├── test_quantize.py            (int8, OPORP, popcount)
 │   ├── test_retrieval_utils.py     (FullScanKNN, post_filter_topk)
-│   ├── test_silvertorch.py         (SilverTorch × filter_mode {none,bloom,exact} × backend {official-fork,official}; SilverTorchBuilder)
+│   ├── test_silvertorch.py         (SilverTorch × filter_mode {none,bloom,exact} on cuda; SilverTorchBuilder)
 │   ├── test_topk_util.py           (masked_topk / counts_to_valid)
 │   └── test_tune_smoke.py          (one tiny sweep point per tune-kernels spec, all 4; CUDA-gated)
 ├── parity/                # kernel vs pure-torch reference
@@ -61,12 +61,12 @@ retrieve/tests/
 │   ├── test_compact_order.py                (ascending item order, run to run and process to process)
 │   ├── test_fused_masked_knn_topk.py
 │   ├── test_gemv_scores.py
-│   ├── test_official.py                     (Meta's ops as published vs an independent oracle, and the adapted code vs
-│   │                                         the published: gates T1–T7 once per official backend; op schemas pinned)
+│   ├── test_official.py                     (Meta's SilverTorch ops, adapted, vs an independent oracle: the
+│   │                                         upstream-shaped ops and st::search, T1–T6 and the C gates; op schemas pinned)
 │   └── test_oporp_1bit_match_topk.py
 └── compile/               # torch.compile / torch.export gates
         ├── test_linr_compile.py        # compiled LiNR V1–V3 with the exact filter: cudagraph_skips == 0, replays == eager
-    ├── test_official_fork_compile.py # META-FORK compile gate: opcheck on all 16 stfork ops; the official-fork
+    ├── test_silvertorch_compile.py # SilverTorch's compile gate: opcheck on all 16 st ops; the
     │                               #   layer fullgraph, 0 graph breaks, default / reduce-overhead × dynamic,
     │                               #   torch.equal to eager; torch.export
         └── test_export_kernel_ref.py   # torch.export preserves the kernel reference (triton_op); the op-registry gates
@@ -105,11 +105,10 @@ The split is **by purpose**, not by module:
   non-power-of-two case against the oracle at the true width: D = 192 and
   768 (pubmed's), OPORP `W = 3` / `12`.
 - `compile/` answers *"does the compile/export machinery still see the
-  kernels?"*: `test_official_fork_compile.py` runs `torch.library.opcheck` on every `stfork` op,
-  compiles `SilverTorch(backend="official-fork")` `fullgraph` with zero graph breaks in the
+  kernels?"*: `test_silvertorch_compile.py` runs `torch.library.opcheck` on every `st` op,
+  compiles `SilverTorch` `fullgraph` with zero graph breaks in the
   default and `reduce-overhead` modes, `dynamic` False and True, `torch.equal` to eager, and
-  exports it (the published backend is eager-only by contract; `test_official.py` T7 asserts that
-  it refuses to compile);   `test_linr_compile.py` compiles the LiNR variants with the exact filter with the
+  exports it; `test_linr_compile.py` compiles the LiNR variants with the exact filter with the
   harness's `graph` settings, warms up five times, then replays on two new queries:
   `cudagraph_skips == 0`, each replay's scores `torch.equal` to eager on the same inputs, ids up
   to ties (the gate on the compaction kernel being a `custom_op`, [kernels](kernels.md));
@@ -173,16 +172,16 @@ The CUDA gate is implemented as
 `skip` marker if CUDA is missing, except items marked `pytest.mark.cpu`
 (registered in `pyproject.toml`; today only `test_public_api.py`).
 
-A second, narrower gate covers the optional official backend:
+A second, narrower gate covers the `silvertorch` extension:
 
 - `require_official()` — call it from a test that needs
-  `SilverTorch(backend="official")`, Meta's `torch.ops.st.*` ops (the
-  `official` extra). It splits the two ways the extension can be absent,
+  `SilverTorch`, Meta's `torch.ops.st.*` ops (the `silvertorch` workspace
+  member). It splits the two ways the extension can be absent,
   and the split is the point: it skips on `OfficialMissing`
   (`silvertorch` not installed, or no CUDA device — so a CPU-only box
-  collects and skips the whole official surface) and fails on any other
+  collects and skips the whole SilverTorch surface) and fails on any other
   `ImportError` (`silvertorch` imports but its `_C` extension did not
-  build / load, or the pinned sha lacks an op the adapter calls) — a
+  build / load, or the build lacks an op the adapter calls) — a
   build failure that silently skipped would look green on the first GPU
   run. Memoized in the adapter after the first call.
 
@@ -193,8 +192,8 @@ The probe-layout builder, four assertions and the poisoned allocator:
 - `make_probe_family(b, n_lists, max_size, n_probe, *, empty_rate=0.1,
   seed=7)` — a synthetic CSR probe (`ProbeLayout`: distinct `probe_ids`
   per row, `cluster_offsets` with some empty clusters and one at
-  `max_size`, a random `sort_perm`, the compact `width`). `test_official.py`'s two arms and its
-  oracle all score it, so every arm sees the same candidates.
+  `max_size`, a random `sort_perm`, the compact `width`). `test_official.py`'s reference path,
+  `st::search` and its oracle all score it, so every path sees the same candidates.
 
 - `make_exact(n, b, *, c=2, a_max=2, reverse="none", n_vocab=8)` — item
   and query clause attrs plus the reverse flags; `reverse="mixed"` flips
@@ -230,13 +229,13 @@ The probe-layout builder, four assertions and the poisoned allocator:
   allocator fails instead of passing vacuously.
 
 A path that is bit-exact by construction — an integer score (popcount),
-Meta's int8 scorers at int32 (an exact dot, the same two fp32 multiplies on both official
-backends, [kernels.md](kernels.md#numerics)), a kernel against
+Meta's int8 scorers at int32 (an exact dot, the same two fp32 multiplies on every path,
+[kernels.md](kernels.md#numerics)), a kernel against
 itself (config override, row alone vs batch, permutation, compiled vs
 eager) — uses `assert_topk_equal`: any score drift there is a real
 regression, not accumulator-order noise.
 [`test_official.py`](../../retrieve/tests/parity/test_official.py)'s T1
-does the same between the published int32 path, its oracle and the adapted code.
+does the same between the int32 path (upstream-shaped and `search`) and its oracle.
 Only a path that reduces floats in a different order
 (`fused_masked_knn_topk`'s `tl.sum` vs `bmm`, an fp16 backend vs an fp32
 one) uses `assert_topk_matches`, with its tolerance and reason at the
@@ -271,7 +270,7 @@ call site.
   tensor-core accumulator meets an fp32 sum (`PrefilterKNN` torch vs
   Triton, `PostfilterKNN` vs `PrefilterKNN`; measured ≤ 1.1e-6); and
   `atol=rtol=1e-3` where one side scores the fp32 table and the other its
-  fp16 copy (the `B = 1` edge case) or comes from the official fp16 path
+  fp16 copy (the `B = 1` edge case) or comes from Meta's fp16 path
   (T2 bounds it at 2⁻¹⁰ relative).
 - **Module-scope fixtures**: heavy index builds (IVF, LiNR with N>1k)
   use `@pytest.fixture(scope="module")` to amortize across the file.
@@ -296,7 +295,7 @@ module under test.
 | `ExactAttributeFilter.evaluate_mask`| dense broadcast `(item == query.unsqueeze).any(-1).all(-1)` written explicitly in `test_clause_index_all_reverse` |
 | `ExactAttributeFilter.evaluate_indices` | `compact_mask(evaluate_mask(...))` (the ABC default path) |
 
-| `SilverTorch` (Meta's ops)  | `test_official.py`'s `Family.oracle`: per row, the probed positions concatenated, an exact int32 dot of the int8 query, `(dot · q_scale) · global_scale`, `masked_topk`; the adapted code additionally `torch.equal` to the published code on the same index |
+| `SilverTorch` (Meta's ops, adapted)  | `test_official.py`'s `_oracle`: per row, the probed positions concatenated, an exact int32 dot of the int8 query, `(dot · q_scale) · global_scale`, `masked_topk`; the adapted code additionally `torch.equal` to the published code on the same index |
 | `combine_masks`            | iterated `&` of non-`None` inputs |
 | `combine_indices`          | `compact_mask(combine_masks(*[f.evaluate_mask(q)]))` over two exact filters on two attribute tables |
 | `SilverTorch` (no bloom)   | `FullScanKNN` for recall (asserts ≥ 0.85 at full probe) + recall monotone in `n_probe` |
@@ -461,7 +460,7 @@ LiNR V1, V2, V3 plus `SimHashKNN` in both backends.
   `fullgraph` compile tests likewise `assert_topk_equal`.
 
 - `backend` validation: every LiNR class and `ExactAttributeFilter`
-  raise `ValueError("unknown backend …")` for `"official"`, `"cuda"` and a
+  raise `ValueError("unknown backend …")` for `"official"` (deleted), `"cuda"` and a
   typo — `LinrBackend` is `torch | triton`, no silent torch fallback.
 - The composites (`TestComposites`, the composites' bit-exactness gate):
   `LiNRV1` ≡ `PostfilterKNN` + `filter.evaluate_mask`, `LiNRV2` ≡
@@ -475,20 +474,18 @@ LiNR V1, V2, V3 plus `SimHashKNN` in both backends.
 
 ### [`test_silvertorch.py`](../../retrieve/tests/correctness/test_silvertorch.py)
 
-`SilverTorch`, all three filter modes (`"none"`, `"bloom"`, `"exact"`) on both official backends
-(`"official-fork"`, the adapted code; `"official"`, Meta's code as published) in one file. Every
-cell calls `require_official(backend)`, which skips only when the extra is not installed (a
-broken build *fails* the test). The buffer checks read the CSR layout both backends register
-(`cluster_offsets` / `sort_perm` / `inv_perm`, the cluster-sorted `item_codes`,
-`_probe_width`) and the exact attrs in each backend's layout; the bloom is Meta's hash on both,
-so its gates are semantic and live in `test_official.py`.
+`SilverTorch`, all three filter modes (`"none"`, `"bloom"`, `"exact"`) on `cuda` in one file.
+Every cell calls `require_official()`, which skips only when the `silvertorch` extension is not
+installed (a broken build *fails* the test). The buffer checks read the CSR layout the layer
+registers (`cluster_offsets` / `sort_perm` / `inv_perm`, the cluster-sorted `item_codes`,
+`_probe_width`) and the exact attrs in the clause-major layout; the bloom is Meta's hash, so its
+gates are semantic and live in `test_official.py`.
 
 - Output shape `(B, K)` with a prepared filter, without it, on `filter_mode="none"`, and on
   `filter_mode="exact"`; ids long, scores float32.
 - Buffer dtypes/shapes on the no-filter module: `item_codes` int8, centroid / cluster shapes; no
   `bloom_index` / `item_clause_attrs`. The exact-mode module allocates `item_clause_attrs`
-  (`[N, C, A_max]` long on `official`, the clause-major int32 slots plus `clause_slots` on the
-  adapted code) and no bloom buffer.
+  (the clause-major int32 slots plus `clause_slots`) and no bloom buffer.
 - Param validation: unknown `filter_mode`, an unknown or deleted backend (`"triton"`,
   `"torch"`), `m_bits` non-power-of-2, `k_hash <= 0`, partial bloom config (only one of
   `m_bits`/`k_hash` set), bloom params passed with `filter_mode="none"` or `"exact"`,
@@ -596,11 +593,10 @@ each of `SilverTorch` (`filter_mode="exact"`, on the adapted code) and `LiNRV1`�
 - `set_state_dict(...).build()` through the class's builder equals a fresh
   build: key order, buffers, forward.
 - `capturable` is defined on the class (a `bool` or a property), never
-  stamped on the instance; `True` on every tested backend, `False` on
-  `SilverTorch(backend="official")` (gated by `require_official`).
-- `DISPATCH` names every algo-level class × the four backends (`triton`,
-  `torch`, then `OFFICIAL_BACKENDS`: `official`, `official-fork`), every key
-  is a `retrieve.modules` class, only `SilverTorch` has an official path and it alone has none
+  stamped on the instance; `True` on every tested backend.
+- `DISPATCH` names every algo-level class × the three backends (`triton`,
+  `torch`, then `SILVERTORCH_BACKENDS`: `cuda`), every key
+  is a `retrieve.modules` class, only `SilverTorch` has a `cuda` path and it alone has none
   on `triton` / `torch`, and every `None` cell raises `ValueError("unknown backend")` at
   construction.
 - `set_query_params`: `SilverTorch(n_probe=…)` re-runs the two
@@ -654,7 +650,7 @@ poison** — the scatter writes nothing there
 
 
 | [`test_compact_order.py`](../../retrieve/tests/parity/test_compact_order.py)                 | `clause_compact` | `ops.reference.clause_compact` | the determinism gate: ids **and** counts `torch.equal` in order (ascending item order) over `make_exact` × reverse ∈ {none, mixed} × `(C, A_max)`, at one tile / many tiles / a ragged last tile; the order holds under three non-default tile configs; the same call is `torch.equal` on counts and the `[:counts]` prefix ten launches running and in a fresh interpreter; and **every consumer ignores the tail**: `LiNRV2` (Triton / torch rescoring), `LiNRV3` (Triton / torch) and `combine_indices`, run in a subprocess with the compaction's `torch.empty` poisoned to `-1` and then to `2**40` (past every table), return `torch.equal` results; a consumer that used a tail id would differ, one that gathered through it would fault (hence the subprocess). Goes red with the reference op's `counts` bound removed, or with `LiNRV2` dropping `counts` |
-| [`test_clause_mask.py`](../../retrieve/tests/parity/test_clause_mask.py)                     | `clause_mask`, `clause_mask_packed` | Pure-torch `[B, N, C, A_max]` broadcast inlined as `_ref_mask`; the packed form against `clause_mask` packed by hand and its torch twin | bit-exact via `torch.equal`; covers reverse clauses, all-reverse, all-inactive query, `A_max=1`, `B=1`, `N < BLOCK_N`; packed at `N` 64 / 1000 / 4133 |
+| [`test_clause_mask.py`](../../retrieve/tests/parity/test_clause_mask.py)                     | `clause_mask`| Pure-torch `[B, N, C, A_max]` broadcast inlined as `_ref_mask`; the packed form against `clause_mask` packed by hand and its torch twin | bit-exact via `torch.equal`; covers reverse clauses, all-reverse, all-inactive query, `A_max=1`, `B=1`, `N < BLOCK_N`; packed at `N` 64 / 1000 / 4133 |
 | [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py)               | `clause_compact`            | `ExactAttributeFilter.evaluate_mask(...)` + `compact_mask` (transitively goes through `clause_mask` on CUDA) | rows equal in order (ascending item order); cases for reverse clauses, all-inactive query, no-passing-items, `B=1` grid corner |
 
 | [`test_accumulation.py`](../../retrieve/tests/parity/test_accumulation.py) | `fused_masked_knn_topk`, `oporp_1bit_match_topk_indirect`; the exact LiNR scorers `PostfilterKNN` (± mask) and `PrefilterKNN` (dense, torch and Triton candidates) | **fp64** computation of the same operation on the same inputs, every candidate returned (`k = P`) and mapped back by id | the accumulation-width gate the other parity files cannot be (they compare both sides at the same input dtype, so a width defect cancels). Goodreads-like unnormalised fp16 inputs; the fp32 dot within `1e-4` abs of fp64 where an fp16 tree reduction of the same products is asserted to miss it; the popcount path `torch.equal` to the int64 truth; the LiNR scorers on YFCC-shaped near ties (every row's top-100 inside ~20 fp16 quanta): fp32 scores within `2e-6` of fp64 and the fp64 top-k selected up to ties inside that bound, where an fp16 score of the same dots is asserted to miss (recall < 0.95; measured 0.88 / 0.92) |
@@ -711,7 +707,7 @@ poison** — the scatter writes nothing there
 
 CUDA is required. The whole suite is GPU-gated.
 
-The repo is a uv workspace ([root pyproject](../../pyproject.toml)); `retrieve/`, `evaluation/` and `official-fork/` share a single `.venv` at the workspace root. Running `uv` from inside `retrieve/` discovers the workspace root automatically — no per-subdir sync needed.
+The repo is a uv workspace ([root pyproject](../../pyproject.toml)); `retrieve/`, `evaluation/` and `silvertorch/` share a single `.venv` at the workspace root. Running `uv` from inside `retrieve/` discovers the workspace root automatically — no per-subdir sync needed.
 
 ```bash
 cd retrieve   # or, from the root: uv run --directory retrieve <cmd>

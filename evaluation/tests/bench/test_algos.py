@@ -11,7 +11,6 @@ import torch
 
 from bench import algos as A
 from bench.measure import index_bytes
-from retrieve import OfficialConfig
 
 N, D = 256, 64
 
@@ -42,41 +41,16 @@ def _data(seed: int = 0):
     return x, q, attrs, qa
 
 
-@pytest.mark.parametrize(
-    ("params", "bloom_path"), [({}, "partial"), ({"bloom_path": "partial"}, "partial"),
-                               ({"bloom_path": "full"}, "full")],
-)  # fmt: skip
-def test_official_config_from_bloom_path(params, bloom_path):
-    cfg = A.official_config("silvertorch", "bloom", "official", params)
-    assert (cfg or OfficialConfig()).bloom_path == bloom_path
-    assert (cfg is None) == (params == {})
-
-
-@pytest.mark.parametrize(
-    ("algo", "filter_kind", "backend"),
-    [("silvertorch", "bloom", "torch"), ("silvertorch", "bloom", "triton"),
-     ("silvertorch", "clause", "official"), ("linr_v3", "bloom", "triton")],
-)  # fmt: skip
-def test_official_config_rejects_bloom_path_elsewhere(algo, filter_kind, backend):
-    with pytest.raises(ValueError, match="bloom_path applies to"):
-        A.official_config(algo, filter_kind, backend, {"bloom_path": "full"})
-    assert A.official_config(algo, filter_kind, backend, {"n_probe": 4}) is None
-
-
 def test_official_config_recheck():
     """``recheck`` as a build param: the study runs the bloom with it false."""
-    cfg = A.official_config("silvertorch", "bloom", "official-fork", {"recheck": False})
-    assert cfg.recheck_for("official-fork") is False
-    off = A.official_config("silvertorch", "bloom", "official", {"recheck": False})
-    assert off.recheck is False
-    for algo, fk, backend, value in [
-        ("silvertorch", "bloom", "official", True),
-        ("silvertorch", "clause", "official-fork", False),
-        ("silvertorch", "bloom", "triton", False),
-        ("linr_v1_filter_mask", "bloom", "triton", False),
-    ]:
-        with pytest.raises(ValueError, match="recheck applies to"):
-            A.official_config(algo, fk, backend, {"recheck": value})
+    cfg = A.official_config("silvertorch", "bloom", "cuda", {"recheck": False})
+    assert cfg.recheck is False and cfg.score_path == "fp16"
+    assert A.official_config("silvertorch", "bloom", "cuda", {"n_probe": 4}) is None
+    with pytest.raises(ValueError, match="recheck applies to silvertorch/bloom"):
+        A.official_config("silvertorch", "clause", "cuda", {"recheck": False})
+    for algo, backend in [("silvertorch", "triton"), ("linr_v1_filter_mask", "triton")]:
+        with pytest.raises(ValueError, match="applies to silvertorch on"):
+            A.official_config(algo, "bloom", backend, {"recheck": False})
 
 
 def _check_k_slice(module, call, k_big: int = 8, k_small: int = 3) -> None:
@@ -176,9 +150,9 @@ def test_build_refusals():
     with pytest.raises(ValueError, match="no code path"):
         A.build("linr_v2", x, k=4, backend="torch", filter_kind="none")
     with pytest.raises(ValueError, match="no code path"):
-        A.build("linr_v1_filter_mask", x, k=4, backend="official")
+        A.build("linr_v1_filter_mask", x, k=4, backend="cuda")
     with pytest.raises(ValueError, match="invalid params"):
-        A.build("silvertorch", x, k=4, backend="official-fork", params={"n_lists": 4, "n_probe": 8})
+        A.build("silvertorch", x, k=4, backend="cuda", params={"n_lists": 4, "n_probe": 8})
     assert A.is_valid_combo("silvertorch", {"n_lists": 16, "n_probe": 16})
     assert not A.is_valid_combo("silvertorch", {"n_lists": 16})  # default n_probe=24 > 16
     assert A.is_valid_combo("linr_v3", {"n_probe": 100}) and A.is_valid_combo("silvertorch", {})
@@ -226,7 +200,7 @@ def test_postfilter_refusals():
     x, _, attrs, _ = _data()
     f = A.build_filter("clause", attrs, backend="torch")
     for fk, backend in (("none", "torch"), ("bloom", "torch"), ("clause", "triton"),
-                        ("clause", "official")):  # fmt: skip
+                        ("clause", "cuda")):  # fmt: skip
         with pytest.raises(ValueError, match="no code path"):
             A.build("postfilter", x, k=4, backend=backend, filter_kind=fk, filter_mod=f)
     m = A.build("postfilter", x, k=4, backend="torch", filter_kind="clause", filter_mod=f,

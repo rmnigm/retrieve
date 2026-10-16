@@ -14,8 +14,8 @@ Every kernel of ours is Triton: the LiNR kernels and the filter primitives, flat
 `torch.ops.retrieve.*` when the package is imported (its `__init__.py`); every op has a pure-torch
 twin with the same name and signature in
 [`ops/reference/`](../../retrieve/src/retrieve/ops/reference/) (the `"torch"` backend and the
-parity oracle). `SilverTorch` runs no kernel of ours: its phases 2+3 are Meta's ops, as published
-(`backend="official"`) or adapted (`backend="official-fork"`, the default), behind the adapter in
+parity oracle). `SilverTorch` runs no kernel of ours: its phases 2+3 are Meta's SilverTorch code, adapted
+(`backend="cuda"`), behind the adapter in
 [`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py)
 ([SilverTorch on Meta's ops](#silvertorch-on-metas-ops)). Our earlier Triton reimplementation of
 SilverTorch is deleted ([Deleted backends](#deleted-backends)).
@@ -25,9 +25,8 @@ By domain:
 - LiNR — `fused_masked_knn_topk` (`PrefilterKNN`), `oporp_1bit_match_topk` (`OneBitKNN` /
   `SimHashKNN`), `gemv_scores` (`PostfilterKNN` at `B = 1`; its dense matmul + top-K is otherwise
   pure torch, there being no fusion to win over cuBLAS LtGemm + CUB).
-- filters — `clause_mask` / `clause_mask_scores` / `clause_mask_packed` and `clause_compact`
-  (`ExactAttributeFilter`, and the packed mask `SilverTorch(backend="official",
-  filter_mode="exact")` hands Meta's scorer). The mask/compact split mirrors the filter API split
+- filters — `clause_mask` / `clause_mask_scores` and `clause_compact`
+  (`ExactAttributeFilter`). The mask/compact split mirrors the filter API split
   documented in [filtering.md](filtering.md).
 
 Cross-kernel `@triton.jit` building blocks live in
@@ -83,13 +82,12 @@ All kernels follow the same conventions.
   one launch line → finish. Validation therefore runs on the
   production ops, not just `_impl`. (`gemv_scores` is the exception: one op at a fixed tile, no
   `_impl`, no Config, no prep.)
-- Graph-break behavior. Eight ops are registered across the five Triton kernel files (the
-  official backends register no op of ours; they call `torch.ops.st.*` / `stfork.*`), in two
-  flavours.
+- Graph-break behavior. Seven ops are registered across the five Triton kernel files
+  (`SilverTorch` registers no op of ours; it calls `torch.ops.st.*`), in two flavours.
 
-  **Seven on `@torch.library.triton_op`**, each with a textually-inline
+  **Six on `@torch.library.triton_op`**, each with a textually-inline
   `wrap_triton(_kernel)[grid](**launch.kwargs)` launch: `clause_mask`, `clause_mask_scores`,
-  `clause_mask_packed`, `fused_masked_knn_topk`, `gemv_scores`, `oporp_1bit_match_topk_full`,
+  `fused_masked_knn_topk`, `gemv_scores`, `oporp_1bit_match_topk_full`,
   `oporp_1bit_match_topk_indirect`. The
   decorator stops dynamo from graph-breaking at the wrapper boundary, so
   each layer's full forward captures into one cudagraph_trees graph, and
@@ -855,8 +853,8 @@ OPORP/SimHash parity tests stay bit-exact.
 ### [`quantize_int8`](../../retrieve/src/retrieve/indexing/quantize.py) (`retrieve.indexing`)
 
 Per-row symmetric int8 of the queries, called at query time by the candidate re-rank and the
-official adapter; the adapted code's prep kernel computes the same codes and scales
-([official-fork](#official-fork--our-fork-of-metas-ops)). Codes are `round(x / abs_max * 127)`, so an
+adapter's reference path; `search`'s prep kernel computes the same codes and scales
+([cuda](#cuda--the-adapted-forward)). Codes are `round(x / abs_max * 127)`, so an
 element whose quotient sits on a half-integer flips a code when the
 division is off by one ulp. Eager uses PyTorch's correctly rounded fp32
 division; under `torch.compile`, inductor emits Triton's `/`, which lowers to
@@ -966,10 +964,10 @@ pins it with `assert_topk_equal` (`torch.equal` scores, ids up to ties).
 A divergence means a popcount or packing bug.
 
 **The SilverTorch dequant is one expression in three places.** The bit-exact contract between
-Meta's code as published and the adapted code rests on the left-associated `dot.float() *
-q_scale * global_scale` being written the same way at every site that computes it: the adapter's
-epilogue `_dequant` ([`ops/official/adapter.py`](../../retrieve/src/retrieve/ops/official/adapter.py)),
-the adapted code's fused epilogue (`fork_search_cuda.cu`, the same fp32 multiplies in the same
+the torch oracle, the adapter's reference path and `search` rests on the left-associated
+`dot.float() * q_scale * global_scale` being written the same way at every site that computes it:
+the adapter's epilogue `_dequant` ([`ops/official/adapter.py`](../../retrieve/src/retrieve/ops/official/adapter.py)),
+`search`'s fused epilogue (`fork_search_cuda.cu`, the same fp32 multiplies in the same
 order) and `SilverTorch._forward_candidates`
 ([`modules/silvertorch.py`](../../retrieve/src/retrieve/modules/silvertorch.py)). Reassociating
 any one of them (`dot * (q_scale * global_scale)`) changes the last bit and breaks `torch.equal`
@@ -1001,50 +999,52 @@ items fill with `-inf` / `-1` as before.
 `masked_topk` routes every torch-side top-k through it, so LiNR V1 takes it over its unpadded
 `[B, N]` scores, well under the plain top-k's time on the small datasets and a little under it
 on PubMed ([validation](../../research/validation.md), V1-TOPK). Below the thresholds it is plain
-`torch.topk`. The adapted SilverTorch code has the same
+`torch.topk`. `SilverTorch` has the same
 two-level cut and its own radix select inside `search`
-([official-fork](#official-fork--our-fork-of-metas-ops)).
+([cuda](#cuda--the-adapted-forward)).
 
 ## SilverTorch on Meta's ops
 
 `SilverTorch` runs phase 1 of Algorithm 1 in torch (k-means, the cluster-sorted CSR layout, int8
-quantization, the centroid top-`n_probe`) and phases 2+3 on Meta's ops: as published
-(`backend="official"`, next) or adapted (`backend="official-fork"`, the default; its own section
-follows). Both backends register the same index (`indexing.ivf.csr_layout`): `item_codes` in
-cluster-sorted order, `cluster_offsets [n_lists + 1]`, `cluster_sizes`, `sort_perm` (sorted
-position → original id) and `inv_perm`, with the filter buffers in the same sorted order. A query
-row's probed clusters are laid out back to back, so the scorer's output is `[B, width]` with
-`width = indexing.ivf.probe_width(cluster_sizes, n_probe)`, the sum of the `n_probe` largest
-clusters: a static bound on any row's item count, cached as the Python int
-`SilverTorch._probe_width` and rederived by `set_query_params` and by the load hook.
-`register_index` / `set_query_params` raise unless `width ≥ k`.
+quantization, the centroid top-`n_probe`) and phases 2+3 on Meta's SilverTorch code, adapted:
+`backend="cuda"`, its only backend, the `silvertorch/` workspace member
+([CHANGES](../../silvertorch/CHANGES.md); [§ cuda](#cuda--the-adapted-forward)). The layer
+registers the index (`indexing.ivf.csr_layout`): `item_codes` in cluster-sorted order,
+`cluster_offsets [n_lists + 1]`, `cluster_sizes`, `sort_perm` (sorted position → original id) and
+`inv_perm`, with the filter buffers in the same sorted order. A query row's probed clusters are
+laid out back to back, so the scorer's output is `[B, width]` with `width =
+indexing.ivf.probe_width(cluster_sizes, n_probe)`, the sum of the `n_probe` largest clusters: a
+static bound on any row's item count, cached as the Python int `SilverTorch._probe_width` and
+rederived by `set_query_params` and by the load hook. `register_index` / `set_query_params` raise
+unless `width ≥ k`.
 
-### `official` — Meta's `torch.ops.st.*` kernels as the reference backend
+### Meta's ops
 
 [`ops/official/`](../../retrieve/src/retrieve/ops/official/adapter.py) (`__init__.py`: loader,
-`OfficialConfig`, the upstream constants and `st = torch.ops.st`; `adapter.py`: the rest).
-Not a kernel of ours: an adapter over the ops of
-[meta-recsys/silvertorch](https://github.com/meta-recsys/silvertorch)
-(pinned at `21aa35e`, the `official` extra), selected by
-`SilverTorch(backend="official")`. This section is the *what runs*; the
-upstream facts it relies on were measured by
+`OfficialConfig`, the upstream constants and `st = torch.ops.st`; `adapter.py`: the rest) is an
+adapter over the ops of Meta's [meta-recsys/silvertorch](https://github.com/meta-recsys/silvertorch)
+(vendored at `21aa35e`) as the `silvertorch/` member carries them: the six upstream-shaped ops
+below, called unchanged by the gates' reference path (`official_probe_score`,
+`official_scores_full`, `fused_scores`, the bloom searches over CPU plans), and the adapted
+forward's own ops (`search`, `probe_prep`, the `*_prepared` searches, `bloom_index_build_fixed`;
+[§ cuda](#cuda--the-adapted-forward)). The upstream facts in this section were measured on Meta's
+code as published by
 [`official_facts.py`](../../research/artifacts/official-silvertorch/official_facts.py)
-([artifacts](../../research/artifacts/official-silvertorch/README.md)). Its parity
-gate state is in [validation](../../research/validation.md#library-gates).
+([artifacts](../../research/artifacts/official-silvertorch/README.md)); they hold for the adapted
+ops wherever § cuda does not say otherwise, and the parity gate of the adapted code against the
+published code held bit-exact at int32 up to the tag `meta-published-parity-final`, where the
+published code left the workspace ([validation](../../research/validation.md#library-gates)).
 
-**Layout.** Phase 1 is ours and shared: the same `KMeans`,
-the same `quantize_int8_global` codes, the same centroid top-`n_probe`.
-The official scorer reads the same cluster-sorted CSR every backend
-registers ([above](#silvertorch-on-metas-ops)). Forward passes
-`cluster_ids = probe_ids [B, n_probe]`, `cluster_length =
-cluster_sizes[probe_ids]` and `max_tensor_size_per_row` equal to the
-compact probe width `_probe_width`. The official output is therefore `[B, width]` (rounded up to
-32). Returned indices are sorted
-positions and map back through `sort_perm`. Slots the op never writes
-(pads, filtered docs) carry `indices == -1` and become `-inf` / `-1`.
+**Layout.** Phase 1 is ours: the same `KMeans`, the same `quantize_int8_global` codes, the same
+centroid top-`n_probe`. Meta's scorer reads the cluster-sorted CSR the layer registers
+([above](#silvertorch-on-metas-ops)). It takes `cluster_ids = probe_ids [B, n_probe]`,
+`cluster_length = cluster_sizes[probe_ids]` and `max_tensor_size_per_row` equal to the compact
+probe width `_probe_width`. Its output is therefore `[B, width]` (rounded up to 32). Returned
+indices are sorted positions and map back through `sort_perm`. Slots the op never writes (pads,
+filtered docs) carry `indices == -1` and become `-inf` / `-1`.
 
 **Ops called**, with their schemas as registered upstream
-(`TORCH_LIBRARY_FRAGMENT(st, …)` at `21aa35e`):
+(`TORCH_LIBRARY_FRAGMENT(st, …)` at `21aa35e`; the member registers them under the same strings):
 
 - `fused_kmean_ann(Tensor cluster_offsets, Tensor cluster_ids, Tensor cluster_length,
   Tensor embeddings, Tensor queries, int max_tensor_size_per_row,
@@ -1085,14 +1085,15 @@ positions and map back through `sort_perm`. Slots the op never writes
   `[B·P]`, `first_item_offset_in_column` int8 `[B·P]`, `column_mask_response`
   int64 `[Σ columns]`.
 
-Nothing else upstream is used — no `BloomIndexSearchModule`, no
-`is_topk`, no `*_multiple` sharded variants.
+Nothing else upstream is used by the library — no `BloomIndexSearchModule` (Meta's own
+modules are re-exported for users by `retrieve.modules.official`), no `is_topk`, no
+`*_multiple` sharded variants.
 
 **Scores** (`OfficialConfig.score_path`). `"int32"`:
-`divisor_for_int8=-1` returns the raw int32 dot; the host epilogue
+`divisor_for_int8=-1` returns the raw int32 dot; the epilogue
 `(dot.float() · q_scale[b]) · global_scale` is the same two
-left-associated fp32 multiplies as the adapted code's epilogue, so scores are **bit-identical**
-(the parity contract, [Numerics](#numerics)). `"fp16"`
+left-associated fp32 multiplies as the torch oracle and as `search`'s fused epilogue, so scores are
+**bit-identical** (the parity contract, [Numerics](#numerics)). `"fp16"`
 (default — the instantiation Meta ships for int8 serving, hence the
 timed path): `divisor_for_int8 = default_divisor(D)`, the smallest power
 of two with `127²·D / divisor ≤ 65504` (16 / 32 / 64 at D = 64 / 128 /
@@ -1102,39 +1103,31 @@ q_scale · global_scale`. `per_embedding_scale` is not used: upstream
 casts the int32 dot to fp16 *before* dividing by it, which overflows for
 any realistic `D`.
 
-**Filter modes.** `none` → `fused_kmean_ann`. `exact` → our Triton
-`clause_mask_packed` over the cluster-sorted `item_clause_attrs`, written
-straight as the scorer's `filtering_bit_mask` (int64 `[B, ceil(N/64)]`,
-doc `d` at bit `63 − d % 64` of word `d // 64` — `MASK_BIT_ORDER`, see
-below; no `[B, N]` bool) and passed to `fused_kmean_ann`: phase 2 ours
-(filling a step Meta does not provide) and full-`N`, labelled so in
-every table. `bloom` → **Meta's
-bloom**, not ours: at `register_index`, `attrs_to_features` turns the
-sorted `[N, C, A_max]` attrs into the jagged `(feature_ids int32 [C],
-feature_offsets int64 [N·C+1], feature_values int64)` layout — the
-clause index is the feature id, the same `(clause, value)` keying as our
-salt — and `bloom_index_build(b_multiplier, k)` builds `bloom_index [W]`
-+ `bundle_b_offsets`; in `prepare_queries` (once per batch, outside
-`forward`), `queries_to_expressions` renders each `[C]` query row as
-`"0:v0 AND 1:v1"` (`NOT c:v` for reverse clauses, `""` = match all) and
-`parse_plans` runs Meta's CPU parser. The plans stay on the CPU: Meta's
-search decodes them on the host per call
-(`bloom_index_search_cuda.cu:1045`), so device plans would only add a D2H.
-Per forward, either
-(`bloom_path="partial"`, default — the paper's co-design)
-`bloom_index_search_batch_return_partial_response` over the probed
-clusters feeds `fused_kmean_ann_with_partial_masks`, or
-(`"full"`, the S9 ablation) `bloom_index_search_batch(return_bool_mask=
-False)` over all `N` feeds `fused_kmean_ann(filtering_bit_mask=…)`. The
-search `k` is our `k_hash` (must be ≤ 10: `MAX_K_V2`, a fixed array
-size the upstream kernel never checks), `OfficialConfig.n_stored_hashes`
-(default 7; the ops' `hash_k` argument, renamed because `k_hash` is the
-library-wide name of the search `k`) is the number of raw hashes stored
-per term, `build_k` defaults to the
-search `k`. A bloom index registered without attributes is empty and a
-later query with attributes raises.
+**Filter modes.** `none` → the scorer alone. `exact` → the clauses tested inside `search` over
+the probed docs ([§ cuda](#cuda--the-adapted-forward)); the gates' reference path packs our
+`clause_mask` into the scorer's `filtering_bit_mask` instead (int64 `[B, ceil(N/64)]`, doc `d`
+at bit `63 − d % 64` of word `d // 64` — `MASK_BIT_ORDER`, see below), the full-`N` form
+`fused_kmean_ann` reads. `bloom` → **Meta's bloom**, not ours: at `register_index`,
+`attrs_to_features` turns the sorted `[N, C, A_max]` attrs into the jagged `(feature_ids int32
+[C], feature_offsets int64 [N·C+1], feature_values int64)` layout — the clause index is the
+feature id — and `bloom_index_build(b_multiplier, k)` (or `bloom_index_build_fixed` at the
+configured width, § cuda) builds `bloom_index [W]` + `bundle_b_offsets`; in `prepare_queries`
+(once per batch, outside `forward`), `queries_to_expressions` renders each `[C]` query row as
+`"0:v0 AND 1:v1"` (`NOT c:v` for reverse clauses, `""` = match all) and `parse_plans` runs Meta's
+CPU parser. Meta's searches decode the plans on the host per call
+(`bloom_index_search_cuda.cu:1045`), so on the reference path the plans stay on the CPU; the
+forward uploads them once instead (§ cuda). The search `k` is our `k_hash` (must be ≤ 10:
+`MAX_K_V2`, a fixed array size the upstream kernel never checks), `OfficialConfig.n_stored_hashes`
+(default 7; the ops' `hash_k` argument, renamed because `k_hash` is the library-wide name of the
+search `k`) is the number of raw hashes stored per term, `build_k` defaults to the search `k`. A
+bloom index registered without attributes is empty and a later query with attributes raises.
+Meta's partial-response search over the probed clusters feeding
+`fused_kmean_ann_with_partial_masks` (the paper's co-design) and its full-`N` search feeding
+`fused_kmean_ann(filtering_bit_mask=…)` return the same scores (T5); the forward evaluates the
+bloom over the probed clusters only (§ cuda), and the partial-vs-full ablation (S9 / C5) ran on
+Meta's code as published (records `official`, `params.bloom_path`).
 
-**Bit order — measured, high-first.** The upstream scorer reads mask
+**Bit order — measured, high-first.** Meta's scorer reads mask
 words high-first ("lower doc id put at higher bits",
 `bloom_index_util.cuh`), and the packed bloom output is stored the same
 way; both are constants in the adapter (`MASK_BIT_ORDER`,
@@ -1149,93 +1142,72 @@ the packed output round-trips as a scorer mask — so both constants are
 `OFFICIAL_BIT_ORDER` and T3 asserts the adapter constants equal it,
 with the other order kept as a negative control (nothing scored).
 
-**Eager only.** Every op syncs the host (`repeat_interleave`
-without an output size, `.item()` on cumsums, a per-call host decode and
-pageable upload of the plans), and the partial-response output
-shape is data-dependent, so there is no `torch.compile` or CUDA-graph
-path: `SilverTorch.compile()` raises on this backend and a compiled
-forward raises `RuntimeError` when traced. Measured on the A100
-(`torch.profiler` + fd-2 sync counting): `fused_kmean_ann` is
+**Host syncs in Meta's code as published.** Every published op syncs the host
+(`repeat_interleave` without an output size, `.item()` on cumsums, a per-call host decode and
+pageable upload of the plans), and the partial-response output shape is data-dependent, so the
+published code had no `torch.compile` or CUDA-graph path. Measured on the A100
+(`torch.profiler` + fd-2 sync counting): `fused_kmean_ann` was
 **19 launches and 3 host syncs** per unfiltered forward (only 2 of the
-19 are the scoring kernels; the rest is payload prep — scans, a
+19 the scoring kernels; the rest payload prep — scans, a
 `repeat_interleave`, fills), `fused_kmean_ann_with_partial_masks` 19 / 4,
 the partial-response bloom search 13 / 2 with two H2D plan uploads, so a
-bloom forward is ≈ 32 launches and ≥ 5 syncs (the adapted code: 9-12 launches, none).
-The CPU expression parse (≈ 59 µs per call at B=16) is query
-preparation: it runs in `prepare_queries`, outside the timed forward,
-and the harness records it as `query_prep_ms`
-([evaluation](evaluation.md#query-preparation)). T7 records the forward's
-syncs with the filter already prepared.
+bloom forward ≈ 32 launches and ≥ 5 syncs. The adapted code's forward has none
+([§ cuda](#cuda--the-adapted-forward), C3 / C4: 9-12 launches). The sync sites, in the
+upstream-shaped ops the gates still call: `fused_kmean_ann` reads `remaining_docs` back
+(`fused_kmean_ann_cuda.cu:465`), the partial scorer its warp totals (`:2054, :2072`), the partial
+search its chunk sums (`bloom_index_search_cuda.cu:1495`), both searches decode the plans on the
+host per call (`:1045`); C3 / C4 removed them from the member's build. The CPU expression parse
+(≈ 59 µs per call at B=16) is query preparation: it runs in `prepare_queries`, outside the timed
+forward, and the harness records it as `query_prep_ms`
+([evaluation](evaluation.md#query-preparation)). Meta's released `setup.py` compiles the host side
+of its `.cu` files at gcc `-O0` (OF-11); the member's compiles at `-O3`, bit-identical and no
+slower ([OFFICIAL-REWORK](../../research/artifacts/official-rework/README.md)).
 
-**Run as Meta intends (OFFICIAL-REWORK).** Everything query-side runs in
-`prepare_queries`, outside the timed forward:
-- **bloom:** the expressions are rendered and parsed into CPU plans. On the
-  partial path there is one plan per distinct expression, plus a device
-  row → plan index (`query_plan_index`, which Meta's partial search
-  accepts); Meta's full search takes one plan per row.
-- **exact:** the int64 attrs.
+**Epilogue (OFFICIAL-REWORK).** Everything query-side runs in `prepare_queries`, outside the
+timed forward: bloom → the expressions rendered and parsed, one plan per distinct expression plus
+a device row → plan index (`query_plan_index`, which Meta's partial search accepts); exact → the
+int32 query attrs. The forward is the probe (centroid matmul + `topk`), Meta's search and scorer,
+then a top-k on the scorer's raw `[B, M]` (int32 dots or `fp16(dot / divisor)`, pads at the
+dtype's minimum) with only the `[B, k]` winners dequantized and mapped through `sort_perm`
+(`official_probe_score`, the reference path; fused into `search` on the forward). Dequantizing
+multiplies by positive scales, so the winners and their scores are bit-identical to dequantizing
+every slot first, ties aside. Upstream has no top-k inside the scorer: its tests sort the compact
+output themselves. `is_topk` is a separate op, a full row sort plus a `≥ kth` membership mask
+whose ties exceed k, so it is not used.
 
-The forward is Meta's ops plus our glue:
-- the probe (centroid matmul + `topk`);
-- **ours, filling a step Meta does not provide:** `clause_mask_packed` for
-  exact;
-- Meta's search and scorer;
-- **"Epilogue":** a top-k on the scorer's raw `[B, M]` (int32 dots or
-  `fp16(dot / divisor)`, pads at the dtype's minimum), then only the
-  `[B, k]` winners are dequantized and mapped through `sort_perm`.
+### `cuda` — the adapted forward
 
-Dequantizing multiplies by positive scales, so the winners and their scores
-are bit-identical to dequantizing every slot first, ties aside.
+[`silvertorch/`](../../silvertorch/CHANGES.md) is a uv workspace member: Meta's
+`meta-recsys/silvertorch` vendored at `21aa35e`, synced to upstream `22c2007`, Apache-2.0 with
+Meta's `LICENSE` and headers and one "Modified by the retrieve authors" line per changed file,
+under Meta's own names (distribution and package `silvertorch`, ops `torch.ops.st.*`, C++
+namespace `st::ops`). `CHANGES.md` lists every change; each has its gate row in
+[validation](../../research/validation.md#meta-fork-backendofficial-fork), measured when the
+member was `official-fork/` (package `silvertorch_fork`, ops `torch.ops.stfork.*`) and loaded
+beside Meta's published package for the parity gates; the published code left the workspace at
+RENAME and the member took Meta's names back ([Deleted backends](#deleted-backends)).
+`SilverTorch(backend="cuda")`, the default and only value, runs it.
 
-Upstream has no top-k inside the scorer: its tests sort the compact output
-themselves. `is_topk` is a separate op, a full row sort plus a `≥ kth`
-membership mask whose ties exceed k, so it is not used.
+**Forward: one op.** `SilverTorch` runs phase 1 (ours) and then one `torch.ops.st.search` call
+(`adapter.fork_search`; `fork_search_cuda.cu`). In order:
 
-Our part of the forward issues **no host sync**. The first sync on every
-path is inside Meta's op:
-- `fused_kmean_ann` reads `remaining_docs` back (`fused_kmean_ann_cuda.cu:465`);
-- the partial scorer reads its warp totals back (`:2054, :2072`);
-- the partial search reads its chunk sums back
-  (`bloom_index_search_cuda.cu:1495`);
-- both searches decode the plans on the host per call (`:1045`).
-
-So a whole-forward CUDA-graph capture fails on every path, and the arm stays
-eager (OF-3). Meta's released `setup.py` compiles the host side of its `.cu`
-files at gcc `-O0` (OF-11). The same sources at `-O3` are bit-identical and
-no slower ([OFFICIAL-REWORK](../../research/artifacts/official-rework/README.md)).
-
-### `official-fork` — our fork of Meta's ops
-
-[`official-fork/`](../../official-fork/CHANGES.md) is a uv workspace member: Meta's
-`meta-recsys/silvertorch` vendored at `21aa35e`, synced to upstream `22c2007`, renamed so it
-loads beside the pinned upstream in one process (package `silvertorch_fork`, ops
-`torch.ops.stfork.*`, C++ namespace `st::ops` kept, extensions loaded `RTLD_LOCAL`), Apache-2.0
-with Meta's `LICENSE` and headers and one "Modified by the retrieve authors" line per changed
-file. `CHANGES.md` lists every change; each has its gate row in
-[validation](../../research/validation.md#meta-fork-backendofficial-fork).
-`SilverTorch(backend="official-fork")` selects it.
-
-**Forward: one op.** `SilverTorch(backend="official-fork")` runs phase 1 (ours) and then one
-`torch.ops.stfork.search` call (`adapter.fork_search`; `fork_search_cuda.cu`). In order:
-
-1. **Prep, one launch** (`probe_prep_kernel`; `stfork::probe_prep` exposes it): per query row the
+1. **Prep, one launch** (`probe_prep_kernel`; `st::probe_prep` exposes it): per query row the
    int8 codes and scale exactly as eager torch computes our `quantize_int8` (the code quotient in
    fp64 rounded to fp32; the scale `abs_max · fp32(1/127)`, as torch divides by a CPU scalar), and
    one block for the probed clusters' ids, lengths and offsets, the warp sizes and the scorer's
    three cumsums.
-2. **Filter, into the payloads.** Bloom (`bloom_path="partial"` only; `SilverTorch` raises on
-   `"full"` for this backend): the payload kernels evaluate the
+2. **Filter, into the payloads.** Bloom: the payload kernels evaluate the
    prepared plan (one per distinct expression) on the ≤ 2 bloom columns a payload's docs span and
    cut the same mask bits upstream's payload kernels cut from `column_mask_response`, so no column
    search runs; the scorer reads no other bit of Meta's full-`N` mask, so the result is the one Meta's full
-   path returns, without its scan of all `N`. A `full` label would time the same code as
-   `partial`, so the S9 / C5 partial-vs-full ablation stays on `backend="official"`.
+   path returns, without its scan of all `N`. The S9 / C5 partial-vs-full ablation ran on Meta's
+   code as published (records `official`), which had both paths.
    Each filter's full-warp and remainder payload kernels are one launch (the blocks split
    between the two), so their latencies overlap at small batches. `exact`: the clauses are
    tested over the probed docs only, one warp per 32-doc payload with `__brev(__ballot_sync(…))`
    as its mask, an inactive clause a warp-uniform skip. The attrs are the layer's
-   `fork_clause_attrs` layout (C14), not the `[N, C, A_max]` int64 table the other backends
-   read: int32 `[R, N]`, clause `c` in slot rows `clause_slots[c]:clause_slots[c + 1]` (as many
+   `fork_clause_attrs` layout (C14), not the `[N, C, A_max]` int64 table the LiNR filter
+   reads: int32 `[R, N]`, clause `c` in slot rows `clause_slots[c]:clause_slots[c + 1]` (as many
    as its widest doc has values, so no all-pad slot is stored), each doc's values sorted
    descending so a `-1` ends them. A warp's 32 docs read one coalesced 128-byte row per slot,
    and a lane stops at its match or its first pad. `prepare_queries` casts the query attrs to
@@ -1263,41 +1235,40 @@ file. `CHANGES.md` lists every change; each has its gate row in
    one-kernel epilogue.
 
 It returns `(ids int64 [B, k], scores fp32 [B, k])` with `-1` / `-inf` pads.
-`official_probe_score` stays for `"official"`.
+`official_probe_score` is the gates' reference path over the upstream-shaped scorer.
 
-**Bloom width (C12).** `OfficialConfig.bloom_width`: `"configured"` (the fork's default) builds the
-official bloom with `bloom_index_build_fixed`, every 2048-doc bundle `m_bits` bits per doc (the
-layer's `m_bits` is then required), so its index is `N · m_bits / 8` bytes;
-`"upstream"` keeps Meta's `max terms · k · b_multiplier` per bundle (OF-10), the only width
-`"official"` has.
+**Bloom width (C12).** `OfficialConfig.bloom_width`: `"configured"` (the default) builds Meta's
+bloom with `bloom_index_build_fixed`, every 2048-doc bundle `m_bits` bits per doc (the layer's
+`m_bits` is then required), so its index is `N · m_bits / 8` bytes; `"upstream"` keeps Meta's
+`max terms · k · b_multiplier` per bundle (OF-10), the width Meta's code as published had and
+the parity gate against it used (`m_bits` is then optional).
 
-**Exact recheck (C13).** `OfficialConfig.recheck` (the fork's default; `"official"` has none):
+**Exact recheck (C13).** `OfficialConfig.recheck` (the default; Meta's code has none):
 `prepare_queries` also keeps the query attrs and the layer keeps the cluster-sorted exact attrs
 (C14's layout, above) beside the bloom index, and `search` tests the bloom's survivors exactly (partial path: a warp takes up
 to 32 consecutive payloads, as many as keep ≥ 64 warps an SM, lane l evaluating payload l's bloom
 columns; the warp then walks its payloads, skipping those without bloom survivors, each lane
 testing one bloom-passing doc). Bloom ∧ exact is the exact
-filter, so the fork's bloom returns no false positive; the parity gate against Meta's bloom runs
-with `bloom_width="upstream", recheck=False`.
+filter, so the bloom returns no false positive; Meta's bloom semantics are
+`OfficialConfig(bloom_width="upstream", recheck=False)`, the setting of the parity gate against
+the published code and of the study's timed cells.
 
-**Upstream-shaped ops.** The fork still registers the same six ops as upstream, under `stfork::`
-with upstream's schema strings (the parity gates call them), and the adapter of the [`official`
-section](#official--metas-torchopsst-kernels-as-the-reference-backend) calls them unchanged:
-`ensure_loaded(backend)` / `is_available(backend)` are memoized per backend
-(`PACKAGES = {backend: (package, namespace)}`) and every op-calling adapter function takes
-`backend=`. So everything that section says (ops, scores, filter modes, bit order, eager only)
-holds for the fork until a change below replaces it. Builds: the fork's `setup.py` compiles host
-code at `-O3` (OF-11) and adds `is_topk` / `fresh_index_post_processing` to the sources;
-`env.official_fork_build` records its `.so`.
+**Upstream-shaped ops.** The member still registers the same six ops as upstream, under `st::`
+with upstream's schema strings (`test_official.py` pins them, with `search`'s), and the adapter's
+reference path calls them unchanged: `ensure_loaded()` / `is_available()` are memoized once
+(`PACKAGE`, `NAMESPACE`). So everything the [Meta's ops section](#metas-ops) says (ops, scores,
+filter modes, bit order) holds for them until a change below replaces it. Builds: the member's
+`setup.py` compiles host code at `-O3` (OF-11) and adds `is_topk` / `fresh_index_post_processing`
+to the sources; `env.silvertorch_build` records its `.so`.
 
-| op (adapter caller) | fork state |
+| op (adapter caller) | state |
 |---|---|
-| `fused_kmean_ann` (`fused_scores`) | changed: no host sync (C3); its scorer, which `search` also runs, takes the prep kernel's hints (C6) and gains no pre-fill, block maxima, the cooperative scorer from D 128 and filtered payload batches (K fixes 3, 10, 12, 14, 16; `official-fork/CHANGES.md`) |
+| `fused_kmean_ann` (`fused_scores`) | changed: no host sync (C3); its scorer, which `search` also runs, takes the prep kernel's hints (C6) and gains no pre-fill, block maxima, the cooperative scorer from D 128 and filtered payload batches (K fixes 3, 10, 12, 14, 16; `silvertorch/CHANGES.md`) |
 | `fused_kmean_ann_with_partial_masks` (`fused_scores(partial=…)`) | changed: no host sync (C3) |
 | `bloom_index_build` (`build_bloom_index`) | upstream's (22c2007: CCCL 3 guards, old cub path on CUDA 12.8) |
 | `parse_expression_query_batch` (`parse_plans`) | upstream's |
-| `bloom_index_search_batch` (`bloom_full_mask`) | upstream's; the fork forward calls `bloom_index_search_batch_prepared` instead (C4) |
-| `bloom_index_search_batch_return_partial_response` (`bloom_partial_masks`) | upstream's; the fork forward calls `bloom_index_search_batch_return_partial_response_prepared` instead (C4) |
+| `bloom_index_search_batch` (`bloom_full_mask`) | upstream's; the forward calls `bloom_index_search_batch_prepared` instead (C4) |
+| `bloom_index_search_batch_return_partial_response` (`bloom_partial_masks`) | upstream's; the forward calls `bloom_index_search_batch_return_partial_response_prepared` instead (C4) |
 
 **No host sync (C3, C4).** `fused_kmean_ann` and `_with_partial_masks` find each warp
 slot's probed cluster by a binary search over the device warp cumsum instead of a host
@@ -1308,8 +1279,8 @@ uploads its encoding (`adapter.prepare_plans`, `DevicePlans`: an int64 blob of 8
 slot, then the data, padded to `slots · plan_capacity_bytes(C, n_stored_hashes)` so a batch shape has
 one blob shape); the `*_prepared` searches build each plan per thread from it. The partial search's
 `column_mask_response` has the static length `max_partial_columns(B, P, width) = B · (width / 64 + 2P)`
-with a zero tail. `official-fork/silvertorch_fork/ops/_fake.py` gives every `stfork` op's shape function (16,
-`opcheck` green), so the fork forward is `capturable` and compiles (`backend="official"` stays eager-only).
+with a zero tail. `silvertorch/silvertorch/ops/_fake.py` gives every `st` op's shape function (16,
+`opcheck` green), so the forward is `capturable` and compiles.
 
 ### Deleted backends
 
@@ -1325,6 +1296,15 @@ Triton kernels on scores.
 Their measurements (raw outputs:
 [artifacts/cute-dsl-scorer/](../../research/artifacts/cute-dsl-scorer/README.md)) are
 superseded results, not cited.
+
+**Meta's code as published** (`SilverTorch(backend="official")`: the pinned `meta-recsys/silvertorch`
+build at `21aa35e`, the `official` extra, the published forward in `silvertorch.py` and the
+adapter's per-backend plumbing, the adapted-vs-published parity tests, and our `clause_mask_packed`
+kernel that packed the exact predicate into its scorer's bit mask) left the library and the
+workspace at RENAME (roadmap §5; user ruling 2026-10-16: the adapted code takes Meta's names,
+`backend="cuda"` is its only backend). Its last parity run against the adapted code (T1 / T6 / C13
+bit-exact at int32, `dev/export-lib` ffd014a4) stands behind the tag `meta-published-parity-final`
+([validation](../../research/validation.md#library-gates)).
 
 **The Triton SilverTorch** (`SilverTorch(backend="triton")`, its `backend="torch"` reference and
 `bloom_path="full"`: the `codesigned_probe_score*` and `bloom_full_mask` ops, their reference

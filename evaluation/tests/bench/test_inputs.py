@@ -198,11 +198,11 @@ def test_build_filters_keyed_by_filter_backend(tmp_path):
     ex = data.exact_filter("bloom", {}, inp, "torch")
     assert isinstance(ex, ExactAttributeFilter) and ex is not mods["torch"]
     assert data.exact_filter("none", {}, inp, "torch") is None
-    # official → triton filter backend (O §6.2), deduplicated across cell backends; the
+    # cuda → triton filter backend (O §6.2), deduplicated across cell backends; the
     # Triton module registers on CPU (no kernel until evaluate), so this is a CPU check.
-    tri = data.build_filters("clause", inp, ["triton", "official"])
+    tri = data.build_filters("clause", inp, ["triton", "cuda"])
     assert set(tri) == {"triton"} and isinstance(tri["triton"], ExactAttributeFilter)
-    assert data.exact_filter("clause", tri, inp, "official") is tri["triton"]
+    assert data.exact_filter("clause", tri, inp, "cuda") is tri["triton"]
 
 
 def test_query_pool_is_seeded_and_skips_masked_rows(tmp_path):
