@@ -4,6 +4,7 @@ manifest (docs/system/evaluation.md § Merged tables)."""
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import hashlib
 import json
 import subprocess
@@ -91,20 +92,19 @@ def accept(recs: list[dict[str, Any]]) -> None:
             r["_superseded_by"] = None if r is best else best["_subtree"]
 
 
-def _tags(commit: str | None, cache: dict[str, str | None]) -> str | None:
+@functools.cache
+def tags_at(commit: str | None) -> str | None:
     """The git tags at ``commit`` in the checkout the merge runs in, comma-joined; null without."""
     if commit is None:
         return None
-    if commit not in cache:
-        try:
-            out = subprocess.run(
-                ["git", "tag", "--points-at", commit], cwd=EVAL_DIR, capture_output=True,
-                text=True, check=True,
-            ).stdout.split()  # fmt: skip
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            out = []
-        cache[commit] = ",".join(sorted(out)) or None
-    return cache[commit]
+    try:
+        out = subprocess.run(
+            ["git", "tag", "--points-at", commit], cwd=EVAL_DIR, capture_output=True, text=True,
+            check=True,
+        ).stdout.split()  # fmt: skip
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        out = []
+    return ",".join(sorted(out)) or None
 
 
 def _flat_env(env: dict[str, Any]) -> dict[str, Any]:
@@ -119,7 +119,8 @@ def _flat_env(env: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _meta(rec: dict[str, Any], tags: dict) -> dict[str, Any]:
+def _meta(rec: dict[str, Any]) -> dict[str, Any]:
+    """The columns every table row starts with: verdict, key block, provenance."""
     env = rec["env"]
     return {
         "subtree": rec["_subtree"],
@@ -132,15 +133,15 @@ def _meta(rec: dict[str, Any], tags: dict) -> dict[str, Any]:
         "env_started": env["started"],
         "env_code_version": env["code_version"],
         "env_commit": env.get("commit"),
-        "tag": _tags(env.get("commit"), tags),
+        "tag": tags_at(env.get("commit")),
     }
 
 
 def tables(recs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    tags: dict[str, str | None] = {}
+    """The ``records``, ``timings`` and ``samples`` rows of every record."""
     rows: dict[str, list[dict[str, Any]]] = {"records": [], "timings": [], "samples": []}
     for rec in recs:
-        meta = _meta(rec, tags)
+        meta = _meta(rec)
         cols = records.record_columns(rec)
         rows["records"].append(
             {
