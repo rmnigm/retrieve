@@ -110,7 +110,7 @@ tiny-dataset writer of `tests/conftest.py` (both item layouts clean, each
 breakage flagged). Give each new loader a fixture test that writes the upstream format into `tmp_path`
 and runs `validate_layout` on
 what it wrote.
-`test_synth_filter.py` is G-synth ([below](#synthetic-selectivity-attrs)).
+`test_synth_filter.py` pins the synthetic attrs ([below](#synthetic-selectivity-attrs)).
 
 ### Shared conventions
 
@@ -489,7 +489,7 @@ overlay. **The GPU is.** `bench.inputs.load_inputs` holds the item matrix
 fp32 on the device, so the full catalog at 768-d needs 110 GB on an 80 GB
 A100 before any index exists — and even an fp16-items harness change would
 put 55 GB of items next to SilverTorch's 27.6 GB of int8 codes. **The 10 M
-slice is therefore the E2 target**, not a stopgap: 30.7 GB of items + 7.7 GB
+slice is therefore the target**, not a stopgap: 30.7 GB of items + 7.7 GB
 of int8 codes + 1.6 GB of attrs leaves the working set the oracle and the
 perf pools need, it is the papers' 10 M pool size, and the
 largest catalog the harness as written can take at 768-d is ~15 M. Going
@@ -514,7 +514,7 @@ quantization* and *Build-time 1-bit quantization*).
 
 **Status: built, `bench check` ok; not on the Hub, so a pod that needs it rebuilds it with the
 steps below (Re-LAION may be shared as vectors only, and the user decides whether:
-[roadmap](../../research/roadmap.md#needs-the-user)).** Roadmap V-LAION30: a 30 M scale point at d256, `filter` only
+[roadmap](../../research/roadmap.md#needs-the-user)).** A 30 M scale point at d256, `filter` only
 ([decisions](../../research/decisions.md#datasets)). Nothing here is citable. The first dataset staged
 through the [generic ingest](#the-generic-ingest-eval-data-ingest).
 
@@ -657,11 +657,11 @@ Each draw has its own config, `<name>-synth-s<d>.yaml`, whose
 | `query_attrs_synth.pt` | `[U_full, 10]` int64, all ones, aligned 1:1 with the full test split like `eval_split.parquet` |
 | `synth_filter.json` | rates, draw, seed, `n_items`, `n_queries`, achieved `pass_counts` / `pass_rates` per rate |
 
-All ten columns are always written, and the harness refuses attrs whose `synth_filter.json` names another rate list (`layout.check_synth_rates`: the YAMLs index columns, so attrs built before SYNTH-TRIM's ten rates must be rebuilt). The YAMLs name every column (`p0001` … `p1`, `p005` = 0.05, `p02` = 0.2, `p05` = 0.5); the `synth` suite picks the rates per dataset:
+All ten columns are always written, and the harness refuses attrs whose `synth_filter.json` names another rate list (`layout.check_synth_rates`: the YAMLs index columns, so attrs built with another rate list must be rebuilt). The YAMLs name every column (`p0001` … `p1`, `p005` = 0.05, `p02` = 0.2, `p05` = 0.5); the `synth` suite picks the rates per dataset:
 [`goodreads-synth.yaml`](../../evaluation/config/goodreads-synth.yaml),
 [`arxiv-synth.yaml`](../../evaluation/config/arxiv-synth.yaml) (the suite runs nine:
 0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.5, 1.0);
-[`laion30m-synth.yaml`](../../evaluation/config/laion30m-synth.yaml) runs nine (0.001 … 1.0 without 0.3, C1's points; SilverTorch at 0.1 / 0.2 / 0.5 / 1;
+[`laion30m-synth.yaml`](../../evaluation/config/laion30m-synth.yaml) runs nine (0.001 … 1.0 without 0.3; SilverTorch at 0.1 / 0.2 / 0.5 / 1;
 clause only) in its own `laion30m-synth` suite. Each keeps the parent's `data_dir`, encoder and `users_limit`, so
 it shares the parent's encode cache. Its sweeps are named `p0001` … `p1`,
 so they cannot collide with the parent's names in the shared `gt_d{dim}`,

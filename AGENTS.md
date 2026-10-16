@@ -25,14 +25,14 @@ Naming that must stay straight in code, docs and prose:
 - **The adapted official code** lives in the `silvertorch/` workspace
   member under Meta's own names (package `silvertorch`, ops `torch.ops.st.*`,
   `SilverTorch(backend="cuda")`, its only backend; changes in its
-  `CHANGES.md`; RENAME, user ruling 2026-10-16). In the paper and user docs
+  `CHANGES.md`; user ruling 2026-10-16). In the paper and user docs
   it is "Meta's official SilverTorch code, adapted (improvements listed in
   CHANGES)", never "a fork". `backend="torch"` is reserved for a pure-torch
   SilverTorch path; none exists.
 - **Meta's code as published** (pinned `21aa35e`, `backend="official"` while
   it was in the workspace) was the bit-exact parity reference, not an arm
-  of the study. It left the library and the workspace at RENAME;
-  its last bit-exact parity run against the adapted code stands behind the
+  of the study. It left the library and the workspace when the adapted code took
+  Meta's names; its last bit-exact parity run against the adapted code stands behind the
   tag `meta-published-parity-final`. Records keep the names they were
   written with (`official-fork`, `official`); `bench merge` maps them.
 - **Our Triton SilverTorch reimplementation** (`SilverTorch(backend="triton")`
@@ -145,7 +145,7 @@ In `docs/`:
    (tag `cuda-cute-backends-final` holds them), the Triton SilverTorch
    backend with our LiNR bloom filter went after the adapted backend's
    review ACCEPT and the final run (tag `triton-silvertorch-final`), and
-   Meta's code as published went at RENAME, after the adapted code's last
+   Meta's code as published went when the adapted code took its names, after the adapted code's last
    parity run against it (tag `meta-published-parity-final`).
 6. **Commits and branches.** Commit only when the user asks. One branch per
    roadmap step (`dev/<step>`) off `staging`. Session scripts go under

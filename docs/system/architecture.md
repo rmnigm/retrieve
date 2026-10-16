@@ -315,7 +315,7 @@ The ops ([kernels](kernels.md#silvertorch-on-metas-ops)): `backend="cuda"`, Meta
 (`torch.ops.st.*`, the `silvertorch/` workspace member, its changes in
 [CHANGES](../../silvertorch/CHANGES.md)): one `search` op after phase 1, bloom plans prepared once
 on the device, no host sync in the forward, so it captures and compiles. Meta's code as published
-(`backend="official"`) left at RENAME ([kernels](kernels.md#deleted-backends)).
+(`backend="official"`) left the workspace when the adapted code took Meta's names ([kernels](kernels.md#deleted-backends)).
 
 `official=OfficialConfig(...)`: `score_path` `"fp16"` (default, the shipped int8 serving path) or
 `"int32"` (the bit-exact parity path), `b_multiplier`, `n_stored_hashes`, `bloom_width`,

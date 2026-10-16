@@ -287,7 +287,7 @@ its own tile shape, launch grid, or masking policy:
   branch it is back to its narrow-table count. **Known cost:** with every
   clause active the branch skips nothing and the kernel is a little slower
   than without it. Masked loads and 4 warps were measured and are not used
-  ([CLAUSE-SKIP](../../research/artifacts/campaign-v2.6/clause-skip/README.md)). Used by `clause_mask` / `clause_compact`
+  ([measurements](../../research/artifacts/campaign-v2.6/clause-skip/README.md)). Used by `clause_mask` / `clause_compact`
   (`ids=n_offsets`, `load_mask=n_valid`).
   `is_reverse_ptr` must point at int8 storage (host preps do
   `.to(torch.int8)`; Triton can't load native torch.bool).
@@ -458,21 +458,21 @@ The fill loop then stores `-inf` over `[cdiv(counts[b], BLOCK_N) ·
 BLOCK_N, P)` in `FILL_N` = 1,024-lane chunks, strided over the same
 programs, so a mostly empty row costs a few wide stores per program, not
 one `BLOCK_N`-lane tile per iteration
-([V2-FILL](../../research/artifacts/campaign-v2/v2-fill/README.md)).
+([measurements](../../research/artifacts/campaign-v2/v2-fill/README.md)).
 
 The grid is sized by the config, not by `P`. The compact family returns
 full-width `[B, N]` candidates, so a grid of `cdiv(P, BLOCK_N)` one-tile
 programs launched hundreds of thousands of 8-warp programs at goodreads N,
 bs 16, nearly all only storing `-inf`: bound by program count, not bytes
-([v2-prof](../../research/artifacts/campaign-v2/v2-prof/README.md)). The stride
+([profile](../../research/artifacts/campaign-v2/v2-prof/README.md)). The stride
 does not change which program reduces a lane or how: each lane is still
 one `tl.sum` over D in the same layout, so scores are bit-identical to
-the one-tile grid ([v2-fix-a](../../research/artifacts/campaign-v2/v2-fix-a/README.md)).
+the one-tile grid ([measurements](../../research/artifacts/campaign-v2/v2-fix-a/README.md)).
 `programs` is a field of the tile config. The default 864 is one wave on
 A100 (108 SMs × 8 resident 8-warp programs); swept over {864, …, 13824},
 it was the best or within 1 % of the best at every batch size and pass
 rate measured, and at bs 16, p 1 fewer programs gather faster
-([v2-fix-a](../../research/artifacts/campaign-v2/v2-fix-a/README.md)).
+([measurements](../../research/artifacts/campaign-v2/v2-fix-a/README.md)).
 
 **Per-cell scoring is elementwise**, not `tl.dot`. Different `(b, p)` cells
 gather different rows, so a true GEMM would re-load each row across the
@@ -508,7 +508,7 @@ rows of a bs-16 batch, and at 864 programs (54 a row) such a row ran slower
 than the one-loop body; at 3,456 it runs well under it, at a small cost on
 a uniform p 1 batch. A `maxnreg` cap also worked eagerly, but inductor's
 launcher drops it, so it was rejected
-([V2-HIGHP](../../research/artifacts/campaign-v2/v2-highp/README.md)). Each lane's
+([measurements](../../research/artifacts/campaign-v2/v2-highp/README.md)). Each lane's
 score is the same `tl.sum` over D, so scores are bit-identical to the
 one-loop body.
 
@@ -755,7 +755,7 @@ the bit-identical tensor (ids and scores `torch.equal` to the mask + `where` pat
 functional, not in place: under `torch.compile` inductor has no mutation to turn into a copy of
 the score matrix (a profile of V1's graph showed that copy). The score matrix stays cuBLAS's,
 because any other fp32 reduction re-orders the D products and flips k-th-place ties
-([validation](../../research/validation.md#library-gates), V1-FUSE).
+([validation](../../research/validation.md#library-gates)).
 
 Powers `ExactAttributeFilter.evaluate_mask` on CUDA. Same inner loop as
 `clause_compact` minus the count → scan → write compaction — emits the
@@ -869,7 +869,7 @@ The scales stay `abs_max / 127.0`: eager PyTorch evaluates a division by a
 Python scalar as a multiply by fp32(1/127), and inductor emits the same multiply,
 so they already agree (a correctly rounded division would not).
 Measured in
-[v-graph-ids](../../research/artifacts/campaign-v2/v-graph-ids/README.md).
+[measurements](../../research/artifacts/campaign-v2/v-graph-ids/README.md).
 
 ### [`quantize_oporp_1bit`](../../retrieve/src/retrieve/indexing/quantize.py) (`retrieve.indexing`)
 
@@ -998,7 +998,7 @@ items fill with `-inf` / `-1` as before.
 
 `masked_topk` routes every torch-side top-k through it, so LiNR V1 takes it over its unpadded
 `[B, N]` scores, well under the plain top-k's time on the small datasets and a little under it
-on PubMed ([validation](../../research/validation.md), V1-TOPK). Below the thresholds it is plain
+on PubMed ([validation](../../research/validation.md#library-gates)). Below the thresholds it is plain
 `torch.topk`. `SilverTorch` has the same
 two-level cut and its own radix select inside `search`
 ([cuda](#cuda--the-adapted-forward)).
@@ -1124,7 +1124,7 @@ bloom index registered without attributes is empty and a later query with attrib
 Meta's partial-response search over the probed clusters feeding
 `fused_kmean_ann_with_partial_masks` (the paper's co-design) and its full-`N` search feeding
 `fused_kmean_ann(filtering_bit_mask=…)` return the same scores (T5); the forward evaluates the
-bloom over the probed clusters only (§ cuda), and the partial-vs-full ablation (S9 / C5) ran on
+bloom over the probed clusters only (§ cuda), and the partial-vs-full ablation ran on
 Meta's code as published (records `official`, `params.bloom_path`).
 
 **Bit order — measured, high-first.** Meta's scorer reads mask
@@ -1161,9 +1161,9 @@ host per call (`:1045`); C3 / C4 removed them from the member's build. The CPU e
 forward, and the harness records it as `query_prep_ms`
 ([evaluation](evaluation.md#query-preparation)). Meta's released `setup.py` compiles the host side
 of its `.cu` files at gcc `-O0` (OF-11); the member's compiles at `-O3`, bit-identical and no
-slower ([OFFICIAL-REWORK](../../research/artifacts/official-rework/README.md)).
+slower ([measurements](../../research/artifacts/official-rework/README.md)).
 
-**Epilogue (OFFICIAL-REWORK).** Everything query-side runs in `prepare_queries`, outside the
+**Epilogue.** Everything query-side runs in `prepare_queries`, outside the
 timed forward: bloom → the expressions rendered and parsed, one plan per distinct expression plus
 a device row → plan index (`query_plan_index`, which Meta's partial search accepts); exact → the
 int32 query attrs. The forward is the probe (the `n_probe` nearest centroids by L2, `q·c − ‖c‖²/2` + `topk`, the metric `KMeans` assigned items with), Meta's search and scorer,
@@ -1184,8 +1184,8 @@ under Meta's own names (distribution and package `silvertorch`, ops `torch.ops.s
 namespace `st::ops`). `CHANGES.md` lists every change; each has its gate row in
 [validation](../../research/validation.md#adapted-silvertorch-gates), measured when the
 member was `official-fork/` (package `silvertorch_fork`, ops `torch.ops.stfork.*`) and loaded
-beside Meta's published package for the parity gates; the published code left the workspace at
-RENAME and the member took Meta's names back ([Deleted backends](#deleted-backends)).
+beside Meta's published package for the parity gates; then the published code left the workspace
+and the member took Meta's names back ([Deleted backends](#deleted-backends)).
 `SilverTorch(backend="cuda")`, the default and only value, runs it.
 
 **Forward: one op.** `SilverTorch` runs phase 1 (ours) and then one `torch.ops.st.search` call
@@ -1200,7 +1200,7 @@ RENAME and the member took Meta's names back ([Deleted backends](#deleted-backen
    prepared plan (one per distinct expression) on the ≤ 2 bloom columns a payload's docs span and
    cut the same mask bits upstream's payload kernels cut from `column_mask_response`, so no column
    search runs; the scorer reads no other bit of Meta's full-`N` mask, so the result is the one Meta's full
-   path returns, without its scan of all `N`. The S9 / C5 partial-vs-full ablation ran on Meta's
+   path returns, without its scan of all `N`. The partial-vs-full ablation ran on Meta's
    code as published (records `official`), which had both paths.
    Each filter's full-warp and remainder payload kernels are one launch (the blocks split
    between the two), so their latencies overlap at small batches. `exact`: the clauses are
@@ -1299,8 +1299,8 @@ Their measurements are superseded results, not cited.
 build at `21aa35e`, the `official` extra, the published forward in `silvertorch.py` and the
 adapter's per-backend plumbing, the adapted-vs-published parity tests, and our `clause_mask_packed`
 kernel that packed the exact predicate into its scorer's bit mask) left the library and the
-workspace at RENAME (roadmap §5; user ruling 2026-10-16: the adapted code takes Meta's names,
-`backend="cuda"` is its only backend). Its last parity run against the adapted code (T1 / T6 / C13
+workspace when the adapted code took Meta's names (user ruling 2026-10-16; `backend="cuda"` is
+its only backend). Its last parity run against the adapted code (T1 / T6 / C13
 bit-exact at int32, `dev/export-lib` ffd014a4) stands behind the tag `meta-published-parity-final`
 ([validation](../../research/validation.md#library-gates)).
 

@@ -50,7 +50,7 @@ silently serves stale kernels
 ([testing](testing.md#running)).
 For the same reason it must change with the library tree: a job directory
 reused after a library edit replays the old body in every `graph`-mode cell
-([validation](../../research/validation.md#library-gates), V1-FUSE), so it is
+([validation](../../research/validation.md#library-gates), the row on LiNR V1's clause filter folded into the score write), so it is
 keyed by `code_version`: `bench` appends the library tree's `code_version` to
 the directory it is given, and the library pytest suite uses a fresh
 directory per run. A script that compiles outside `bench` and pytest keys its
