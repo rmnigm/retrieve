@@ -96,7 +96,7 @@ runs with the bf16 / fused-AdamW / TF32 stack above.
 - `gsasrec-ep{N}-ndcg10{X}.pt` — model `state_dict` saved at the best val epoch (runs of the current trainer name it `sasrec-ep{N}-…`).
 - `best_model.pt` — same `state_dict`, copied at the end of training (or on
   manual stop). Use this one going forward.
-- `eval_quality.json` — final test metrics, `best_epoch`, `paper_target`.
+- `eval_quality.json` — the trainer's final test evaluation: `split`, `ks`, `mask_history`, `metrics`.
 
 > **Missing artifacts (killed mid-training):** the 500M runs do not include
 > `config.json`, `item_embs.pt`, or a copy of `item_id_map.json`. The hyperparams

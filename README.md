@@ -94,7 +94,7 @@ written for someone who installed `torchretrieve` and does not have this repo:
 [indexing-and-ops](retrieve/docs/indexing-and-ops.md),
 [adding-a-dataset](retrieve/docs/adding-a-dataset.md).
 
-**Papers** ([`articles/`](articles/)) — pandoc renderings of the two papers
+**Papers** (`articles/`, gitignored) — pandoc renderings of the two papers
 this repo reproduces (SilverTorch, LiNR), plus the Yambda benchmark sources the
 `yambda` ETL adapts. Frozen source material: cited by the docs, never edited;
 gitignored, so not in a fresh clone.

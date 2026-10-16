@@ -65,5 +65,5 @@ and tags for both trees: [SCHEMA.md](SCHEMA.md). Structural changes:
   ([hub-index.md](artifacts/hub-index.md)).
 - [docs/system/](../docs/index.md): how the code works today (the
   project's documentation; code comments cite it by section).
-- [`articles/`](../articles/): the SilverTorch and LiNR papers, frozen.
+- `articles/`: the SilverTorch and LiNR papers, frozen.
   Gitignored (not shipped in git); present locally, not after a fresh clone.

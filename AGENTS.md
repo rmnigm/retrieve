@@ -23,22 +23,23 @@ from the paper's text. That comparison is the paper and the released code.
 
 Naming that must stay straight in code, docs and prose:
 - **The adapted official code** lives in the `official-fork/` workspace
-  member (package `silvertorch_fork`, `backend="official-fork"`, changes in
-  its `CHANGES.md`; on `dev/meta-fork` until the META-FORK review accepts).
-  Those code names stay until the roadmap's RENAME step; in the paper and
-  user docs it is "Meta's official SilverTorch code, adapted (improvements
-  listed in CHANGES)", never "a fork".
+  member (package `silvertorch_fork`, `backend="official-fork"`, the
+  default `SilverTorch` backend, changes in its `CHANGES.md`). Those code
+  names stay until the roadmap's RENAME step; in the paper and user docs it
+  is "Meta's official SilverTorch code, adapted (improvements listed in
+  CHANGES)", never "a fork".
 - **Meta's code as published** is `backend="official"`, pinned `21aa35e`:
   the bit-exact parity reference and the "as published" column of
   [Meta as published vs adapted](research/paper/meta-published-vs-adapted.md),
   not an arm of the study.
 - **Our Triton SilverTorch reimplementation** (`SilverTorch(backend="triton")`
   and its `backend="torch"` reference: SilverTorch Algorithm 1
-  reimplemented, called QuantizedIVF in the thesis — retired 2026-09-15 in
-  the thesis and `research/paper/`; the already-delivered defense talk still
-  says it and stays that way) is **out of the paper and out of the
-  released code**. It stays in the repository, recorded and unused, until
-  the roadmap deletes it (rule 5); its records are never cited.
+  reimplemented, called QuantizedIVF in the thesis; the already-delivered
+  defense talk still says it and stays that way) is **out of the paper and
+  deleted from the code** (tag `triton-silvertorch-final` holds it); its
+  records on the Hub are never cited. **Our LiNR bloom filter** is deleted
+  with it (user, 2026-10-15): LiNR runs the exact filter only, and the
+  bloom in the study is Meta's, inside SilverTorch.
 - **LiNR** variants are V1–V3 as in the paper (our int8 V4 left the
   library in campaign v2; [decisions](research/decisions.md#campaign-v2-user-2026-10-08)).
 
@@ -153,11 +154,10 @@ In `docs/`:
    copy, not just the page you were already editing.
 5. **Deletion is gated.** Never delete a kernel that still has no
    validated replacement. The model: the two hand-written SilverTorch
-   backends went at roadmap B4 only after the official backend's parity
-   gate (B2) was green; tag `cuda-cute-backends-final` holds them. The
-   Triton SilverTorch backend goes the same way, after the adapted
-   official backend's review ACCEPT and its NUMBERS legs, behind the tag
-   `triton-silvertorch-final` ([roadmap](research/roadmap.md)).
+   backends went only after the official backend's parity gate was green
+   (tag `cuda-cute-backends-final` holds them), and the Triton SilverTorch
+   backend with our LiNR bloom filter went after the adapted backend's
+   review ACCEPT and the final run (tag `triton-silvertorch-final`).
 6. **Commits and branches.** Commit only when the user asks. One branch per
    roadmap step (`dev/<step>`) off `staging`. Session scripts go under
    `research/artifacts/<plan>/`, not in the packages; raw outputs (records,

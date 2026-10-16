@@ -39,7 +39,7 @@ two process contracts.
 Out of scope: the library user guide, which ships in the sdist and lives in
 [`retrieve/docs/`](../retrieve/docs/) (written for someone without a
 clone; it names `docs/system/` but does not link it); the papers we
-reproduce, frozen in [`articles/`](../articles/); the reproducibility
+reproduce, frozen in `articles/` (gitignored); the reproducibility
 paper's own sections in [`paper/`](paper/), which cite this wiki but are
 drafts rather than wiki pages.
 

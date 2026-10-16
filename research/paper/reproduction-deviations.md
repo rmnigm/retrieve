@@ -13,7 +13,7 @@
 > or wiki page that carries the fact, and a label with no link has no
 > public source beyond this text.
 >
-> **Sources.** The papers as frozen in [articles/](../../articles/)
+> **Sources.** The papers as frozen in `articles/` (gitignored, on a working box only)
 > (`silvertorch.md`, `linr.md`) — cited, never edited. The implementation as
 > documented in [../system/](../../docs/system/) (`architecture.md`, `kernels.md`,
 > `filtering.md`, `evaluation.md`, `datasets.md`). The measurements in the
