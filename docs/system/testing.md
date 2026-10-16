@@ -733,7 +733,7 @@ There is no marker to select and no `--bench` flag.
 **Every pytest run compiles on a fresh inductor cache.** Both `conftest.py` files
 (`retrieve/tests`, `evaluation/tests`) set `TORCHINDUCTOR_CACHE_DIR` to a new
 `<tmp>/pytest-inductor-*` directory in `pytest_configure` and remove it in
-`pytest_unconfigure` (H-INDCACHE; `test_inductor_dir.py` in each tree pins it). The on-disk FX-graph / AOT-autograd caches key a graph
+`pytest_unconfigure` (`test_inductor_dir.py` in each tree pins it). The on-disk FX-graph / AOT-autograd caches key a graph
 on the custom op, not on the Python source of its `@triton_op` body. With a warm default
 cache (`/tmp/torchinductor_<user>`), a compiled call can replay the *old* body. Measured:
 after the OPORP candidate path changed its output width, four `test_linr.py` compile gates

@@ -1106,7 +1106,7 @@ bloom index registered without attributes is empty and a later query with attrib
 Meta's partial-response search over the probed clusters feeding
 `fused_kmean_ann_with_partial_masks` (the paper's co-design) and its full-`N` search feeding
 `fused_kmean_ann(filtering_bit_mask=…)` return the same scores (T5); the forward evaluates the
-bloom over the probed clusters only (§ cuda), and the partial-vs-full ablation (S9 / C5) ran on
+bloom over the probed clusters only (§ cuda), and the partial-vs-full ablation ran on
 Meta's code as published (records `official`, `params.bloom_path`).
 
 **Bit order — measured, high-first.** Meta's scorer reads mask
@@ -1144,7 +1144,7 @@ forward, and the harness records it as `query_prep_ms`
 of its `.cu` files at gcc `-O0` (OF-11); the member's compiles at `-O3`, bit-identical and no
 slower.
 
-**Epilogue (OFFICIAL-REWORK).** Everything query-side runs in `prepare_queries`, outside the
+**Epilogue.** Everything query-side runs in `prepare_queries`, outside the
 timed forward: bloom → the expressions rendered and parsed, one plan per distinct expression plus
 a device row → plan index (`query_plan_index`, which Meta's partial search accepts); exact → the
 int32 query attrs. The forward is the probe (the `n_probe` nearest centroids by L2, `q·c − ‖c‖²/2` + `topk`, the metric `KMeans` assigned items with), Meta's search and scorer,
@@ -1164,8 +1164,8 @@ Meta's `LICENSE` and headers and one "Modified by the retrieve authors" line per
 under Meta's own names (distribution and package `silvertorch`, ops `torch.ops.st.*`, C++
 namespace `st::ops`). `CHANGES.md` lists every change, each gated when the
 member was `official-fork/` (package `silvertorch_fork`, ops `torch.ops.stfork.*`) and loaded
-beside Meta's published package for the parity gates; the published code left the workspace at
-RENAME and the member took Meta's names back ([Deleted backends](#deleted-backends)).
+beside Meta's published package for the parity gates; then the published code left the workspace
+and the member took Meta's names back ([Deleted backends](#deleted-backends)).
 `SilverTorch(backend="cuda")`, the default and only value, runs it.
 
 **Forward: one op.** `SilverTorch` runs phase 1 (ours) and then one `torch.ops.st.search` call
@@ -1180,7 +1180,7 @@ RENAME and the member took Meta's names back ([Deleted backends](#deleted-backen
    prepared plan (one per distinct expression) on the ≤ 2 bloom columns a payload's docs span and
    cut the same mask bits upstream's payload kernels cut from `column_mask_response`, so no column
    search runs; the scorer reads no other bit of Meta's full-`N` mask, so the result is the one Meta's full
-   path returns, without its scan of all `N`. The S9 / C5 partial-vs-full ablation ran on Meta's
+   path returns, without its scan of all `N`. The partial-vs-full ablation ran on Meta's
    code as published (records `official`), which had both paths.
    Each filter's full-warp and remainder payload kernels are one launch (the blocks split
    between the two), so their latencies overlap at small batches. `exact`: the clauses are
@@ -1278,7 +1278,7 @@ Their measurements are superseded results.
 build at `21aa35e`, the `official` extra, the published forward in `silvertorch.py` and the
 adapter's per-backend plumbing, the adapted-vs-published parity tests, and our `clause_mask_packed`
 kernel that packed the exact predicate into its scorer's bit mask) left the library and the
-workspace at RENAME (2026-10-16: the adapted code takes Meta's names, `backend="cuda"` is its only
+workspace when the adapted code took Meta's names (2026-10-16; `backend="cuda"` is its only
 backend). Its last parity run against the adapted code (T1 / T6 / C13 bit-exact at int32) stands
 behind the tag `meta-published-parity-final`.
 
