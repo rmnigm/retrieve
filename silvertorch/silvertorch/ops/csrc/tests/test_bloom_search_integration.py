@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-10: the two half-stripped load_library calls closed into comments (silvertorch/CHANGES.md).
+# Modified by the retrieve authors, 2026-10-10: the two half-stripped load_library calls closed into comments.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ import torch
 # @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:bloom_indexer")
 # @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:bloom_indexer_gpu")
 # @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:bloom_index_search")
-# @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:bloom_index_search_gpu")  (fork: the strip left this call open, OF-6)
-# @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:expression_query_parser")  (fork: the strip left this call open, OF-6)
+# @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:bloom_index_search_gpu")  (the strip left this call open)
+# @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:expression_query_parser")  (the strip left this call open)
 
 
 def _make_features(

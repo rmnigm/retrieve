@@ -287,7 +287,7 @@ them.
 
 `cuda` is Meta's SilverTorch code, adapted (`silvertorch/`), and exists for `silvertorch` only;
 its standalone filter modules are Triton (`algos.filter_backend`); its `OfficialConfig` params
-are `score_path` and `recheck`; it is capturable (CHANGES C4: no host sync, shape functions for
+are `score_path` and `recheck`; it is capturable (no host sync, shape functions for
 compile), so it records `graph` entries. Its sources are outside
 `LIB`, so `code_version` does not see a change there; the record's
 `env.silvertorch_build.so_sha256` identifies the build. Records written before the adapted code took Meta's names carry the
@@ -307,8 +307,8 @@ filter_kind=, filter_mod=, item_attrs=, clause_is_reverse=, params=,
 seed=)` is the one factory; it refuses `None`-path cells and `n_probe >
 n_lists`. The build param `bloom_path` (`partial` | `full`, the co-design ablation) ran on
 Meta's code as published and left with it: a config that still carries it is a
-`ConfigError`; the FR records keep it in `params`. The build param `recheck` (bool, CHANGES
-C13) sets `OfficialConfig(recheck=…)` on `silvertorch / bloom` through `algos.official_config`
+`ConfigError`; the FR records keep it in `params`. The build param `recheck` (bool)
+sets `OfficialConfig(recheck=…)` on `silvertorch / bloom` through `algos.official_config`
 (anywhere else `load_matrix` raises `ConfigError`): `false` is Meta's
 bloom, false positives included, which recall then counts as misses
 against the exact filtered oracle; without the key the library default

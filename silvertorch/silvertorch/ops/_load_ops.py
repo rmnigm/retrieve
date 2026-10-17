@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-10: C4: the shape functions in _fake.py load with the ops (silvertorch/CHANGES.md).
+# Modified by the retrieve authors, 2026-10-10: loads the shape functions in _fake.py with the ops.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.

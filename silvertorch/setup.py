@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-10: builds is_topk / fresh_index_post_processing; -O3 host code; metadata in pyproject.toml; C5: builds fork_search; relative source paths (silvertorch/CHANGES.md).
+# Modified by the retrieve authors, 2026-10-10: build sources, compiler flags and metadata.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ cpu_sources = [
     # registered upstream but absent from its build
     "silvertorch/ops/csrc/is_topk.cpp",
     "silvertorch/ops/csrc/fresh_index_post_processing.cpp",
-    # st::search, the adapted forward (CHANGES.md)
+    # st::search, the adapted forward
     "silvertorch/ops/csrc/fork_search.cpp",
 ]
 
@@ -49,7 +49,7 @@ cuda_sources = [
     # registered upstream but absent from its build
     "silvertorch/ops/csrc/is_topk_cuda.cu",
     "silvertorch/ops/csrc/fresh_index_post_processing_cuda.cu",
-    # st::search, the adapted forward (CHANGES.md)
+    # st::search, the adapted forward
     "silvertorch/ops/csrc/fork_search_cuda.cu",
 ]
 
@@ -70,7 +70,7 @@ extra_compile_args = {
 }
 
 if CUDA_HOME is not None:
-    # Upstream passes no -O to nvcc, so its .cu host code built at gcc's -O0 (CHANGES.md).
+    # Upstream passes no -O to nvcc, so its .cu host code built at gcc's -O0.
     extra_compile_args["nvcc"] = [
         "-O3",
         "-Xcompiler",

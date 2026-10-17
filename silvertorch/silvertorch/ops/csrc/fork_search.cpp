@@ -1,12 +1,12 @@
 // Copyright (c) the retrieve authors. Licensed under the Apache License, Version 2.0, as the
-// rest of this package (silvertorch/LICENSE); added in the fork (silvertorch/CHANGES.md, C5).
+// rest of this package (silvertorch/LICENSE); added by the retrieve authors, 2026-10-10.
 
 #include <torch/library.h>
 
 // st::search (fork_search_cuda.cu, CUDA only): the whole forward after phase 1 in one call.
 // Filter (at most one): none; bloom over prepared plans (`plans`, evaluated over the probed
-// clusters' columns only: Meta's full-N mask gives the same result, K fix 17); exact (`query_clause_attrs` against the
-// cluster-sorted `item_clause_attrs` / `clause_slots` / `clause_is_reverse`, C14's int32 layout,
+// clusters' columns only: Meta's full-N mask gives the same result); exact (`query_clause_attrs` against the
+// cluster-sorted `item_clause_attrs` / `clause_slots` / `clause_is_reverse`, the int32 slot layout,
 // over the probed docs only); or a
 // given full-N `filtering_bit_mask`. Returns
 // (ids int64 [B, k], scores fp32 [B, k]) with -1 / -inf pads, like every SilverTorch backend.
@@ -38,7 +38,7 @@ TORCH_LIBRARY_FRAGMENT(st, m) {
       "Tensor? query_clause_attrs=None)"
       "-> (Tensor, Tensor)");
 
-  // search's first launch (C6), exposed for its gate: int8 codes, scales, the probed clusters'
+  // search's first launch, exposed for its gate: int8 codes, scales, the probed clusters'
   // ids / lengths / offsets, warp sizes and the three cumsums the scorer reads.
   m.def(
       "probe_prep("

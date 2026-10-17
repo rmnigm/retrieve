@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: C4: the prepared-plan search schemas (silvertorch/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: prepared-plan search schemas.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -571,7 +571,7 @@ TORCH_LIBRARY_FRAGMENT(st, m) {
       "Tensor? query_plan_index=None)"
       "-> (Tensor, Tensor, Tensor)");
 
-  // fork (C4): the searches over plans prepared once on the device (the parser's encoding,
+  // the searches over plans prepared once on the device (the parser's encoding,
   // uploaded by SilverTorch.prepare_queries); CUDA only, no host sync.
   m.def(
       "bloom_index_search_batch_prepared("

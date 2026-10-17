@@ -3,11 +3,10 @@
 GPU retrieval for recommender systems (PyTorch + Triton): the library `torchretrieve` and the
 benchmark harness behind a reproducibility study of two industrial GPU retrieval papers.
 
-**The study.** **SilverTorch** (Meta), run as Meta's official SilverTorch code adapted by us
-(improvements listed in [`silvertorch/CHANGES.md`](silvertorch/CHANGES.md), each gated bit-exact
-against the published code before it left this repository), against **LiNR** (LinkedIn) V1–V3,
-implemented here from the paper's text, on public datasets with real and synthetic attribute
-filters.
+**The study.** **SilverTorch** (Meta), run as Meta's official SilverTorch code, adapted (each
+change gated bit-exact against the published code before it left this repository), against
+**LiNR** (LinkedIn) V1–V3, implemented here from the paper's text, on public datasets with real
+and synthetic attribute filters.
 
 ## Layout
 
@@ -17,10 +16,9 @@ members sharing a single `.venv` at the workspace root:
 - [`retrieve/`](retrieve/) — the library: kernels, modules, correctness tests. Package
   `torchretrieve` (not on PyPI); imports as `retrieve`.
 - [`silvertorch/`](silvertorch/) — Meta's official SilverTorch code (`meta-recsys/silvertorch`),
-  adapted (Apache-2.0, Meta's licence and headers kept; changes in
-  [`silvertorch/CHANGES.md`](silvertorch/CHANGES.md)): package `silvertorch`, ops
-  `torch.ops.st.*`, a dependency of `retrieve/`, built from source at install (needs an `nvcc`
-  matching your torch wheel).
+  adapted (Apache-2.0, Meta's licence and headers kept; modified files say so in their headers):
+  package `silvertorch`, ops `torch.ops.st.*`, a dependency of `retrieve/`, built from source at
+  install (needs an `nvcc` matching your torch wheel).
 - [`evaluation/`](evaluation/) — the benchmark harness (`bench`), the dataset ETL (`eval-data`)
   and the encoder trainer (`train`); depends on `retrieve` editable. Not published.
 

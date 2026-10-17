@@ -51,8 +51,7 @@ For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` /
 
 Triton is the default backend of the LiNR modules and the filters; they accept
 `backend="torch"` for a pure-PyTorch path. `SilverTorch` runs Meta's official SilverTorch code,
-adapted (improvements listed in its CHANGES file; `backend="cuda"`, its only backend; the
-`silvertorch` package). The package is two
+adapted (`backend="cuda"`, its only backend; the `silvertorch` package). The package is two
 public layers — `retrieve.modules` (re-exported at the top level) and
 `retrieve.ops` — plus `retrieve.indexing` (index-build math) and
 `retrieve.functional` (query-time glue).

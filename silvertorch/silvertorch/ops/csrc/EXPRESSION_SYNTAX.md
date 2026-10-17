@@ -1,4 +1,4 @@
-<!-- Modified by the retrieve authors, 2026-10-10 (silvertorch/CHANGES.md). -->
+<!-- Modified by the retrieve authors, 2026-10-10. -->
 # Expression Query Syntax
 
 A text-based query language for silvertorch bloom index filtering.

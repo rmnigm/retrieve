@@ -1,5 +1,5 @@
 // Copyright (c) the retrieve authors. Licensed under the Apache License, Version 2.0, as the
-// rest of this package (silvertorch/LICENSE); added in the fork (silvertorch/CHANGES.md, C13).
+// rest of this package (silvertorch/LICENSE); added by the retrieve authors, 2026-10-10.
 
 #pragma once
 
@@ -9,7 +9,7 @@ namespace st::ops::fork_filters {
 
 // Our exact clause predicate (retrieve.functional.clause_subset_match): a clause passes when any
 // of the doc's values equals the query's, negated for a reverse clause; an inactive clause
-// (query value -1) passes. C14: attrs is the clause-major int32 [R, n_docs] slot table of
+// (query value -1) passes. attrs is the clause-major int32 [R, n_docs] slot table of
 // fork_clause_attrs, clause c in slots [clause_slots[c], clause_slots[c + 1]), so a warp's
 // docs read coalesced; each doc's values are sorted descending, so a -1 ends its values.
 __device__ __forceinline__ bool exact_pass(

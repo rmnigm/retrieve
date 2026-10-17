@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: C3: payload helpers take the warp-size cumsum and return capacities; K fix 12: BlockKeys (silvertorch/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: payload helpers and block keys.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ union RemainingPayload {
   int4 payload;
 };
 
-// fork (K fix 12): where the scorer folds the order key of each score it writes into the max of
+// where the scorer folds the order key of each score it writes into the max of
 // its 256-slot block (row-major [B, n_blocks] uint32, zeroed by the caller); keys null = off.
 struct BlockKeys {
   uint32_t* keys = nullptr;

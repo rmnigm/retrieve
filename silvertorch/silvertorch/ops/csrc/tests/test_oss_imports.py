@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-10: the setup.py test checks the renamed packages (silvertorch/CHANGES.md).
+# Modified by the retrieve authors, 2026-10-10: the setup.py test checks the installed package names.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.

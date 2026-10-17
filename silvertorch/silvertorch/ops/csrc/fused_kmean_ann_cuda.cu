@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: C3: no host sync in fused_kmean_ann / _with_partial_masks; C6: fused_kmean_ann_cuda_precomputed; K fix 3: warp-per-cluster remaining payloads; K fix 10: no pre-fill under write_failed; K fix 12: block keys folded by the scorer (silvertorch/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: no host sync; precomputed payload hints; block keys.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -241,7 +241,7 @@ __inline__ __device__ void store(
     bool write_failed = false) {
   if constexpr (FILTER) {
     if (!filtering_mask) {
-      // fork (K fix 10): the search op writes the unwritten-slot sentinels itself, no pre-fill
+      // the search op writes the unwritten-slot sentinels itself, no pre-fill
       if (write_failed) {
         *results = cuda_mm_types<RETURN_T>::C_MIN_NEG;
         *indices = -1;
@@ -280,7 +280,7 @@ __inline__ __device__ void store_with_direct_query(
     bool write_failed = false) {
   if constexpr (FILTER) {
     if (!filtering_mask) {
-      // fork (K fix 10): the search op writes the unwritten-slot sentinels itself, no pre-fill
+      // the search op writes the unwritten-slot sentinels itself, no pre-fill
       if (write_failed) {
         *results = cuda_mm_types<RETURN_T>::C_MIN_NEG;
         *indices = -1;
@@ -399,7 +399,7 @@ __global__ void generate_remaining_payload_kernel(
     const uint64_t* filtering_bitmask_index_ptr,
     int64_t max_tensor_size_per_row,
     TORCH_DSA_KERNEL_ARGS) {
-  // fork (K fix 3): one warp per selected cluster, lane i writes remaining doc i's payload
+  // one warp per selected cluster, lane i writes remaining doc i's payload
   // (upstream: one thread loops a cluster's < 32 remaining docs); the same payloads.
   int64_t cluster_length_column_count = selected_cluster_lengths.size(1);
   int64_t total_selected_clusters =
@@ -902,7 +902,7 @@ std::tuple<Tensor, int64_t> generate_remaining_payload_with_partial_masks(
 
 namespace {
 
-// K fix 12: the order key of a written score (as the search's select ranks it) and its fold
+// the order key of a written score (as the search's select ranks it) and its fold
 // into the slot's 256-slot block max.
 __device__ __forceinline__ uint32_t order_key(int32_t v) {
   return static_cast<uint32_t>(v) ^ 0x80000000u;
@@ -1282,7 +1282,7 @@ __global__ void process_cluster_remaining_multi_emb(
   }
 }
 
-// fork (C11): the full-warp scorer with the warp's 32 docs read cooperatively, for wide rows.
+// the full-warp scorer with the warp's 32 docs read cooperatively, for wide rows.
 // Upstream's lane loads its own doc in 16-byte pieces strided by DIM (32 rows a request); here
 // the warp reads its 32 consecutive rows linearly, a column chunk of kPart int4s per row at a
 // time (the whole row up to 256 bytes, so each request is 512 contiguous bytes), into a padded
@@ -1318,7 +1318,7 @@ __global__ void __launch_bounds__(kCoopBlockSize) process_cluster_coop(
   const int lane = threadIdx.x % kWarpThreadCount;
   const int warp = threadIdx.x / kWarpThreadCount;
   const int32_t total = *total_needed_warps_ptr;
-  // The warp takes `batch` (≤ 32) consecutive payloads at a time, one coalesced load (K fix 16):
+  // The warp takes `batch` (≤ 32) consecutive payloads at a time, one coalesced load:
   // filtered payloads mostly only write sentinels, so a load per payload left it latency-bound.
   for (int64_t first = (static_cast<int64_t>(blockIdx.x) * kWarpsInBlock + warp) * batch;
        first < total;
@@ -1490,7 +1490,7 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
       (remaining_docs + kBlockSize - 1) / kBlockSize,
       192L * at::cuda::getCurrentDeviceProperties()->multiProcessorCount);
   Tensor results;
-  // write_failed (fork search): every slot below a row's written width is written by the scorer
+  // write_failed (st::search): every slot below a row's written width is written by the scorer
   // (failing lanes write the sentinels), the caller ignores the rest, so nothing is pre-filled
   Tensor indices = write_failed
       ? at::empty(
@@ -1512,7 +1512,7 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_run_payloads(
         : half             ? at::full({total_result_size}, cuda_mm_types<c10::Half>::C_MIN_NEG, opts)
                            : at::full({total_result_size}, cuda_mm_types<int32_t>::C_MIN_NEG, opts);
     const int64_t sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-    // filtered: payloads a warp loads at once, keeping >= 64 warps an SM (K fix 16)
+    // filtered: payloads a warp loads at once, keeping >= 64 warps an SM
     const int batch = has_filtering_bitmask
         ? static_cast<int>(std::clamp<int64_t>(total_needed_warps / (64 * sms), 1, 32))
         : 1;
@@ -2258,7 +2258,7 @@ std::tuple<Tensor, Tensor> fused_kmean_ann_cuda(
       /*query_on_shared_mem=*/false);
 }
 
-// fork (C6): fused_kmean_ann with the warp rounding and its cumsums already computed (by
+// fused_kmean_ann with the warp rounding and its cumsums already computed (by
 // st::search's prep kernel), an optional full-N mask, no per-embedding scale.
 std::tuple<Tensor, Tensor> fused_kmean_ann_cuda_precomputed(
     const Tensor& cluster_offsets,

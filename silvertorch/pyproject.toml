@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-10: static [project] metadata, a uv workspace member (silvertorch/CHANGES.md).
+# Modified by the retrieve authors, 2026-10-10: static [project] metadata, a uv workspace member.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 [project]
 name = "silvertorch"
 version = "1.0.0"
-description = "SilverTorch: GPU Retrieval Library (meta-recsys/silvertorch @ 21aa35e, adapted by the retrieve authors; see CHANGES.md)"
+description = "SilverTorch: GPU Retrieval Library (meta-recsys/silvertorch @ 21aa35e, adapted by the retrieve authors)"
 license = { file = "LICENSE" }
 requires-python = ">=3.8"
 dependencies = ["torch>=2.0"]

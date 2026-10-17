@@ -4,14 +4,14 @@ created: 2026-10-17
 updated: 2026-10-17
 type: concept
 tags: [library, silvertorch, parity]
-sources: [silvertorch/CHANGES.md, retrieve/tests/parity/test_official.py]
+sources: [retrieve/tests/parity/test_official.py]
 ---
 
 # Parity of the adapted SilverTorch code with Meta's published code
 
-[`silvertorch/`](../../silvertorch/CHANGES.md) is Meta's SilverTorch code
-(`meta-recsys/silvertorch`, commit `21aa35e28b6dd9a91e9ee35efb0857715e86bda7`)
-with the changes listed in its `CHANGES.md`. Every change was gated against
+[`silvertorch/`](../../silvertorch/) is Meta's SilverTorch code
+(`meta-recsys/silvertorch`, commit `21aa35e28b6dd9a91e9ee35efb0857715e86bda7`),
+adapted. Every change was gated against
 the published code at that commit, built in the same environment, before the
 published code was removed from the workspace. This page gives the gate, its
 recorded results, what this repository still checks, and how to rerun the

@@ -1,6 +1,6 @@
 """Meta's SilverTorch ops, adapted (``torch.ops.st.*``; the workspace member ``silvertorch/``,
-Meta's `meta-recsys/silvertorch <https://github.com/meta-recsys/silvertorch>`_ at ``21aa35e``
-with the changes listed in its ``CHANGES.md``), behind one adapter: ``SilverTorch(backend="cuda")``
+Meta's `meta-recsys/silvertorch <https://github.com/meta-recsys/silvertorch>`_ at ``21aa35e``,
+adapted), behind one adapter: ``SilverTorch(backend="cuda")``
 keeps our phase 1 (k-means, int8 quantization, probe selection) and runs phases 2+3 as one
 ``st::search`` call; the upstream-shaped ops (``fused_kmean_ann``, the bloom index build and
 searches, the expression parser) are wrapped here for the gates and for Meta's own modules
@@ -84,9 +84,9 @@ class OfficialConfig:
     - ``fast_build``: the CUDA builder's single-pass signature-free build (ignored by the
       CPU builder).
     - ``bloom_width``: ``"configured"`` (default) → ``m_bits`` bits per doc in every bundle
-      (CHANGES.md C12; the layer's ``m_bits`` is then required); ``"upstream"`` → Meta's width,
+      (the layer's ``m_bits`` is then required); ``"upstream"`` → Meta's width,
       each 2048-doc bundle ``max_terms · k · b_multiplier`` bits per doc (``m_bits`` ignored).
-    - ``recheck``: test the bloom's survivors exactly (CHANGES.md C13; default on): bloom ∧ exact
+    - ``recheck``: test the bloom's survivors exactly (default on): bloom ∧ exact
       is the exact filter, so no false positive is returned and the bloom only spares the exact
       test its failing docs; the layer then keeps the exact attrs beside the bloom index. Off:
       Meta's bloom semantics, false positives included.
@@ -165,7 +165,7 @@ def _try_load():
     if missing:
         return ImportError(
             f"{PACKAGE} loaded but torch.ops.{NAMESPACE} lacks {missing}; the source does "
-            "not match the one this adapter was written against (silvertorch/CHANGES.md)."
+            "not match the silvertorch/ workspace member this adapter was written against."
         )
     return ops
 

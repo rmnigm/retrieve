@@ -52,7 +52,7 @@ symmetry but always runs the same code (cuBLAS already covers its case).
 
 `SilverTorch` takes `backend="cuda"`, its only value: Meta's official SilverTorch code, adapted
 (`torch.ops.st.*`, the `silvertorch` package that ships with `torchretrieve`, built from source
-against a CUDA toolkit matching your torch; the improvements are listed in its CHANGES file). Ids
+against a CUDA toolkit matching your torch). Ids
 and scores were gated bit-exact against Meta's code as published at int32; no host sync, so it
 captures and compiles; its bloom is evaluated over the probed clusters only and by default
 rechecks the bloom's survivors exactly, so it returns no false positives.
@@ -147,9 +147,9 @@ inputs, fp32 accumulation). Ranking is what the layers promise; cast at the boun
 
 ## SilverTorch
 
-> `SilverTorch` runs on Meta's official SilverTorch code, adapted by us (improvements listed in
-> its CHANGES file: no host syncs, CUDA-graph capture, `m_bits` honoured, an exact recheck of
-> bloom survivors), the `silvertorch` package that installs with `torchretrieve`.
+> `SilverTorch` runs on Meta's official SilverTorch code, adapted (no host syncs, CUDA-graph
+> capture, `m_bits` honoured, an exact recheck of bloom survivors): the `silvertorch` package that
+> installs with `torchretrieve`.
 
 ```python
 SilverTorch(k, n_lists, n_probe, filter_mode="none", m_bits=None, k_hash=None,

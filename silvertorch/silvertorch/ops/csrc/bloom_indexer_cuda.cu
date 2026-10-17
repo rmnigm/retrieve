@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: C12: bloom_index_build_fixed, a configured width (silvertorch/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: a configured bloom width.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -327,7 +327,7 @@ __global__ void generate_column_b_and_signature_sizes_kernel(
         WarpReduce(temp_storage[warp_id % BLOOM_BUILD_V2_WARP_PER_BLOCK])
             .Reduce(max_feature_count, ST_CUB_MAXIMUM());
     if (tidx == 0) {
-      // fork (C12): fixed_b > 0 is the configured width in bits per doc (m_bits) for every
+      // fixed_b > 0 is the configured width in bits per doc (m_bits) for every
       // bundle; 0 keeps upstream's max terms in the column x k x b_multiplier
       int64_t b_size = fixed_b > 0
           ? fixed_b
@@ -938,7 +938,7 @@ std::tuple<Tensor, Tensor> bloom_index_build_cuda(
       nullptr);
 }
 
-// fork (C12): the bloom index at a configured width, bits_per_doc bits per doc in every bundle.
+// the bloom index at a configured width, bits_per_doc bits per doc in every bundle.
 std::tuple<Tensor, Tensor> bloom_index_build_fixed_cuda(
     const Tensor& feature_ids,
     const Tensor& feature_offsets,

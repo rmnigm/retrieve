@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# Modified by the retrieve authors, 2026-10-10: the two half-stripped load_library calls closed into comments (silvertorch/CHANGES.md).
+# Modified by the retrieve authors, 2026-10-10: the two half-stripped load_library calls closed into comments.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ import unittest
 import silvertorch.ops._load_ops  # noqa: F401
 import torch
 
-# @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:is_topk")  (fork: left open by the strip, OF-6)
-# @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:is_topk_gpu")  (fork: left open by the strip, OF-6)
+# @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:is_topk")  (left open by the strip)
+# @oss-disable[end= ]: torch.ops.load_library("//silvertorch/oss/ops/csrc:is_topk_gpu")  (left open by the strip)
 
 HAS_CUDA = torch.cuda.is_available()
 

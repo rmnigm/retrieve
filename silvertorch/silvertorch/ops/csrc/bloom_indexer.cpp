@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: C12: the bloom_index_build_fixed schema (silvertorch/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: a configured bloom width.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -123,7 +123,7 @@ TORCH_LIBRARY_FRAGMENT(st, m) {
       "int k, "
       "bool fast_build=False"
       ") -> (Tensor, Tensor)");
-  // fork (C12), CUDA only: every bundle bits_per_doc bits wide (our m_bits) instead of
+  // CUDA only: every bundle bits_per_doc bits wide (our m_bits) instead of
   // max terms in the bundle x k x b_multiplier.
   m.def(
       "bloom_index_build_fixed("

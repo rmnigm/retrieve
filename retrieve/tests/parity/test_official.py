@@ -278,7 +278,7 @@ def test_t1_int32_path_bitexact(n_lists, max_size, n_probe, d, k, b):
 def test_t1_exact_mask_bitexact(d, reverse):
     """The exact predicate on every path: our ``clause_mask`` packed into the scorer's
     ``filtering_bit_mask`` (full ``N``), the same mask into ``st::search``, and the clauses
-    tested inside ``st::search`` over the probed docs (the layer's exact path, CHANGES.md C14):
+    tested inside ``st::search`` over the probed docs (the layer's exact path):
     scores bit-identical to the oracle under the same mask, ids up to ties."""
     b, k = 16, 32
     f = Family(b, 64, 96, 8, d)
@@ -558,11 +558,11 @@ def test_t5_partial_masks_equal_full_mask_scores(b):
     assert torch.equal(s_f[keep], s_n[keep]) and torch.equal(i_f[keep], i_n[keep])
 
 
-# --- The adapted code's own gates (silvertorch/CHANGES.md) -----------------------------------
+# --- The adapted code's own gates --------------------------------------------------------------
 
 
-def test_c4_prepared_searches_equal_the_upstream_shaped_ones():
-    """The prepared searches (CHANGES.md C4: plans uploaded once, read in place) against the
+def test_prepared_searches_equal_the_upstream_shaped_ones():
+    """The prepared searches (plans uploaded once, read in place) against the
     upstream-shaped searches over CPU plans, on one index and one batch of plans, over ragged
     clusters that start mid-column. Full mask (packed and bool) ``torch.equal``; the partial
     triple equal up to the prepared response's zero tail (cumsum and first offsets
@@ -613,8 +613,8 @@ def test_c4_prepared_searches_equal_the_upstream_shaped_ones():
 
 @pytest.mark.parametrize("partial", [True, False])
 @pytest.mark.parametrize("score_path", ["int32", "fp16"])
-def test_c8_search_bloom_equals_the_upstream_shaped_path(partial, score_path):
-    """``st::search`` end to end on the bloom (CHANGES.md C5 / C8: prep kernel, payloads that
+def test_search_bloom_equals_the_upstream_shaped_path(partial, score_path):
+    """``st::search`` end to end on the bloom (prep kernel, payloads that
     evaluate the bloom in place, scorer, epilogue) against the upstream-shaped search ops +
     scorer + the adapter's epilogue, on ragged clusters starting mid-column with repeated
     expressions; the reference's bloom through its partial masks or its full mask: ids and
@@ -652,8 +652,8 @@ def test_c8_search_bloom_equals_the_upstream_shaped_path(partial, score_path):
     _assert_bitexact(of.fork_search(*args, score_path=score_path, bloom=bloom), ref)
 
 
-def test_c12_configured_bloom_width():
-    """``bloom_width="configured"`` (CHANGES.md C12) builds every bundle ``m_bits`` bits per doc
+def test_configured_bloom_width():
+    """``bloom_width="configured"`` builds every bundle ``m_bits`` bits per doc
     (the index is ``N · m_bits / 8`` bytes rounded to whole bundles) and keeps no false
     negatives against the exact predicate."""
     attrs, offsets, sizes, index, boff = _bloom_corpus()
@@ -673,8 +673,8 @@ def test_c12_configured_bloom_width():
 
 
 @pytest.mark.parametrize("d", [128, 192, 768])
-def test_c6_probe_prep_equals_reference(d):
-    """The prep kernel (``st::probe_prep``, ``search``'s first launch; CHANGES.md C6) against
+def test_probe_prep_equals_reference(d):
+    """The prep kernel (``st::probe_prep``, ``search``'s first launch) against
     our torch path, ``torch.equal`` throughout: codes and scales against ``quantize_int8`` on
     10,000 queries (Gaussian, plus rows of zeros, of one tiny value and of exact ``.5`` code
     quotients), the probed clusters' ids / lengths / offsets against the gathers, and the warp
@@ -707,8 +707,8 @@ def test_c6_probe_prep_equals_reference(d):
 @pytest.mark.parametrize("k", [100, 1000])
 @pytest.mark.parametrize("score_path", ["int32", "fp16"])
 @pytest.mark.parametrize("delta", [-1, 0, 1, None])
-def test_c7_two_level_topk_equals_the_upstream_shaped_path(k, score_path, delta):
-    """``st::search``'s top-k on wide rows (CHANGES.md C7 and the select fixes: the chunked
+def test_two_level_topk_equals_the_upstream_shaped_path(k, score_path, delta):
+    """``st::search``'s top-k on wide rows (the chunked
     radix select over ~34 chunks of 8192 slots; at k 1000 its candidates take a second round)
     against the upstream-shaped scorer + the adapter's whole-width ``torch.topk``, under heavy
     ties (four distinct code rows) and with exactly ``k + delta`` passing items a row (a
@@ -878,9 +878,9 @@ def test_t6_layer_bloom(data, record_property):
     print(f"T6 bloom: {fp} bloom false positives among {B * K} returned slots")
 
 
-def test_c13_recheck_equals_exact(data, record_property):
-    """The bloom with its survivors rechecked (``OfficialConfig.recheck``, the default;
-    CHANGES.md C13) returns the exact filter's result on the same index: ids and scores
+def test_recheck_equals_exact(data, record_property):
+    """The bloom with its survivors rechecked (``OfficialConfig.recheck``, the default)
+    returns the exact filter's result on the same index: ids and scores
     ``torch.equal`` up to ties at int32, with no false positive; without the recheck the same
     index lets at least one through."""
     cfg = {"score_path": "int32", "n_stored_hashes": HASH_K}
@@ -897,7 +897,7 @@ def test_c13_recheck_equals_exact(data, record_property):
     fp = int(((ids >= 0) & ~passing).sum())
     record_property("bloom_m64_false_positives_without_recheck", fp)
     assert fp > 0, "no false positive at m_bits 64: the gate cannot see the recheck"
-    print(f"C13: {fp} false positives at m_bits 64 without the recheck, 0 with it")
+    print(f"recheck: {fp} false positives at m_bits 64 without the recheck, 0 with it")
 
 
 def test_t6_layer_contract(data):

@@ -1,5 +1,5 @@
 # Copyright (c) the retrieve authors. Licensed under the Apache License, Version 2.0, as the
-# rest of this package (silvertorch/LICENSE); added in the fork (silvertorch/CHANGES.md).
+# rest of this package (silvertorch/LICENSE); added by the retrieve authors, 2026-10-10.
 
 """Shape functions of every ``st`` op, so ``torch.compile`` traces a forward whole (the
 harness ``graph`` mode) and ``torch.library.opcheck`` passes on each (the compile gate). The

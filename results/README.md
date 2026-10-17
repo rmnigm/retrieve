@@ -202,7 +202,7 @@ The records were measured at the commit tagged `measured-final-run` (every recor
 the reverse-clause runs (`reverse_clause`, `algo` `silvertorch`): those were taken on a branch
 commit outside this history (`code_version` `08d54df3e5d71a2c33b8afccb455f61877d5f9fe`) whose
 code differs from the commit tagged `measured-clause-filter-runs` by one source comment; it adds
-the exact filter's int32 clause-slot layout (CHANGES C14) to the first revision.
+the exact filter's int32 clause-slot layout to the first revision.
 
 This tree differs from the measured revision in ways that change names or picks, not the
 measured kernels:

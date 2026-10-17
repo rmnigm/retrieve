@@ -416,7 +416,7 @@ def test_smi_device_is_the_first_visible_device(monkeypatch, visible, want):
 
 
 def test_silvertorch_build_records_the_extension_and_its_flags(monkeypatch, tmp_path):
-    """OF-11: the loaded extension's sha256, and the nvcc flags its build recipe wrote beside it
+    """The loaded extension's sha256, and the nvcc flags its build recipe wrote beside it
     (``None`` = Meta's setup.py defaults); ``None`` overall without silvertorch."""
     pkg = tmp_path / "silvertorch"
     pkg.mkdir()

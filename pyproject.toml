@@ -22,7 +22,7 @@ members = ["retrieve", "evaluation", "silvertorch"]
 [tool.uv.sources]
 torchretrieve = { workspace = true }
 retrieve-evaluation = { workspace = true }
-# Meta's SilverTorch code, adapted (silvertorch/CHANGES.md): Apache-2.0, ops under torch.ops.st.*.
+# Meta's SilverTorch code, adapted: Apache-2.0, ops under torch.ops.st.*.
 silvertorch = { workspace = true }
 
 [dependency-groups]

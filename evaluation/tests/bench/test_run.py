@@ -1,8 +1,8 @@
 """CPU end-to-end tests for ``bench.run`` on the tiny fixture of
 ``conftest.py``: ``backend="torch"``, both modes — ``graph`` needs CUDA, so on this box every
 graph entry is the null entry with ``reason: cuda_unavailable`` (the exact path the
-``cuda`` backend takes on the A100; capture itself is C4's gate) — shrunken latency
-windows.
+``cuda`` backend takes on the A100; capture itself is gated in the library's parity suite) —
+shrunken latency windows.
 
 Checked: the JSONL record schema (H §3.2 + §8.2 amendments: key block, ``schema_version``,
 ``status``, quality shapes per filter kind, one perf entry per ``(bs, k, mode)`` with the

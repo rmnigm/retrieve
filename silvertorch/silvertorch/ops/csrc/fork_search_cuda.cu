@@ -1,5 +1,5 @@
 // Copyright (c) the retrieve authors. Licensed under the Apache License, Version 2.0, as the
-// rest of this package (silvertorch/LICENSE); added in the fork (silvertorch/CHANGES.md, C5-C9).
+// rest of this package (silvertorch/LICENSE); added by the retrieve authors, 2026-10-10.
 
 // st::search: the whole SilverTorch phase 2 + 3 forward in one op call: one prep launch
 // (query int8, probed clusters, warp cumsums), the filter (bloom over prepared plans or the exact
@@ -34,7 +34,7 @@ namespace {
 constexpr int kPrepThreads = 1024;
 // Average full warps per probed cluster from which the payload kernels run a warp per cluster.
 constexpr int64_t kPerClusterWarps = 40;
-// ... and only with many clusters (K fix 14: per-warp won at 1536 and 4096 clusters, per-cluster at 16384).
+// ... and only with many clusters (per-warp won at 1536 and 4096 clusters, per-cluster at 16384).
 constexpr int64_t kPerClusterMinClusters = 8192;
 
 
@@ -44,7 +44,7 @@ struct MaxOp {
   }
 };
 
-// K fix 2: the top-k as a radix select per row chunk in one CTA, its [B, k] epilogue fused. A
+// the top-k as a radix select per row chunk in one CTA, its [B, k] epilogue fused. A
 // score's key is a uint32 that orders like the score (int32: sign bit flipped; fp16: the IEEE
 // order trick on the bits; a slot the scorer never wrote ranks lowest, INT_MIN on int32, -inf
 // on fp16). Four 8-bit histogram passes find the k-th largest key T; keys above T are taken,
@@ -57,7 +57,7 @@ constexpr int kSelectThreads = 512;
 constexpr int kSelectItems = 16; // keys a thread holds in registers
 constexpr int64_t kSelectChunk = kSelectThreads * kSelectItems;
 constexpr int64_t kSelectMaxK = 1024;
-// the two-level block size and thresholds (C7, K fix 9)
+// the two-level block size and thresholds
 constexpr int64_t kTopkBlock = 256;
 constexpr int64_t kTopkMinSlots = int64_t{1} << 23;
 constexpr int64_t kTopkMinRatio = 8;
@@ -81,7 +81,7 @@ __device__ __forceinline__ uint32_t composite_slot(uint64_t c) {
 }
 
 // Raw scores of row `row`, slots [first, first + n): the key, -inf's on fp16 for unwritten slots.
-// `limit[row]` (K fix 10): the row's written width; slots past it are empty (lowest key).
+// `limit[row]`: the row's written width; slots past it are empty (lowest key).
 template <typename T>
 struct RawKeys {
   const T* raw;
@@ -467,8 +467,8 @@ __global__ void __launch_bounds__(kSelectThreads, 2) select_chunk_kernel(
   }
 }
 
-// K fix 9: very wide rows (>= kTopkMinRatio blocks of kTopkBlock slots per top-k slot) are cut
-// to the slots of their k best blocks first (the block maxima folded by the scorer, K fix 12) (C7's two-level argument: a block holding a slot above
+// very wide rows (>= kTopkMinRatio blocks of kTopkBlock slots per top-k slot) are cut
+// to the slots of their k best blocks first (the block maxima folded by the scorer) (the two-level argument below: a block holding a slot above
 // the k-th score has a larger max than any block without one). Blocks tied at the k-th max are
 // taken in index order and the chosen blocks gathered in ascending order, so the earliest tied
 // slots stay candidates and the tie choice is still torch's.
@@ -643,7 +643,7 @@ __global__ void epilogue_kernel(
   scores[i] = score;
 }
 
-// One launch for everything before the masks (C6). Blocks [0, B): row b's int8 codes and scale,
+// One launch for everything before the masks. Blocks [0, B): row b's int8 codes and scale,
 // bit for bit retrieve.indexing.quantize.quantize_int8 as eager torch computes it: abs max
 // clamped at fp32(1e-8); scale = abs_max * fp32(1 / 127) (torch divides by a CPU scalar as a
 // multiply by its fp32 reciprocal); code = rint(fp32(fp64(x) / fp64(abs_max)) * 127) clamped to
@@ -767,7 +767,7 @@ __global__ void __launch_bounds__(kPrepThreads) probe_prep_kernel(
   }
 }
 
-// The two-level top-k (C7; our Triton epilogue's, kernels.md § SilverTorch kernels "Top-k"):
+// The two-level top-k (our Triton epilogue's, kernels.md § SilverTorch kernels "Top-k"):
 // from kTopkMinSlots slots of [B, W], where a row has at least kTopkMinRatio whole kTopkBlock-slot
 // blocks per top-k slot, the top-k runs on the slots of the row's k best blocks. Exact: every
 // block holding a slot above the k-th score has a larger max than any block without one, and
@@ -913,14 +913,14 @@ std::tuple<Tensor, Tensor> raw_topk(const Tensor& raw, const Tensor& idx, int64_
   return {top_raw, cand_slot.gather(1, cand_pos)};
 }
 
-// C9: the exact filter over the probed docs only (our clause_subset_match: a clause passes when
+// the exact filter over the probed docs only (our clause_subset_match: a clause passes when
 // any of the doc's values equals the query's, negated for a reverse clause; an inactive clause,
-// query value -1, always passes), evaluated into the scorer's payloads like C8's bloom.
+// query value -1, always passes), evaluated into the scorer's payloads like the bloom.
 using st::ops::fork_filters::ExactClauses;
 using st::ops::fused_kmean_ann::RemainingPayload;
 using st::ops::fused_kmean_ann::WarpPayload;
 
-// fork (K fix 7): the cluster of warp slot w (first i with inclusive_cumsum[i] > w), searched
+// the cluster of warp slot w (first i with inclusive_cumsum[i] > w), searched
 // by the 32 lanes of a warp together: each step every lane tests one of 32 evenly spaced
 // positions, so ~log32(n) dependent loads instead of log2(n). Every lane gets the result.
 __device__ __forceinline__ int32_t warp_find_cluster(
@@ -945,7 +945,7 @@ __device__ __forceinline__ int32_t warp_find_cluster(
 
 // One warp per full-warp payload: lane l tests doc start + l; the ballot, bit-reversed, is the
 // payload's high-first 32-bit mask (doc start at bit 31, as get_bit_32_bit_mask reads it). With a
-// full-N `pre_mask` (C13: the bloom's, high-first words) only its passing docs are tested.
+// full-N `pre_mask` (the bloom's, for the recheck; high-first words) only its passing docs are tested.
 __device__ __forceinline__ bool pre_mask_bit(
     const uint64_t* __restrict__ pre_mask,
     int64_t pre_mask_columns,
@@ -1057,7 +1057,7 @@ __device__ __forceinline__ void exact_remaining_payload_body(
   }
 }
 
-// The full-warp and remainder payloads in one launch (K fix 18, as bloom_payloads_kernel).
+// The full-warp and remainder payloads in one launch (as bloom_payloads_kernel).
 template <bool PER_CLUSTER>
 __global__ void exact_payloads_kernel(
     ExactClauses clauses,
@@ -1089,7 +1089,7 @@ __global__ void exact_payloads_kernel(
   }
 }
 
-// The exact test's inputs (C14: fork_clause_attrs' int32 [R, N] slots, int64 [C + 1] clause
+// The exact test's inputs (fork_clause_attrs' int32 [R, N] slots, int64 [C + 1] clause
 // slot offsets; int32 [B, C] query attrs), checked once here.
 ExactClauses exact_clauses(
     const Tensor& item_clause_attrs,
@@ -1278,7 +1278,7 @@ std::tuple<Tensor, Tensor> search_cuda(
     const std::optional<Tensor>& clause_is_reverse,
     const std::optional<Tensor>& query_clause_attrs) {
   TORCH_CHECK(item_codes.scalar_type() == at::kChar && item_codes.size(1) == query.size(1));
-  // query_clause_attrs alone is the exact filter (C9); with plans, the bloom's exact recheck (C13)
+  // query_clause_attrs alone is the exact filter; with plans, the bloom's exact recheck
   const bool exact = query_clause_attrs.has_value();
   TORCH_CHECK(
       !(filtering_bit_mask.has_value() && (plans.has_value() || exact)),
@@ -1307,8 +1307,8 @@ std::tuple<Tensor, Tensor> search_cuda(
   std::optional<std::tuple<Tensor, int64_t, Tensor, int64_t>> payloads;
   std::optional<Tensor> mask = filtering_bit_mask;
   if (plans.has_value()) {
-    // the bloom over the probed clusters' columns only (C8): what the scorer reads of Meta's
-    // full-N mask, so the full path's result too, without its scan of all N (K fix 17)
+    // the bloom over the probed clusters' columns only: what the scorer reads of Meta's
+    // full-N mask, so the full path's result too, without its scan of all N
     TORCH_CHECK(bloom_index.has_value() && bloom_bundle_b_offsets.has_value());
     payloads = st::ops::bloom_search::bloom_partial_payloads_prepared_cuda(
         *bloom_index,
@@ -1342,13 +1342,13 @@ std::tuple<Tensor, Tensor> search_cuda(
         mask);
   }
 
-  // C11: the cooperative-load scorer from D 128; the query stays in registers (no consistent winner)
+  // the cooperative-load scorer from D 128; the query stays in registers (no consistent winner)
   const bool query_shared = false;
   const bool coop = item_codes.size(1) >= 128;
-  // our select reads only each row's written slots, so the scorer need not pre-fill (K fix 10)
+  // our select reads only each row's written slots, so the scorer need not pre-fill
   const bool write_failed = k <= kSelectMaxK;
-  // very wide rows go through the block prefilter (K fix 9), whose block maxima the scorer
-  // folds as it writes (K fix 12)
+  // very wide rows go through the block prefilter, whose block maxima the scorer
+  // folds as it writes
   const int64_t rows = cluster_ids.size(0);
   const int64_t n_blocks = (width + kTopkBlock - 1) / kTopkBlock;
   const bool prefilter = write_failed && width > kSelectChunk &&

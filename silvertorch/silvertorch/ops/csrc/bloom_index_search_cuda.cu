@@ -1,5 +1,5 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
-// Modified by the retrieve authors, 2026-10-10: C4: prepared-plan search ops, no host sync; C8: bloom-evaluating payload kernels; C13: their exact recheck; K fix 4: signature_match loads after resolving; C14: the recheck reads the int32 clause-slot layout (silvertorch/CHANGES.md).
+// Modified by the retrieve authors, 2026-10-10: prepared-plan searches and payload kernels with filtering.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -335,7 +335,7 @@ __inline__ __device__ uint64_t signature_match<true>(
       used_b_p[resolved++] = b_p;
     }
   }
-  // fork (K fix 4): the k index words loaded after the positions are resolved, so the loads
+  // the k index words loaded after the positions are resolved, so the loads
   // are independent and overlap (upstream loads each one inside the resolve loop); same bits.
 #pragma unroll
   for (int32_t i = 0; i < MAX_K_V2; ++i) {
@@ -820,12 +820,12 @@ __global__ void process_documents_on_probed_columns_kernel(
   }
 }
 
-// C8: the scorer's payloads with the bloom evaluated in place, for the partial path. A full
+// the scorer's payloads with the bloom evaluated in place, for the partial path. A full
 // warp's 32 docs (and a cluster's < 32 remainder docs, one warp per cluster) lie in at most two
 // 64-doc bloom columns, so the payload kernel evaluates those columns' plan results itself and cuts its mask out of
 // them as upstream's payload kernels cut it out of column_mask_response: the same bits, without
 // the column assignment, its cumsum, the response buffer or its launch. Index math as
-// fused_kmean_ann_cuda.cu's partial-mask payload kernels; warp slots found as C3 finds them.
+// fused_kmean_ann_cuda.cu's partial-mask payload kernels; warp slots found by a binary search over the warp cumsum, as there.
 using st::ops::fused_kmean_ann::RemainingPayload;
 using st::ops::fused_kmean_ann::WarpPayload;
 
@@ -974,7 +974,7 @@ __device__ __forceinline__ void bloom_remaining_payload_body(
   }
 }
 
-// fork (K fix 18): the full-warp and remainder payloads in one launch, blocks [0, warp_blocks)
+// the full-warp and remainder payloads in one launch, blocks [0, warp_blocks)
 // the former, the rest the latter: independent, so at small batches their latencies overlap
 // instead of adding up.
 template <int32_t STACK_SIZE>
@@ -1013,7 +1013,7 @@ __global__ void bloom_payloads_kernel(
   }
 }
 
-// fork (K fix 7): the cluster of warp slot w (first i with inclusive_cumsum[i] > w), searched
+// the cluster of warp slot w (first i with inclusive_cumsum[i] > w), searched
 // by the 32 lanes of a warp together: each step every lane tests one of 32 evenly spaced
 // positions, so ~log32(n) dependent loads instead of log2(n). Every lane gets the result.
 __device__ __forceinline__ int32_t warp_find_cluster(
@@ -1036,9 +1036,9 @@ __device__ __forceinline__ int32_t warp_find_cluster(
   return lo + __ffs(above) - 1;
 }
 
-// C13: the same payloads with the bloom's survivors rechecked exactly (bloom ∧ exact = exact,
+// the same payloads with the bloom's survivors rechecked exactly (bloom ∧ exact = exact,
 // the bloom having no false negatives). A warp takes `per_warp` (≤ 32) consecutive full-warp
-// payloads, lane l evaluating payload l's bloom as C8 does (K fix 15: with one payload a warp,
+// payloads, lane l evaluating payload l's bloom as the kernels above do (with one payload a warp,
 // 30 lanes idled through the plan at wide probes; small grids keep fewer a warp to keep the
 // warps); then the warp takes its payloads in turn, skipping those without bloom survivors, each
 // lane rechecking one doc, the bit-reversed ballot the payload's mask.
@@ -1939,8 +1939,8 @@ bloom_index_search_batch_return_partial_response_prepared_cuda(
       std::move(column_mask_response));
 }
 
-// C8 host side: (warp payloads, warp capacity, remainder payloads, remainder capacity) for the
-// partial bloom path, the capacities as C3's (rows · max / 32 warps; rows · min(31 · P, max)
+// Host side of the partial bloom path: (warp payloads, warp capacity, remainder payloads,
+// remainder capacity), the capacities as fused_kmean_ann's (rows · max / 32 warps; rows · min(31 · P, max)
 // remainder docs); the warp and remainder totals stay on the device (the cumsums' last elements).
 std::tuple<Tensor, int64_t, Tensor, int64_t> bloom_partial_payloads_prepared_cuda(
     const Tensor& bloom_index,
@@ -2014,7 +2014,7 @@ std::tuple<Tensor, int64_t, Tensor, int64_t> bloom_partial_payloads_prepared_cud
             warp_blocks);                                                         \
     C10_CUDA_KERNEL_LAUNCH_CHECK();                                               \
   }
-    // payloads a warp: as many as keep >= 64 warps an SM (K fix 15)
+    // payloads a warp: as many as keep >= 64 warps an SM
     const int per_warp =
         static_cast<int>(std::clamp<int64_t>(warps / (64 * (max_grid / 128)), 1, 32));
     if (max_stack_size <= C_FAST_ROUTE_STACK_SIZE_FIRST_LEVEL) {

@@ -66,13 +66,13 @@ INT32 = torch.iinfo(torch.int32)
 
 
 def fork_clause_attrs(attrs: Tensor) -> tuple[Tensor, Tensor]:
-    """``[N, C, A]`` cluster-sorted narrow attrs (values ``>= -1``, ``-1`` pad) → the fork's exact
-    layout (CHANGES.md C14, kernels.md § cuda): ``slots`` int32 ``[R, N]``, clause
+    """``[N, C, A]`` cluster-sorted narrow attrs (values ``>= -1``, ``-1`` pad) → the adapted code's
+    exact layout (kernels.md § cuda): ``slots`` int32 ``[R, N]``, clause
     ``c``'s values in rows ``clause_slots[c]:clause_slots[c + 1]``, each doc's values sorted
     descending so its pads come last, every clause as wide as its widest doc; ``clause_slots``
     int64 ``[C + 1]``."""
     if attrs.numel() and (int(attrs.min()) < -1 or int(attrs.max()) > INT32.max):
-        raise ValueError("the fork's exact filter takes attr values in [-1, 2**31 - 1]")
+        raise ValueError("the exact filter takes attr values in [-1, 2**31 - 1]")
     attrs = attrs.sort(dim=2, descending=True).values
     widths = (attrs != -1).sum(dim=2).amax(dim=0)
     slots = torch.cat([attrs[:, c, :w].T for c, w in enumerate(widths.tolist())])
@@ -82,7 +82,7 @@ def fork_clause_attrs(attrs: Tensor) -> tuple[Tensor, Tensor]:
 
 
 def fork_query_attrs(query_clause_attrs: Tensor) -> Tensor:
-    """``[B, C]`` query attrs → int32 for the fork's exact filter: a value no doc can hold
+    """``[B, C]`` query attrs → int32 for the adapted code's exact filter: a value no doc can hold
     (outside ``[-1, 2**31 - 1]``, see :func:`fork_clause_attrs`) becomes ``INT32.min``, which
     matches nothing either."""
     q = query_clause_attrs.long()
@@ -218,7 +218,7 @@ def prepare_plans(
     *,
     slots: int,
 ) -> DevicePlans:
-    """Meta's CPU parse, then its encoding uploaded once (one pinned H2D) as the fork's
+    """Meta's CPU parse, then its encoding uploaded once (one pinned H2D) as the adapted code's
     :class:`DevicePlans`. The blob is padded to ``slots`` plans of
     :func:`plan_capacity_bytes`, so it has one shape per ``(slots, n_clauses, hash_k)`` (a graph
     replays any batch of that shape). Query preparation: ``SilverTorch.prepare_queries`` runs it
@@ -480,8 +480,9 @@ def official_probe_score(
 
 
 class ForkBloom(NamedTuple):
-    """The fork's bloom filter for one forward: the official index, the prepared plans with their
-    row → plan index (``None``: a plan per row), the search ``k`` and the stored hashes."""
+    """The adapted code's bloom filter for one forward: the official index, the prepared plans
+    with their row → plan index (``None``: a plan per row), the search ``k`` and the stored
+    hashes."""
 
     bloom_index: Tensor
     bundle_b_offsets: Tensor
@@ -562,8 +563,8 @@ def bloom_partial_masks(
     ``lengths`` are int64 ``[B, P]`` (``cluster_offsets[probe_ids]``,
     ``cluster_sizes[probe_ids]``). ``query_plan_index`` (int64 ``[B]`` on the device) maps each
     row to its plan, so ``plans`` may hold one plan per distinct expression
-    (``bloom_index_search_cuda.cu:1230``). ``plans`` as :class:`DevicePlans` (the fork) runs the
-    prepared search, whose ``column_mask_response`` has the static length ``max_columns``
+    (``bloom_index_search_cuda.cu:1230``). ``plans`` as :class:`DevicePlans` (the adapted code)
+    runs the prepared search, whose ``column_mask_response`` has the static length ``max_columns``
     (:func:`max_partial_columns`) with a zero tail."""
     st = ensure_loaded()
     if not 0 < k <= MAX_SEARCH_K:
@@ -609,7 +610,7 @@ def bloom_full_mask(
 ) -> Tensor:
     """``bloom_index_search_batch`` over the whole index: bool ``[B, n_bundles·2048]`` or
     the packed int64 ``[B, n_bundles·32]`` (high-first words); over :class:`DevicePlans` (the
-    fork, one plan per row) the prepared search."""
+    adapted code, one plan per row) the prepared search."""
     st = ensure_loaded()
     if not 0 < k <= MAX_SEARCH_K:
         raise ValueError(

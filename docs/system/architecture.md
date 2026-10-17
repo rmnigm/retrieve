@@ -76,7 +76,7 @@ for `SilverTorch`; every constructor validates its own):
 |---|---|---|
 | `"triton"` | fused Triton kernels. The default. | every module but `SilverTorch` |
 | `"torch"` | pure-torch eager equivalent, same semantics, larger intermediates | every module but `SilverTorch` |
-| `"cuda"` | Meta's SilverTorch code, adapted ([`silvertorch/`](../../silvertorch/CHANGES.md), package `silvertorch`, `torch.ops.st.*`) for phases 2+3 through the adapter; `SilverTorch`'s only backend; CUDA-graph capturable and compilable | **`SilverTorch` only** |
+| `"cuda"` | Meta's SilverTorch code, adapted ([`silvertorch/`](../../silvertorch/), package `silvertorch`, `torch.ops.st.*`) for phases 2+3 through the adapter; `SilverTorch`'s only backend; CUDA-graph capturable and compilable | **`SilverTorch` only** |
 
 `"cuda"` needs the `silvertorch` workspace member, a dependency of `torchretrieve` that builds a
 CUDA extension and registers sixteen `torch.ops.st.*` ops. The adapter is the
@@ -315,8 +315,7 @@ The predicate, `filter_mode ∈ {"none", "bloom", "exact"}`:
   clauses supported, tested inside the search op over the probed docs.
 
 The ops ([kernels](kernels.md#silvertorch-on-metas-ops)): `backend="cuda"`, Meta's code adapted
-(`torch.ops.st.*`, the `silvertorch/` workspace member, its changes in
-[CHANGES](../../silvertorch/CHANGES.md)): one `search` op after phase 1, bloom plans prepared once
+(`torch.ops.st.*`, the [`silvertorch/`](../../silvertorch/) workspace member): one `search` op after phase 1, bloom plans prepared once
 on the device, no host sync in the forward, so it captures and compiles. Meta's code as published
 (`backend="official"`) left the workspace when the adapted code took Meta's names ([kernels](kernels.md#deleted-backends)).
 
