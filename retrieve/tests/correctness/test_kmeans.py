@@ -171,8 +171,10 @@ def _blobs(n_blobs: int, per_blob: int, d: int, *, noise: float = 0.02, seed: in
 def test_kmeanspp_seeds_are_a_valid_d2_sample():
     """``n_iter=0`` returns the seeds: each is a row of the index, all distinct (a point at zero
     D² mass — one already chosen — is never drawn again), and on separable blobs one lands in
-    every blob."""
-    embs, blob = _blobs(16, 128, 32)
+    every blob. That last part is probabilistic: a blob is missed with probability about the
+    within-blob over the between-blob D² mass, measured 49 % of seeds at the default noise and
+    ~1e-5 by that ratio at this one."""
+    embs, blob = _blobs(16, 128, 32, noise=1e-4)
     km = KMeans(n_lists=16, n_iter=0, seed=0, init="kmeans++")
     centroids, assignments = km.fit(embs)
     hit = (centroids[:, None, :] == embs[None, :, :]).all(dim=-1)  # [16, N]
