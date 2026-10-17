@@ -194,6 +194,7 @@ not for the paper; the choice stands.
 | pubmed (`pubmed-medcpt-dot`, the final run's) | on the Hub as `pinkmeme/eval-pubmed@10d48d05` (private). MedCPT scores by dot product, so vectors are stored as shipped, not normalised (`config/pubmed.yaml` `normalize: false`); item norms mean 8.86, CV 3.4 %. Exact top-100 overlap of dot product vs cosine on queries with ≥ 100 passing items: unfiltered 0.53, `c0_mesh` 0.92 |
 | laion1m-30m | staged through `eval-data ingest`; `bench check` ok. 30,000,000 distinct-caption items + 10,000 held-out caption queries from Re-LAION parts 0-1, 1,430,979 domains; encode (bf16 nomic-embed-text-v1.5, Matryoshka d256) 10.1 k captions/s; query↔target cosine median 0.80. Not on the Hub (waits for the user's release decision) ([datasets](../docs/system/datasets.md#laion30m)) |
 | yambda-500m | **in, unfiltered**: from `pinkmeme/eval-yambda-500m` with its checkpoints; `test.parquet` is the Hub's `trainer/test.parquet` (45,932 users); `bench check` d64 / d128 / d256 ok |
+| anonymous input and records archive (A1; [artifact](artifacts/hf-export/README.md)) | **built, not uploaded** (waits for the user's anonymous Hub owner): goodreads (d128 checkpoint), arxiv (d128, d256), pubmed, yambda-500m (3 checkpoints), the 106 final-run legs as neutral `runs/<run>`; 35.98 GB. **Checks (CPU):** every per-query pass count in the records' sidecars recomputed from the shipped attrs (goodreads / arxiv / pubmed real filters, 14 sweep × mode pairs, all queries on single clauses, 300 on multi-clause): equal; the regenerated uniform synth draws: 45 / 45 pass counts equal; `bench check` ok on every config at the run's dims; every record and sample line equal to the Hub's outside the scrubbed fields (suite names, host, paths), every sidecar byte-equal; identifier scan 0 hits. **Not equal:** the regenerated `arxiv-corr-synth` at `c001` / `c01` (k-means stops at its 25-iteration cap; CPU float order moves items; mean pass rate equal to 6 digits, per-query counts off by a median 9e-5 / 6e-6); `c003` equal per query. **Missing:** LAION 1M-30M (not on the Hub or this pod) |
 | out of the study | YFCC-10M, OpenAlex, KuaiRand, yambda-5b ([decisions](decisions.md#datasets)); no result of theirs is cited |
 
 ### Trainer inputs with `timestamps` (data gates, not citable)
@@ -285,6 +286,12 @@ atomically.
   sample; safe only because the current files are shuffled.
 - `scripts/check_doc_links.py` cannot parse `for … in f(...)` in a CLI
   module.
+- The export branch's git history names its author on every commit (1,661 commits by the
+  author's name or handle; the remote is the author's GitHub). The anonymous release must
+  be a single snapshot with an anonymous author, not a push of `export`'s history.
+- The anonymous archive lacks LAION 1M-30M: the staged `laion30m` exists on no pod reachable
+  now and not on the Hub; re-staging needs the GPU encode, and a re-encode is not checked to
+  be byte-equal to the run's.
 - Every row above on a new pod, until the library suite has run there.
 
 ## Superseded results
