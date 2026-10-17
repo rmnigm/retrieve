@@ -58,7 +58,7 @@ def provenance(recs: list[dict[str, Any]], gate: str | None) -> dict[str, Any]:
     )
     if off:
         add(
-            f"record(s) produced on {', '.join(off)} — CLAUDE.md rule 2: "
+            f"record(s) produced on {', '.join(off)} — "
             "harness numbers from a branch are not paper material",
             f"branch {', '.join(off)}",
         )
@@ -131,7 +131,7 @@ def report_md(results_dir: Path, recs: list[dict[str, Any]], prov: dict[str, Any
         f"- runs (commit, branch): {p['runs']}",
         f"- gpu: {p['gpus']}  host: {p['hosts']}  window: {p['started'][0]} .. {p['started'][1]}",
         "",
-        "## Citability (CLAUDE.md rule 2)",
+        "## Citability",
         "",
     ]
     if p["citable"]:

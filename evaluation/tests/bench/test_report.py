@@ -122,8 +122,7 @@ def test_each_reason_is_stated_in_the_verdict_and_the_report(results, tmp_path):
         "1 record(s) with status=failed",
         "1 record(s) with status=partial (partial_reasons: skip_perf 1)",
         "1 record(s) with env.dirty (library subtree was dirty)",
-        "record(s) produced on dev/x — CLAUDE.md rule 2: harness numbers from a branch are "
-        "not paper material",
+        "record(s) produced on dev/x — harness numbers from a branch are not paper material",
     ]
     assert prov["marks"] == [
         "gate not green", "1 failed", "1 partial: skip_perf 1", "1 dirty", "branch dev/x"

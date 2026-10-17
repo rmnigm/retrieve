@@ -3,7 +3,7 @@
 The gates this pins — the command had none until now (V §11 listed it "exercised by no
 test"): campaign scratch never leaves the box, the manifest's checksums describe the files
 actually listed, the citability verdict travels with the payload and ``--gate`` cannot beat
-the evidence (CLAUDE.md rule 2), the generated README says so in prose, the round-trip check
+the evidence, the generated README says so in prose, the round-trip check
 catches a changed byte, and the commit carries every file plus the two generated ones with
 ``private=True`` unless ``--public`` is passed.
 

@@ -548,7 +548,7 @@ never renamed (the composites' `filter.` prefix).
 
 ## Which page owns what
 
-One home per fact (AGENTS.md):
+One home per fact:
 when a code area's behaviour changes, this is the `docs/system` page to
 update in the same commit.
 

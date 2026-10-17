@@ -1,5 +1,5 @@
-"""Report relative markdown links whose target does not exist; in the docs (AGENTS.md,
-README.md, docs/) also backticked repo paths that do not exist and `bench` / `eval-data` /
+"""Report relative markdown links whose target does not exist; in the docs (README.md,
+results/README.md, docs/) also backticked repo paths that do not exist and `bench` / `eval-data` /
 `train` subcommands the click groups do not define; and `docs/... § Heading` citations in
 tracked files whose heading is gone (cited headings are stable). The command table is read from the CLI sources with ast:
 nothing is imported or run."""
@@ -85,7 +85,7 @@ def commands(package: Path) -> set[str]:
 
 
 def in_wiki(rel: str) -> bool:
-    return rel in ("AGENTS.md", "README.md") or rel.startswith("docs/")
+    return rel in ("README.md", "results/README.md") or rel.startswith("docs/")
 
 
 def _plain(text: str) -> str:
