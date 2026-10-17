@@ -185,6 +185,27 @@ Hugging Face dataset repo, one run is fetched and checked with
 `bench fetch --repo-id <owner>/<repo> --path-in-repo <run>`
 ([`bench fetch`](../docs/system/evaluation.md#bench-fetch)).
 
+## Measured revision
+
+The records were measured at the commit tagged `measured-final-run` (every record's
+`code_version` is `3c8198dfc35c299ea0f9d3a59a5eaf299494332e`), except the 39 SilverTorch records of
+the reverse-clause runs (`reverse_clause`, `algo` `silvertorch`): those were taken on a branch
+commit outside this history (`code_version` `08d54df3e5d71a2c33b8afccb455f61877d5f9fe`) whose
+code differs from the commit tagged `measured-clause-filter-runs` by one source comment; it adds
+the exact filter's int32 clause-slot layout (CHANGES C14) to the first revision.
+
+This tree differs from the measured revision in ways that change names or picks, not the
+measured kernels:
+
+- **Names.** The adapted code was `backend="official-fork"` (package `silvertorch_fork`) and Meta's
+  code as published `backend="official"`; the records here carry today's names (`cuda`,
+  `published`). Meta's code as published is no longer installed.
+- **Clustering metric.** The records' IVF assigned items to clusters by L2 in k-means and probed
+  by inner product; this tree uses inner product for both, so rebuilt indexes, and the probe
+  counts that reach a recall target, can differ.
+- **Removed.** Our Triton SilverTorch reimplementation and our LiNR bloom filter (neither in the
+  records here), and the harness's `bloom_path` arm (see the historical suites below).
+
 ## Final-run configuration
 
 The final run did not run [`evaluation/config/suites.yaml`](../evaluation/config/suites.yaml) as
@@ -206,7 +227,7 @@ shipped. It ran the suites in [`final-run-config/suites.yaml`](final-run-config/
 - `curve-d128` (the Goodreads genre points), `yambda`: the recall bridge (quality only);
 - `filter`, `linr-bs64`, `linr-bs256`: the exact LiNR on the reverse-clause filters (batch 1 / 16,
   and 64); `timed-clause-lite-d128` / `-d256` / `-d768`: SilverTorch's exact clause filter on
-  them, run on a later revision.
+  them, run on a later revision ([Measured revision](#measured-revision)).
 
 The follow-up runs at deeper probes and the 20 / 30 / 50 % synthetic timings were generated the
 same way; their configurations are the `followup_run` rows and the 20-50 % `*-synth` rows of

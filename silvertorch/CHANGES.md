@@ -15,6 +15,11 @@ published left the workspace at the RENAME step (its last parity run against thi
 `silvertorch_fork`, ops `torch.ops.stfork.*`), so both loaded in one process for the parity gates and the interleaved
 timing; the "rename" row below is that interval.
 
+**Measured revision.** The study's records were measured at tag `measured-final-run` (the rows up to the
+rename; this directory was `official-fork/` then), and its reverse-clause runs with the exact clause filter at tag
+`measured-clause-filter-runs` (C14 added). Later rows change names and k-means only; see
+[`results/README.md`](../results/README.md#measured-revision).
+
 ## Changes (newest last; each gated as its row says: bit-exact against Meta's code as published while it was installed, or by its own check)
 | change | files | what |
 |---|---|---|
