@@ -145,9 +145,12 @@ docstrings cite these steps as `§2.1`-`§2.8`.
    rebuild). Seeds change the IVF (k-means), the OPORP projection
    (`seed`) and the pool; V1/V2 and the postfilter are seed-invariant in
    quality, so their later seeds copy seed 0's ([quality cache](#quality-cache)).
-   Every suite runs seeds `[0, 1, 2]` on every dataset and sweep (user,
-   2026-10-08), `codesign`'s as timing repeats; `h2h` runs five. The report takes the
-   median across seeds with min-max whiskers.
+   A suite runs the seeds its `seeds` list names (default `[0]`; see
+   [config](#config-one-yaml-per-dataset--suitesyaml) for what `config/suites.yaml` sets). The
+   paper's final run used its own suite files and covered seed 0 everywhere and seeds
+   1-2 only on the head-to-head runs
+   ([`results/README.md`](../../results/README.md#final-run-configuration)). The report
+   takes the median across seeds with min-max whiskers.
 7. **Comparability, stated once in the paper.** Same as SilverTorch: A100,
    D=128, INT8 IVF, an `n_probe` grid including **24** (their production
    setting), bloom bits and FP rate, mean latency at bs=16 against recall
@@ -386,7 +389,10 @@ every `config/*.yaml` against every suite through `load_matrix`: a listed
 dataset expands to jobs, an unlisted one is refused by name and still
 resolves at each of its dims.
 
-`suites.yaml` holds the study grid. Seed 0 everywhere; seeds `{0, 1, 2}` in `filter` and in the `seeds-*` suites (the
+`suites.yaml` holds the study grid as the harness ships it. The paper's numbers come from the final run, whose suites
+(this grid's blocks plus the generated head-to-head, probe-sweep and pass-rate suites) are in
+[`results/final-run-config/`](../../results/final-run-config/suites.yaml); read that, not this file, for what the paper ran.
+In this file: seed 0 everywhere; seeds `{0, 1, 2}` in `filter` and in the `seeds-*` suites (the
 interleaved rounds are the timing repeats elsewhere). Batch sizes are `{1, 16}` (bs 64 only in `codesign-laion30m`,
 `c7-scorepath`, `nsweep-codesign` and `seeds-c7`) and ks `{100, 1000}` or a subset. Every SilverTorch cell scans at most a quarter of the
 lists (`n_probe` ≤ `n_lists` / 4), and its `n_lists` / `n_probe` come from the tune ([IVF tuning](#ivf-tuning)).

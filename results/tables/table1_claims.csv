@@ -1,0 +1,24 @@
+claim,quantity,condition,n,min,max
+LiNR V1/V2 ordering,V2 / V1 latency,"laion1m-synth, pass rate near 10 %, batch 1",1,0.4709995951883584,0.4709995951883584
+LiNR V1/V2 ordering,V2 / V1 latency,"laion3m-synth, pass rate near 10 %, batch 1",1,0.33731274268717254,0.33731274268717254
+LiNR V1/V2 ordering,V2 / V1 latency,"laion10m-synth, pass rate near 10 %, batch 1",1,0.30735714705573036,0.30735714705573036
+LiNR V1/V2 ordering,V2 / V1 latency,"laion30m-synth, pass rate near 10 %, batch 1",1,0.285843162409462,0.285843162409462
+LiNR V1/V2 ordering,V2 / V1 latency,"laion1m-synth, pass rate near 10 %, batch 16",1,1.4897265027841098,1.4897265027841098
+LiNR V1/V2 ordering,V2 / V1 latency,"laion3m-synth, pass rate near 10 %, batch 16",1,1.3370506127440027,1.3370506127440027
+LiNR V1/V2 ordering,V2 / V1 latency,"laion10m-synth, pass rate near 10 %, batch 16",1,1.368537622949894,1.368537622949894
+LiNR V1/V2 ordering,V2 / V1 latency,"laion30m-synth, pass rate near 10 %, batch 16",1,1.3777159577225697,1.3777159577225697
+LiNR V1/V2 ordering,pass rate where V2 / V1 reaches 1,"uniform synthetic filters, batch 1",8,0.8482785319810924,0.9725175769918372
+LiNR V3 shortlist,V3 / faster exact latency,"20-50 % synthetic, LAION 10M/30M, batch 1",12,0.42666342222900866,0.7693677751250717
+LiNR V3 shortlist,V3 / faster exact latency,"20-50 % synthetic, LAION 10M/30M, batch 16",12,1.0930475208557284,1.4647027953564655
+LiNR V3 shortlist,V3 / faster exact latency,"20-50 % synthetic, LAION 10M/30M, batch 64",12,1.9979672375046633,2.7313068323117933
+LiNR V3 shortlist,V3 recall@100,same configurations,12,0.9193640031278134,0.9809630050837994
+SilverTorch probes and precision,fastest n_probe reaching recall 0.90,"LAION 30M synthetic, 4,096 lists, batch 16",7,256.0,1024.0
+SilverTorch probes and precision,"fixed 1,024 probes / tuned latency",same,7,1.0,3.856719124828931
+SilverTorch probes and precision,"recall@100, int8 scores, fp16 output","pubmed c3_journal_reverse, same probed clusters",1,0.93065116431824,0.93065116431824
+SilverTorch probes and precision,"recall@100, fp16 inputs, fp32 accumulation","pubmed c3_journal_reverse, same probed clusters",1,0.9982209314371265,0.9982209314371265
+SilverTorch probes and precision,"recall@100, int8 scores, fp16 output","laion1m c0_domain, same probed clusters",1,0.8459799035455151,0.8459799035455151
+SilverTorch probes and precision,"recall@100, fp16 inputs, fp32 accumulation","laion1m c0_domain, same probed clusters",1,0.85210729221651,0.85210729221651
+SilverTorch co-design,full-index / probed-cluster filtering latency,"laion1m, stable pairs",8,0.8101107970393043,0.9340049086774884
+SilverTorch co-design,full-index / probed-cluster filtering latency,"laion3m, stable pairs",8,0.8227706915160404,1.2788399714433203
+SilverTorch co-design,full-index / probed-cluster filtering latency,"laion10m, stable pairs",8,0.8098227068690138,2.403301419298099
+SilverTorch co-design,full-index / probed-cluster filtering latency,"laion30m, stable pairs",12,1.0975757958749155,5.6512570346883635
