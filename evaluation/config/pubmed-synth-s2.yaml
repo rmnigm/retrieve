@@ -5,7 +5,7 @@
 # `synth_filter.RATES` (0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1.0); the query side is all ones.
 data_dir: data/pubmed-medcpt-dot             # MedCPT as shipped, not normalised
 content_dir: content_d768                 # relative to data_dir
-normalize: false                          # MedCPT scores by dot product (user, 2026-10-13)
+normalize: false                          # MedCPT scores by dot product
 dims: [768]
 users_limit: 10000
 self_match: true                          # queries are catalogue items (docs/system/evaluation.md § Self-match)

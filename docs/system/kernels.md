@@ -1162,9 +1162,9 @@ whose ties exceed k, so it is not used.
 `meta-recsys/silvertorch` vendored at `21aa35e`, synced to upstream `22c2007`, Apache-2.0 with
 Meta's `LICENSE` and headers and one "Modified by the retrieve authors" line per changed file,
 under Meta's own names (distribution and package `silvertorch`, ops `torch.ops.st.*`, C++
-namespace `st::ops`). `CHANGES.md` lists every change, each gated when the
-member was `official-fork/` (package `silvertorch_fork`, ops `torch.ops.stfork.*`) and loaded
-beside Meta's published package for the parity gates; then the published code left the workspace
+namespace `st::ops`). `CHANGES.md` lists every change, each gated while the member
+loaded under other names (package `silvertorch_fork`, ops `torch.ops.stfork.*`) beside Meta's
+published package for the parity gates; then the published code left the workspace
 and the member took Meta's names back ([Deleted backends](#deleted-backends)).
 `SilverTorch(backend="cuda")`, the default and only value, runs it.
 

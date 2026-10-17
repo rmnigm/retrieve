@@ -1,4 +1,4 @@
-# The final grid (F-REPRO, campaign-final; user directive 2026-10-10, docs/system/evaluation.md § Config). A suite = the
+# The final grid (docs/system/evaluation.md § Config). A suite = the
 # cells run on every listed dataset at the dims both list. Each entry of `arms` is one algo on its backends, optionally
 # narrowed to `filter_kinds` / `sweeps`, with `build:` (rebuilds the index) and `query:` (n_probe / candidate_pool /
 # candidate_pool_frac / alpha, applied with set_query_params) grids. An arm with `datasets:` runs only on the datasets it
@@ -6,28 +6,28 @@
 # filter_kind, backend) triples with no code path. Algo defaults: silvertorch n_lists=1024 n_probe=24 n_iter=10,
 # linr_v3 candidate_pool=5000.
 #
-# Global rules (final pass, controller 2026-10-13):
-# - seed 0 everywhere; seeds {0, 1, 2} only in `filter`, the T2 headline whose confidence intervals rest on them;
+# Global rules:
+# - seed 0 everywhere; seeds {0, 1, 2} only in `filter`, the headline comparison whose seed spread rests on them;
 #   interleaved rounds (seed × window) are the timing repeats elsewhere.
-# - bs {1, 16}; bs 64 only in C5 / C7's 30 M regime and the timed tune; k {100, 1000}, k 100 where N·p < 4·1000.
-# - SilverTorch scans at most a quarter of the lists: n_probe <= n_lists / 4 (user). n_lists and n95 per dataset come
+# - bs {1, 16}; bs 64 only in the co-design and score-path cells at 30 M and the timed tune; k {100, 1000}, k 100 where N·p < 4·1000.
+# - SilverTorch scans at most a quarter of the lists: n_probe <= n_lists / 4. n_lists and n95 per dataset come
 #   from the tune; 24 is the paper's n_probe.
 # - SilverTorch is Meta's SilverTorch code, adapted (`cuda`, its only backend), `none` / `bloom` only; LiNR with a bloom
 #   filter is not in the study and runs nowhere (LiNR arms are clause only). The FR records of these suites carry
-#   `official`, Meta's code as published, which left the workspace at RENAME (records keep their names). One backend
-#   per algo (`triton`) except the C3 torch arms.
+#   `official`, Meta's code as published, which is no longer installed (records keep their names). One backend
+#   per algo (`triton`) except the native PyTorch arms.
 # - No bs 8, no k 500.
 
 # Kept sweeps (one high pass rate, one low, one conjunctive / reverse), from measured pass rates:
 # arxiv c3_nversions 0.444, c0_maincat 0.136, all4 0.0094; pubmed c0_mesh 0.0002,
 # c3_journal_reverse 0.9993, all5 0.018. Bloom keeps the forward ones among them.
-filter:                        # headline (T2, C6)
+filter:                        # the headline comparison on the real filters
   datasets: [goodreads, arxiv, pubmed]
   dims: [128, 768]             # each dataset's one native / chosen width; no dim ablation
   filter_kinds: [clause, bloom]
   ks: [100, 1000]
   batch_sizes: [1, 16]
-  seeds: [0, 1, 2]             # T2's confidence intervals
+  seeds: [0, 1, 2]             # the seed spread
   sweeps:
     goodreads: [c0_genre, c1_lang_reverse, all4]
     arxiv: [c3_nversions, c0_maincat, all4]
@@ -47,7 +47,7 @@ filter:                        # headline (T2, C6)
         arxiv: {build: {n_lists: [2048]}, query: {n_probe: [24, 256]}}
         pubmed: {build: {n_lists: [4096]}, query: {n_probe: [24, 512, 1024]}}
     - {algo: postfilter, backends: [torch], query: {alpha: [1, 8]}, filter_kinds: [clause]}
-deep:                          # recall-vs-latency Pareto (F3): Meta's published bloom along n_probe at the tuned n_lists
+deep:                          # recall against latency: Meta's published bloom along n_probe at the tuned n_lists
   # n_lists from the tune (goodreads 4096, arXiv 2048), n_probe up to the n_lists / 4 cap; the exact V1 / V2 references
   # come from `filter` at the same version.
   datasets: [goodreads, arxiv]
@@ -67,10 +67,10 @@ deep:                          # recall-vs-latency Pareto (F3): Meta's published
         goodreads: {build: {n_lists: [4096]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512, 1024]}}
         arxiv: {build: {n_lists: [2048]}, query: {n_probe: [8, 16, 32, 64, 128, 256, 512]}}
 
-synth:                         # pass rate as the x axis (F1, C1, C2)
-  # C1's crossover: V1 + V2 at every rate, clause (nine rates on arxiv-synth, ten on goodreads-synth);
-  # C2: V3 on goodreads-synth's seven pilot rates and the correlated synth; Meta's bloom on arxiv-synth at two rates;
-  # C3's V2 torch arms (V1's are in `c3`).
+synth:                         # pass rate as the x axis
+  # the V2 / V1 crossover: V1 + V2 at every rate, clause (nine rates on arxiv-synth, ten on goodreads-synth);
+  # V3 on goodreads-synth's seven pilot rates and the correlated synth; Meta's bloom on arxiv-synth at two rates;
+  # the native PyTorch V2 arms (V1's are in `c3`).
   datasets: [goodreads-synth, arxiv-synth, arxiv-corr-synth]
   dims: [128]
   filter_kinds: [clause, bloom]
@@ -101,7 +101,7 @@ synth:                         # pass rate as the x axis (F1, C1, C2)
     - {algo: linr_v2, backends: [torch], sweeps: [p001, p01, p1], datasets: {goodreads-synth: {}}, filter_kinds: [clause]}
     - {algo: linr_v2, backends: [torch], sweeps: [p001, p01, p1], build: {compile: [max-autotune]}, datasets: {goodreads-synth: {}}, filter_kinds: [clause]}
 
-c3:                            # C3 across N: V1 Triton vs torch.compile max-autotune (plain torch at 0.8 M), uniform synth
+c3:                            # native PyTorch across N: V1 Triton vs torch.compile max-autotune (plain torch at 0.8 M), uniform synth
   datasets: [goodreads-synth, arxiv-synth, laion30m-synth]
   dims: [128, 256]
   filter_kinds: [clause]
@@ -117,7 +117,7 @@ c3:                            # C3 across N: V1 Triton vs torch.compile max-aut
     - {algo: linr_v1_filter_mask, backends: [torch], build: {compile: [max-autotune]}}
     - {algo: linr_v1_filter_mask, backends: [torch], datasets: {goodreads-synth: {}}}
 
-c3-real:                       # C3 on real filters: V1 Triton vs torch.compile max-autotune, the `filter` kept sweeps
+c3-real:                       # native PyTorch on real filters: V1 Triton vs torch.compile max-autotune, the `filter` kept sweeps
   datasets: [goodreads, arxiv, pubmed]
   dims: [128, 768]
   filter_kinds: [clause]
@@ -132,7 +132,7 @@ c3-real:                       # C3 on real filters: V1 Triton vs torch.compile 
     - {algo: linr_v1_filter_mask, backends: [triton]}
     - {algo: linr_v1_filter_mask, backends: [torch], build: {compile: [max-autotune]}}
 
-codesign:                      # S9 / F4b, C5: Meta's bloom over the probed clusters along n_probe
+codesign:                      # co-design: Meta's bloom over the probed clusters along n_probe
   # The partial-vs-full mask ablation ran on Meta's code as published (FR records: `official`, `params.bloom_path`); the
   # adapted code evaluates the bloom over the probed clusters only, so this suite has one arm.
   datasets: [arxiv, goodreads]
@@ -171,7 +171,7 @@ h2h:                           # SilverTorch by score path
       build: {score_path: [fp16, int32]}
       query: {n_probe: [24]}
 
-bloomwidth:                    # D3 / F4a, C4: bloom width vs FPR and recall
+bloomwidth:                    # bloom width vs FPR and recall
   perf: false
   datasets: [goodreads, arxiv, pubmed]
   dims: [128, 768]
@@ -199,7 +199,7 @@ bloomwidth-timed:              # one timed point per width
     pubmed: [c0_mesh]
   arms:
     - {algo: silvertorch, backends: [cuda], build: {k_hash: [5]}}
-v3bits:                        # C2: V3 at k_bits 64 vs the default (k_bits = D = 128) on goodreads; PubMed d768 at 256
+v3bits:                        # V3 at k_bits 64 vs the default (k_bits = D = 128) on goodreads; PubMed d768 at 256
   # (divides 768; brackets LiNR's 512 from below) vs the default 768, clause only. k_bits is a harness build param.
   datasets: [goodreads-synth, goodreads, pubmed]
   dims: [128, 768]
@@ -229,7 +229,7 @@ v3bits:                        # C2: V3 at k_bits 64 vs the default (k_bits = D 
 
 bloom: {m_bits: 1024, k_hash: 5}   # shared defaults; a suite may override with its own `bloom:`
 
-# V-LAION30 (claims first, user 2026-10-10): how V1 / V2 scale to 30 M under a site
+# How V1 / V2 scale to 30 M under a site
 # filter (c0_domain, pass 5e-7 ... 4e-2) and a bucket conjunction (tags4). Seed 0, k 100, clause only.
 laion30m:
   datasets: [laion30m]
@@ -254,14 +254,14 @@ laion30m-synth:
   batch_sizes: [1, 16]
   seeds: [0]
   sweeps:
-    laion30m-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]   # C1's nine rates (3 M / 10 M share them)
+    laion30m-synth: [p0001, p0003, p001, p003, p005, p01, p02, p05, p1]   # the nine V2 / V1 rates (3 M / 10 M share them)
   interleave:
     - {by: algo, values: [linr_v1_filter_mask, linr_v2]}
   arms:
     - {algo: linr_v1_filter_mask, backends: [triton]}
     - {algo: linr_v2, backends: [triton]}
 
-# C5 in the paper's regime (controller 2026-10-10, C5-META-CHECK): co-design partial vs full mask at 30 M,
+# Co-design in the SilverTorch paper's regime: partial vs full mask at 30 M,
 # Meta's bloom at 30 M. Sub-queries per expression: 1
 # (c0_domain), 4 (tags4: size, CLIP, watermark, punsafe buckets). Eager (run with --mode eager); seed 0.
 codesign-laion30m:
@@ -279,7 +279,7 @@ codesign-laion30m:
       build: {n_lists: [16384]}
       query: {n_probe: [32, 128]}
 
-# V-LAION30 at bs 1 + 16: the exact side at 30 M. Run per sweep as two processes: V2, then V1 alone (memory).
+# bs 1 + 16: the exact side at 30 M. Run per sweep as two processes: V2, then V1 alone (memory).
 laion30m-x:
   datasets: [laion30m]
   dims: [256]
@@ -310,12 +310,12 @@ c7-scorepath:
   arms:
     - {algo: silvertorch, backends: [cuda], build: {n_lists: [16384], score_path: [fp16, int32]}, query: {n_probe: [32, 128]}}
 
-# Fixed-d N-sweep (final-pass extension, controller 2026-10-13): LAION d256 at 1 / 3 / 10 M, seeded nested row subsets of
+# Fixed-d N-sweep: LAION d256 at 1 / 3 / 10 M, seeded nested row subsets of
 # laion30m (`eval-data subset`, docs/system/datasets.md § Subsets), beside the 30 M cells, plus arXiv 3 M at d256 (same N
 # and d, other data). n_lists scaled to the 30 M list size (16384 lists, ~1,831 items each): 1 M 512, 3 M 2048, 10 M 4096
 # (arXiv 2048); n_probe at 30 M's scan fractions: synth {24, L/64, L/16} (30 M: 24, 256, 1024), real {24, L/64, L/16, L/4}
 # (L/4 = the cap = tags4's n95 at 30 M). Seed 0, k 100.
-nsweep-synth:                  # C1 (V1 / V2 at the nine rates) across N at d256
+nsweep-synth:                  # V1 / V2 at the nine rates across N at d256
   datasets: [laion1m-synth, laion3m-synth, laion10m-synth, laion30m-synth, arxiv-synth]
   dims: [256]
   filter_kinds: [clause]
@@ -353,7 +353,7 @@ nsweep:                        # the exact arms on the real filters across N, on
     - {algo: linr_v1_filter_mask, backends: [triton]}
     - {algo: linr_v2, backends: [triton]}
 
-nsweep-codesign:               # C5 across N: partial vs full masks, Meta's kernels, eager (run with --mode eager)
+nsweep-codesign:               # co-design across N: partial vs full masks, Meta's kernels, eager (run with --mode eager)
   datasets: [laion1m, laion3m, laion10m, laion30m]
   dims: [256]
   filter_kinds: [bloom]
@@ -375,8 +375,8 @@ nsweep-codesign:               # C5 across N: partial vs full masks, Meta's kern
         laion10m: {build: {n_lists: [4096]}}
         laion30m: {build: {n_lists: [16384]}}
 
-# Seeds 0-2 where a CI rests on them (controller 2026-10-13, the final-pass seed decision): C1's crossover cells at 3 / 30 M
-# at bs 16 (the rates that bracket each crossover) and C7's 30 M cell at bs 64, all three seeds on one box, so each CI is
+# Seeds 0-2 where a spread rests on them: the V2 / V1 crossover cells at 3 / 30 M
+# at bs 16 (the rates that bracket each crossover) and the score-path 30 M cell at bs 64, all three seeds on one box, so each spread is
 # over one box; their own suites, so these keys are separate from the main grid's seed-0 cells.
 seeds-c1:                      # 3 M d128 (dims are per suite: arxiv-synth would otherwise also run at d256)
   datasets: [arxiv-synth]

@@ -965,7 +965,7 @@ def _self_match_configs(tiny_configs, tmp_path):
 
 
 def test_self_match_excludes_the_own_item_from_oracle_and_results(tiny_configs, tmp_path):
-    """User ruling AMBER 1/3: on a self_match dataset the exact arm still scores oracle recall
+    """On a self_match dataset the exact arm still scores oracle recall
     1.0 once its own item leaves both sides; the held-out side (the target *is* that item)
     keeps the un-excluded list; the key carries ``self_excluded``, the ``none`` cell does not."""
     ds, suites = _self_match_configs(tiny_configs, tmp_path)
