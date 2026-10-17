@@ -14,14 +14,16 @@ KMeansInit = Literal["random", "kmeans++"]
 
 
 class KMeans:
-    """Lloyd's k-means with chunked centroid assignment; ``fit`` returns (centroids [n_lists, D],
-    assignments [N]). ``init="random"`` seeds from ``n_lists`` distinct rows; ``init="kmeans++"``
-    seeds by D² sampling (Arthur & Vassilvitskii 2007, the paper's choice — SilverTorch §4.1),
-    one pass over the index per centroid, no host sync per step.
+    """Lloyd's k-means under inner product: each row joins the centroid of largest ``x·c`` (the
+    metric SilverTorch's probe ranks centroids by), and a centroid is its cluster's plain mean,
+    not normalised, as Faiss trains an inner-product IVF. ``fit`` returns (centroids
+    [n_lists, D], assignments [N]). ``init="random"`` seeds from ``n_lists`` distinct rows;
+    ``init="kmeans++"`` seeds by D² sampling (Arthur & Vassilvitskii 2007, the paper's choice —
+    SilverTorch §4.1), one pass over the index per centroid, no host sync per step.
 
     ``fit`` is **bit-for-bit reproducible run to run** on a given device: both initialisations
     draw from a CPU generator seeded with ``seed``, the assignment step is a deterministic
-    ``cdist`` + ``argmin``, and the centroid-update reduction is order-fixed (see
+    matmul + ``argmax``, and the centroid-update reduction is order-fixed (see
     ``_cluster_sums``). Reproducibility is a gate requirement — SilverTorch's IVF layout, and
     therefore every quality number it produces, is a pure function of these centroids."""
 
@@ -62,7 +64,9 @@ class KMeans:
 
     def _seed_kmeanspp(self, embs: Tensor, g: torch.Generator) -> Tensor:
         """D² sampling: the first centroid uniform, each next one drawn with probability
-        proportional to its squared distance to the nearest centroid so far. One ``mv`` over
+        proportional to its squared L2 distance to the nearest centroid so far: standard
+        k-means++, kept under inner-product assignment because on unit-norm embeddings
+        ``‖x − c‖² = 2 − 2x·c`` is the inner-product dissimilarity. One ``mv`` over
         the index per centroid (``‖x‖² − 2x·c + ‖c‖²``, clamped at 0); the draw is a CPU
         uniform from ``g`` located by ``searchsorted`` on the device-side cumsum
         (``right=True`` so a point already chosen, at zero mass, is never drawn again)."""
@@ -106,12 +110,13 @@ class KMeans:
 
     @staticmethod
     def assign(embs: Tensor, centroids: Tensor) -> Tensor:
-        """Nearest centroid per row, ``[N]`` int64; chunked ``cdist`` + ``argmin``."""
+        """Centroid of largest inner product per row, ``[N]`` int64; chunked ``x @ c.T`` +
+        ``argmax`` (first index on ties)."""
         n = embs.shape[0]
         chunk = _chunk(n)
         assignments = torch.empty(n, dtype=torch.long, device=embs.device)
         for start in range(0, n, chunk):
             end = min(start + chunk, n)
-            d = torch.cdist(embs[start:end].float(), centroids)
-            assignments[start:end] = d.argmin(dim=1)
+            scores = embs[start:end].float() @ centroids.t()
+            assignments[start:end] = scores.argmax(dim=1)
         return assignments

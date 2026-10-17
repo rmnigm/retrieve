@@ -1,4 +1,4 @@
-"""``KMeans.fit`` is bit-for-bit reproducible run to run.
+"""``KMeans.fit`` is bit-for-bit reproducible run to run, and assigns by inner product.
 
 SilverTorch's whole IVF layout — centroids, cluster membership, the int8 codes' scale — is a
 pure function of ``fit``'s output, so a non-reproducible ``fit`` makes every SilverTorch quality
@@ -89,13 +89,21 @@ def test_fit_is_deterministic_on_cpu():
     assert torch.equal(c1, c2)
 
 
-def _inertia(embs, centroids, assignments):
-    """Mean squared distance from each item to its centroid — the k-means objective."""
+def _objective(embs, centroids, assignments):
+    """Mean inner product of each item with its centroid, the quantity the assignment
+    maximises."""
     total = 0.0
     for start in range(0, embs.shape[0], 1 << 14):
         end = min(start + (1 << 14), embs.shape[0])
-        total += (embs[start:end].float() - centroids[assignments[start:end]]).pow(2).sum().item()
+        total += (embs[start:end].float() * centroids[assignments[start:end]]).sum().item()
     return total / embs.shape[0]
+
+
+def test_assign_is_the_largest_inner_product():
+    """Across the chunk tail (N above and not a multiple of the 1 << 14 chunk)."""
+    embs = make_index(20_001, 16)
+    centroids = make_index(32, 16, seed=1) * torch.linspace(0.5, 1.5, 32, device="cuda")[:, None]
+    assert torch.equal(KMeans.assign(embs, centroids), (embs @ centroids.t()).argmax(dim=1))
 
 
 def test_one_update_matches_the_atomic_reduction():
@@ -125,7 +133,7 @@ def test_fit_quality_matches_atomic_reference():
     itself (1.8e-2 run to run on real embeddings; on this synthetic index
     the two implementations were seen both 6e-8 and 2.1e-2 apart on different runs, purely by
     which side flipped first). What must hold is that the objective is unchanged — the
-    reduction was replaced, not the algorithm. Measured relative difference: 5.4e-9.
+    reduction was replaced, not the algorithm.
     """
     embs = make_index(200_000, 128)
     km = KMeans(n_lists=1024, n_iter=4, seed=0)
@@ -133,7 +141,7 @@ def test_fit_quality_matches_atomic_reference():
     new_c, new_a = km.fit(embs)
     old_c, old_a = _atomic_fit(km, embs)
 
-    new_i, old_i = _inertia(embs, new_c, new_a), _inertia(embs, old_c, old_a)
+    new_i, old_i = _objective(embs, new_c, new_a), _objective(embs, old_c, old_a)
     rel = abs(new_i - old_i) / old_i
     assert rel < 1e-3, (
         f"k-means objective moved: {new_i:.9f} vs atomic {old_i:.9f} (rel {rel:.3e}) — the "
@@ -146,13 +154,17 @@ def test_fit_quality_matches_atomic_reference():
 # ---------------------------------------------------------------------------
 
 
-def _blobs(n_blobs: int, per_blob: int, d: int, *, spread: float = 20.0, seed: int = 5):
-    """``n_blobs`` unit-radius Gaussian clusters with centres ``spread`` apart: a separable
-    index on which one seed per blob is the only good initialisation."""
+def _blobs(n_blobs: int, per_blob: int, d: int, *, noise: float = 0.02, seed: int = 5):
+    """``n_blobs`` tight clusters on the unit sphere around random unit centres: a separable
+    index of unit-norm embeddings on which one seed per blob is the only good
+    initialisation."""
     g = torch.Generator(device="cuda").manual_seed(seed)
-    centres = torch.randn(n_blobs, d, generator=g, device="cuda") * spread
+    centres = torch.nn.functional.normalize(
+        torch.randn(n_blobs, d, generator=g, device="cuda"), dim=1
+    )
     embs = centres.repeat_interleave(per_blob, dim=0)
-    embs = embs + torch.randn(embs.shape[0], d, generator=g, device="cuda")
+    embs = embs + noise * torch.randn(embs.shape[0], d, generator=g, device="cuda")
+    embs = torch.nn.functional.normalize(embs, dim=1)
     return embs, torch.arange(n_blobs, device="cuda").repeat_interleave(per_blob)
 
 
@@ -180,7 +192,7 @@ def test_kmeanspp_is_deterministic_per_seed():
     assert not torch.equal(c1, c3)
 
 
-def test_kmeanspp_inertia_at_most_random_on_separable_blobs():
+def test_kmeanspp_objective_at_least_random_on_separable_blobs():
     """Sixteen blobs, sixteen lists: random init lands two seeds in one blob almost surely
     (16!/16¹⁶ ≈ 1e-6 against) and Lloyd's cannot recover, so D² seeding wins the objective
     both before and after the iterations."""
@@ -188,7 +200,7 @@ def test_kmeanspp_inertia_at_most_random_on_separable_blobs():
     for n_iter in (0, 5):
         pp = KMeans(n_lists=16, n_iter=n_iter, seed=0, init="kmeans++").fit(embs)
         rnd = KMeans(n_lists=16, n_iter=n_iter, seed=0, init="random").fit(embs)
-        assert _inertia(embs, *pp) <= _inertia(embs, *rnd)
+        assert _objective(embs, *pp) >= _objective(embs, *rnd)
 
 
 def test_init_is_validated():

@@ -120,10 +120,10 @@ def test_correlated_pass_rate_and_the_query_own_cluster(tmp_path):
         rate = passes.double().mean(1)
         # rel 1e-12: float64 means of the same 30 values, summed in another order
         assert r["query_pass_rate"]["mean"] == pytest.approx(rate.mean().item(), rel=1e-12)
-        # Items and queries both take their nearest unit centroid: the least squared distance.
+        # Items and queries both take the centroid of largest inner product.
         c = torch.tensor(r["centroids"])
-        assert torch.equal(qa[:, j], ((queries[:, None] - c[None]) ** 2).sum(-1).argmin(1))
-        assert torch.equal(item[:, j, 0], ((items[:, None] - c[None]) ** 2).sum(-1).argmin(1))
+        assert torch.equal(qa[:, j], (queries @ c.T).argmax(1))
+        assert torch.equal(item[:, j, 0], (items @ c.T).argmax(1))
     # 10 equal blobs, k = 10. rel 0.5: a random-init local optimum may split one blob and
     # merge two (here 0.134).
     assert side["per_rate"][0]["query_pass_rate"]["mean"] == pytest.approx(0.1, rel=0.5)

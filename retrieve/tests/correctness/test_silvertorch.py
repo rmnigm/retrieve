@@ -492,17 +492,6 @@ class TestBuilder:
         return b.build()
 
     @pytest.mark.parametrize("backend", BACKENDS)
-    def test_probe_ranks_by_the_assignment_metric(self, data, backend):
-        """The first probe is the query's nearest centroid under ``KMeans.assign``'s L2, on a
-        fresh build and on its state-dict twin."""
-        require_official()
-        src = self._fresh(data, backend, "none")
-        twin = self._builder(backend, "none").set_state_dict(src.state_dict()).build()
-        nearest = KMeans.assign(data["query"], src.centroids)
-        for m in (src, twin):
-            assert torch.equal(m._phase1_probe_ids(data["query"])[:, 0], nearest)
-
-    @pytest.mark.parametrize("backend", BACKENDS)
     @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
     def test_state_dict_reproduces_a_fresh_build(self, data, backend, filter_mode):
         require_official()
@@ -566,6 +555,15 @@ class TestKMeansInit:
         assert ids.shape == (B, K)
         again = _build_no_bloom(data, backend=backend, kmeans_init="kmeans++")
         assert torch.equal(again.centroids, pp.centroids)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_first_probe_is_the_kmeans_assignment(data, backend):
+    """The probe ranks centroids by the inner product ``KMeans.assign`` clusters by, so a
+    query's first probe is the cluster it would be assigned to."""
+    m = _build_no_bloom(data, backend=backend)
+    first = m._phase1_probe_ids(data["query"])[:, 0]
+    assert torch.equal(first, KMeans.assign(data["query"], m.centroids))
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

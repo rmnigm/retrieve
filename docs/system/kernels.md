@@ -906,7 +906,7 @@ order is a function of its shapes alone. float64 keeps the accumulation exact we
 float32 and cannot be demoted to TF32 by a caller's
 `torch.set_float32_matmul_precision("high")` (which would cost 13 mantissa bits); it costs
 8 % more time on the A100, where DMMA runs at the float32 SIMT rate. The extra matmul per
-Lloyd iteration has the FLOPs of the `cdist` assignment step, so `fit` takes at most ~2x the
+Lloyd iteration has the FLOPs of the inner-product assignment step, so `fit` takes at most ~2x the
 `index_add_` version's time (measured well under that). The panel
 width is capped so the one-hot buffer stays at 64 MiB whatever `n_lists` is.
 
@@ -1166,7 +1166,7 @@ slower ([measurements](../../research/artifacts/official-rework/README.md)).
 **Epilogue.** Everything query-side runs in `prepare_queries`, outside the
 timed forward: bloom → the expressions rendered and parsed, one plan per distinct expression plus
 a device row → plan index (`query_plan_index`, which Meta's partial search accepts); exact → the
-int32 query attrs. The forward is the probe (the `n_probe` nearest centroids by L2, `q·c − ‖c‖²/2` + `topk`, the metric `KMeans` assigned items with), Meta's search and scorer,
+int32 query attrs. The forward is the probe (centroid matmul `q·c` + `topk`, the inner product `KMeans` assigns items by), Meta's search and scorer,
 then a top-k on the scorer's raw `[B, M]` (int32 dots or `fp16(dot / divisor)`, pads at the
 dtype's minimum) with only the `[B, k]` winners dequantized and mapped through `sort_perm`
 (`official_probe_score`, the reference path; fused into `search` on the forward). Dequantizing
