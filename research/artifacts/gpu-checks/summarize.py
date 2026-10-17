@@ -35,35 +35,67 @@ def check1() -> None:
               f"{f(r['overlap_native_index_vs_triton_v2'], 4)} | {', '.join(uns) or 'no'} |")  # fmt: skip
 
 
+def first_pool(r: dict, arm: str, bar: float) -> str:
+    """The smallest pool (in items) whose recall reaches ``bar``, or ``—``."""
+    hits = [n for p, n in r["pools"].items() if r["recall"][f"{arm}/{p}"] >= bar]
+    return f"{min(hits):,}" if hits else "—"
+
+
 def check2() -> None:
     rs = rows("check2", "v3bits")
-    print("Recall@100 vs the exact filtered top-100 (pool label: pool size)\n")
+    arms = ["v3_oporp128", "v3_simhash128", "v3_simhash512", "v3_oporp768"]
+    print(
+        "Recall@100 against the exact filtered top-100 at LiNR's pool (1 % of N) and at the pool fraction 0.01 of the"
+    )
+    print(
+        "mean pass count (floor 2000); then the smallest pool (items) reaching recall 0.95 per arm.\n"
+    )
+    print("| cell | pass | " + " | ".join(f"{a[3:]} @1%N / @f0.01" for a in arms) + " | "
+          + " | ".join(f"{a[3:]} pool≥0.95" for a in arms) + " |")  # fmt: skip
+    print("|---|---|" + "---|" * (2 * len(arms)))
     for r in rs:
-        pools = r["pools"]
-        arms = sorted({k.split("/")[0] for k in r["recall"] if "/" in k})
+        rec = r["recall"]
+        cells = [
+            f"{f(rec[f'{a}/linrN'], 3)} / {f(rec[f'{a}/f0.01'], 3)}"
+            if f"{a}/linrN" in rec
+            else "—"
+            for a in arms
+        ]
+        pools = [first_pool(r, a, 0.95) if f"{a}/linrN" in rec else "—" for a in arms]
         print(
-            f"**{r['cell']}** pass {r['pass_rate']:.4f}, mean pass {r['mean_pass_count']:.0f}\n"
+            f"| {r['cell']} | {r['pass_rate']:.4f} | "
+            + " | ".join(cells)
+            + " | "
+            + " | ".join(pools)
+            + " |"
         )
-        print("| arm | " + " | ".join(f"{p} ({pools[p]})" for p in pools) + " |")
-        print("|---|" + "---|" * len(pools))
-        for a in arms:
-            print(
-                f"| {a} | "
-                + " | ".join(f(r["recall"][f"{a}/{p}"], 4) for p in pools)
-                + " |"
-            )
-        print()
-    print("Timing (graph median ms; ratio = V3 / faster of V1, V2 in the same job)\n")
-    print("| cell | bs | V1 | V2 | variant | median ms | ratio | recall | unstable |")
-    print("|---|---|---|---|---|---|---|---|---|")
+    print(
+        "\nTiming, graph replay: V1 / V2 medians (ms); V3 as a ratio to the faster of V1 and V2 timed in the same group.\n"
+    )
+    print("| cell | bs | V1 | V2 | oporp128 1%N | oporp128 f0.01 | oporp128 f0.05 | simhash512 1%N | simhash512 f0.01 "
+          "| simhash512 f0.05 | unstable |")  # fmt: skip
+    print("|---|---|---|---|---|---|---|---|---|---|---|")
     for r in rs:
-        for key, ratio in r.get("ratio_to_best_exact", {}).items():
-            v, bs = key.rsplit("/", 1)
+        ratio = r.get("ratio_to_best_exact", {})
+        for bs in ("bs1", "bs16"):
+            if f"v3_oporp128/linrN/{bs}" not in ratio:
+                continue
             p = r["perf"]
-            print(f"| {r['cell']} | {bs[2:]} | {f(p[f'v1/{bs}'].get('median_ms'))} | "
-                  f"{f(p[f'v2/{bs}'].get('median_ms'))} | {v} | {f(p[key].get('median_ms'))} | "
-                  f"{f(ratio, 2)} | {f(r['recall'][v], 4)} | "
-                  f"{'yes' if any(x.get('unstable') for k, x in p.items() if k.endswith(bs)) else 'no'} |")  # fmt: skip
+            vs = [
+                f(ratio[f"{a}/{q}/{bs}"], 2)
+                for a in ("v3_oporp128", "v3_simhash512")
+                for q in ("linrN", "f0.01", "f0.05")
+            ]
+            uns = [
+                k.rsplit("/", 1)[0]
+                for k, x in p.items()
+                if k.endswith(bs) and x.get("unstable")
+            ]
+            print(
+                f"| {r['cell']} | {bs[2:]} | {f(p[f'v1/{bs}'].get('median_ms'))} | {f(p[f'v2/{bs}'].get('median_ms'))} | "
+                + " | ".join(vs)
+                + f" | {', '.join(uns) or 'no'} |"
+            )
 
 
 def check3() -> None:

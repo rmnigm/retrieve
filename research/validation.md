@@ -278,7 +278,7 @@ PubMed 10 M d768 is the large scale point.
 | check | state | result |
 |---|---|---|
 | 1: LiNR §6's native PyTorch (boolean mask, per-query `nonzero` + gather with host sync; and V1's masked scores) against Triton V1 / V2 in graph replay | **measured**: 30 cells (goodreads, arXiv, PubMed × p 0.001 / 0.01 / 0.1 / 0.11 / 0.5 × bs 1 / 16, k 100), 3 `unstable`; native top-100 overlap with V2 0.988-1.000 | native / custom 0.8-34×, never 100×. The index form costs 0.8-4.7× at bs 1 and 1.7-34× at bs 16 (the top is PubMed at 50 %, bs 16); the masked form 1.6-17×; at LiNR's 11 % point 2.2-9.4×. Native windows are shortened (≥ 10 calls) |
-| 2: LiNR V3 at 512 bits | not run yet | |
+| 2: LiNR V3 at 512 bits (Sign-OPORP needs k_bits to divide D, so 512 bits at D = 128 is `SimHashKNN`) against 128-bit OPORP / SimHash, pools LiNR's 1 % of N and fractions 0.005-0.2 of the mean pass count | **measured**: 25 filters (every real clause sweep + synthetic 11 / 20 / 50 %; goodreads, arXiv, PubMed), recall@100 against exact V2 on 2,000 queries; 18 filters timed (graph, bs 1 / 16) against V1 / V2 in the same group, 1 `unstable` | At 1 % of N, 512-bit SimHash recovers 0.992-1.000 of the exact top-100 on Goodreads and arXiv and 0.91-0.98 on PubMed's dense filters, against 0.84-1.00 and 0.68-0.89 for 128-bit OPORP. V3 is slower than the faster exact arm at 0.8 M and 3 M (1.04-3.3×, except arXiv 50 % bs 1); at 10 M with ≥ 11 % passing it takes 0.17-0.74× (OPORP-128) and 0.22-1.05× (SimHash-512) |
 | 3: Meta's bloom with NOT on the four kept reverse-clause filters | not run yet | |
 
 ## Still unverified, known defects

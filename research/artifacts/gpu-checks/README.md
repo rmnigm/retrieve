@@ -103,7 +103,120 @@ confirms nor refutes their number.
 
 ## Check 2: LiNR V3 at 512 bits
 
-Not run yet at this commit.
+LiNR §5.3 / Fig. 7: V3 with **512-bit** codes, keeping **1 %** of the items for the full-precision stage, is "around 10 %"
+faster than V1 / V2 at "nearly parity". The final run used 128-bit Sign-OPORP (k_bits = D). Sign-OPORP bins D coordinates
+into k_bits groups, so `k_bits` must divide D (`quantize._oporp_k_bits`): 512-bit OPORP does not exist at D = 128, which is
+LiNR's D too. The library's stage 1 for more bits than D is `SimHashKNN` (a Gaussian projection, every bit mixing all
+coordinates). The arms are therefore:
+
+- `oporp128`: the study's V3.
+- `simhash128`: SimHash at 128 bits, which separates the projection from the bit count.
+- `simhash512`: LiNR's bit count.
+- `oporp768`: PubMed only, the study's V3 there (k_bits = D).
+
+Each arm feeds the exact rescoring (`PrefilterKNN`). Pools: LiNR's 1 % of the catalog (`1%N`), and the harness's fractions
+{0.005, 0.01, 0.02, 0.05, 0.1, 0.2} of the mean pass count with its 2,000 floor (`run.resolve_pool`).
+
+**Quality.** Recall@100 = overlap with the exact filtered top-100 (LiNR V2) on the first 2,000 kept queries, measured on
+every real clause sweep of the configs and on synthetic 11 / 20 / 50 %.
+
+**Time.** Graph replay at bs 1 and 16, k 100, timed only where the time budget allowed: three real filters per dataset
+(including the reverse and the conjunctive kept sweeps) and the three synthetic ones; `oporp128` and `simhash512` only; pools
+`1%N`, `f0.01` and `f0.05`. V1 and V2 are timed in the same round-robin group, and the ratio is to the faster of them.
+1 timed group is `unstable`. 2 of 864 windows dropped to 1140 MHz; the rest ran at 1395–1410 MHz.
+
+Recall@100 against the exact filtered top-100 at LiNR's pool (1 % of N) and at the pool fraction 0.01 of the
+mean pass count (floor 2000); then the smallest pool (items) reaching recall 0.95 per arm.
+
+| cell | pass | oporp128 @1%N / @f0.01 | simhash128 @1%N / @f0.01 | simhash512 @1%N / @f0.01 | oporp768 @1%N / @f0.01 | oporp128 pool≥0.95 | simhash128 pool≥0.95 | simhash512 pool≥0.95 | oporp768 pool≥0.95 |
+|---|---|---|---|---|---|---|---|---|---|
+| goodreads/c0_genre | 0.3347 | 0.944 / 0.868 | 0.976 / 0.906 | 1.000 / 0.998 | — | 13,341 | 5,336 | 2,000 | — |
+| goodreads/c1_lang_reverse | 0.6140 | 0.937 / 0.906 | 0.912 / 0.863 | 0.999 / 0.998 | — | 24,470 | 24,470 | 2,447 | — |
+| goodreads/c2_format | 0.4031 | 0.943 / 0.887 | 0.973 / 0.919 | 1.000 / 0.999 | — | 16,066 | 6,426 | 2,000 | — |
+| goodreads/c3_year | 0.3673 | 0.935 / 0.863 | 0.976 / 0.917 | 1.000 / 0.998 | — | 14,639 | 5,856 | 2,000 | — |
+| goodreads/c0c1 | 0.1986 | 0.963 / 0.865 | 0.959 / 0.816 | 1.000 / 0.993 | — | 7,915 | 7,915 | 2,000 | — |
+| goodreads/all4 | 0.0415 | 0.991 / 0.937 | 0.993 / 0.922 | 1.000 / 0.997 | — | 3,305 | 3,305 | 2,000 | — |
+| goodreads/p0.11 | 0.1095 | 0.968 / 0.887 | 0.989 / 0.916 | 1.000 / 0.998 | — | 7,971 | 4,365 | 2,000 | — |
+| goodreads/p0.2 | 0.1997 | 0.954 / 0.862 | 0.983 / 0.900 | 1.000 / 0.998 | — | 7,958 | 7,958 | 2,000 | — |
+| goodreads/p0.5 | 0.5001 | 0.939 / 0.897 | 0.970 / 0.933 | 1.000 / 0.999 | — | 19,930 | 7,971 | 2,000 | — |
+| arxiv/c0_maincat | 0.1196 | 0.919 / 0.628 | 0.863 / 0.521 | 0.997 / 0.924 | — | 71,467 | — | 7,147 | — |
+| arxiv/c2_year | 0.1611 | 0.911 / 0.655 | 0.840 / 0.532 | 0.997 / 0.941 | — | 48,162 | 96,325 | 9,632 | — |
+| arxiv/c3_nversions | 0.4475 | 0.859 / 0.755 | 0.768 / 0.640 | 0.994 / 0.977 | — | 133,746 | 267,492 | 13,375 | — |
+| arxiv/c0c2 | 0.0203 | 0.989 / 0.685 | 0.979 / 0.600 | 1.000 / 0.930 | — | 29,890 | 29,890 | 3,041 | — |
+| arxiv/all4 | 0.0075 | 0.998 / 0.817 | 0.997 / 0.761 | 1.000 / 0.967 | — | 29,890 | 29,890 | 2,000 | — |
+| arxiv/p0.11 | 0.1099 | 0.933 / 0.608 | 0.877 / 0.489 | 0.998 / 0.921 | — | 65,711 | 65,711 | 6,571 | — |
+| arxiv/p0.2 | 0.1999 | 0.896 / 0.667 | 0.821 / 0.543 | 0.996 / 0.950 | — | 59,752 | 119,503 | 11,950 | — |
+| arxiv/p0.5 | 0.4997 | 0.839 / 0.744 | 0.738 / 0.623 | 0.992 / 0.976 | — | 149,374 | 298,747 | 14,937 | — |
+| pubmed/c0_mesh | 0.0002 | 1.000 / 0.982 | 1.000 / 0.973 | 1.000 / 0.994 | 1.000 / 0.999 | 2,000 | 2,000 | 2,000 | 2,000 |
+| pubmed/c2_year | 0.1267 | 0.884 / 0.585 | 0.788 / 0.446 | 0.980 / 0.859 | 1.000 / 0.990 | 253,442 | — | 63,361 | 6,336 |
+| pubmed/c3_journal_reverse | 0.9994 | 0.680 / 0.680 | 0.535 / 0.535 | 0.908 / 0.908 | 0.998 / 0.998 | 1,998,754 | — | 499,689 | 49,969 |
+| pubmed/c0c2 | 0.0001 | 1.000 / 0.999 | 1.000 / 0.999 | 1.000 / 1.000 | 1.000 / 1.000 | 2,000 | 2,000 | 2,000 | 2,000 |
+| pubmed/all5 | 0.0001 | 1.000 / 0.999 | 1.000 / 0.999 | 1.000 / 1.000 | 1.000 / 1.000 | 2,000 | 2,000 | 2,000 | 2,000 |
+| pubmed/p0.11 | 0.1098 | 0.889 / 0.555 | 0.798 / 0.420 | 0.979 / 0.817 | 1.000 / 0.986 | 219,635 | — | 54,909 | 5,491 |
+| pubmed/p0.2 | 0.1999 | 0.834 / 0.593 | 0.720 / 0.453 | 0.963 / 0.847 | 1.000 / 0.992 | 399,834 | — | 99,958 | 9,996 |
+| pubmed/p0.5 | 0.4998 | 0.750 / 0.649 | 0.611 / 0.502 | 0.935 / 0.887 | 0.999 / 0.996 | 999,565 | — | 249,891 | 24,989 |
+
+Timing, graph replay: V1 / V2 medians (ms); V3 as a ratio to the faster of V1 and V2 timed in the same group.
+
+| cell | bs | V1 | V2 | oporp128 1%N | oporp128 f0.01 | oporp128 f0.05 | simhash512 1%N | simhash512 f0.01 | simhash512 f0.05 | unstable |
+|---|---|---|---|---|---|---|---|---|---|---|
+| goodreads/c0_genre | 1 | 0.316 | 0.244 | 1.46 | 1.15 | 1.51 | 1.51 | 1.21 | 1.58 | no |
+| goodreads/c0_genre | 16 | 0.567 | 1.293 | 1.95 | 1.73 | 2.06 | 2.41 | 2.20 | 2.52 | no |
+| goodreads/c1_lang_reverse | 1 | 0.315 | 0.281 | 1.27 | 1.19 | 1.28 | 1.37 | 1.29 | 1.38 | no |
+| goodreads/c1_lang_reverse | 16 | 0.568 | 1.596 | 2.04 | 1.97 | 2.23 | 2.79 | 2.73 | 2.98 | no |
+| goodreads/all4 | 1 | 0.376 | 0.303 | 1.44 | 1.17 | 1.17 | 1.48 | 1.21 | 1.21 | no |
+| goodreads/all4 | 16 | 0.647 | 1.922 | 3.13 | 2.93 | 2.93 | 3.19 | 2.99 | 2.99 | no |
+| goodreads/p0.11 | 1 | 0.292 | 0.186 | 1.64 | 1.22 | 1.51 | 1.70 | 1.28 | 1.58 | no |
+| goodreads/p0.11 | 16 | 0.469 | 0.595 | 1.55 | 1.27 | 1.47 | 1.69 | 1.42 | 1.61 | no |
+| goodreads/p0.2 | 1 | 0.290 | 0.203 | 1.53 | 1.13 | 1.51 | 1.62 | 1.22 | 1.61 | no |
+| goodreads/p0.2 | 16 | 0.470 | 0.668 | 1.58 | 1.30 | 1.59 | 1.88 | 1.61 | 1.89 | no |
+| goodreads/p0.5 | 1 | 0.290 | 0.238 | 1.33 | 1.04 | 1.55 | 1.47 | 1.19 | 1.68 | no |
+| goodreads/p0.5 | 16 | 0.470 | 0.940 | 1.71 | 1.47 | 2.01 | 2.50 | 2.27 | 2.79 | no |
+| arxiv/c0_maincat | 1 | 0.830 | 0.392 | 1.27 | 1.09 | 1.38 | 1.32 | 1.14 | 1.44 | no |
+| arxiv/c0_maincat | 16 | 1.783 | 3.591 | 1.85 | 1.70 | 1.84 | 2.05 | 1.90 | 2.04 | no |
+| arxiv/c2_year | 1 | 0.831 | 0.453 | 1.09 | 1.04 | 1.08 | 1.20 | 1.14 | 1.19 | no |
+| arxiv/c2_year | 16 | 1.792 | 3.964 | 1.86 | 1.75 | 1.82 | 2.22 | 2.11 | 2.18 | no |
+| arxiv/all4 | 1 | 1.035 | 0.627 | 1.23 | 1.09 | 1.09 | 1.25 | 1.11 | 1.11 | no |
+| arxiv/all4 | 16 | 2.087 | 6.689 | 3.34 | 3.22 | 3.22 | 3.34 | 3.22 | 3.22 | no |
+| arxiv/p0.11 | 1 | 0.737 | 0.287 | 1.36 | 1.11 | 1.49 | 1.45 | 1.19 | 1.56 | no |
+| arxiv/p0.11 | 16 | 1.455 | 1.890 | 1.38 | 1.21 | 1.36 | 1.58 | 1.40 | 1.55 | no |
+| arxiv/p0.2 | 1 | 0.736 | 0.328 | 1.22 | 1.17 | 1.21 | 1.33 | 1.28 | 1.32 | no |
+| arxiv/p0.2 | 16 | 1.454 | 2.186 | 1.43 | 1.31 | 1.42 | 1.79 | 1.66 | 1.77 | no |
+| arxiv/p0.5 | 1 | 0.737 | 0.482 | 0.86 | 0.92 | 0.91 | 1.03 | 1.09 | 1.08 | no |
+| arxiv/p0.5 | 16 | 1.453 | 3.306 | 1.58 | 1.54 | 1.77 | 2.52 | 2.47 | 2.71 | no |
+| pubmed/c0_mesh | 1 | 9.578 | 0.793 | 1.22 | 1.08 | 1.08 | 1.23 | 1.09 | 1.09 | no |
+| pubmed/c0_mesh | 16 | 11.959 | 6.363 | 1.07 | 1.00 | 1.00 | 1.07 | 1.01 | 1.01 | no |
+| pubmed/c2_year | 1 | 9.579 | 2.060 | 0.53 | 0.50 | 0.51 | 0.57 | 0.53 | 0.55 | v2 |
+| pubmed/c2_year | 16 | 11.971 | 28.582 | 0.74 | 0.60 | 0.68 | 0.84 | 0.70 | 0.78 | no |
+| pubmed/all5 | 1 | 10.209 | 2.191 | 1.08 | 1.03 | 1.03 | 1.08 | 1.03 | 1.03 | no |
+| pubmed/all5 | 16 | 13.307 | 16.112 | 1.03 | 0.98 | 0.98 | 1.05 | 1.00 | 1.00 | no |
+| pubmed/p0.11 | 1 | 9.226 | 1.538 | 0.52 | 0.46 | 0.49 | 0.55 | 0.49 | 0.52 | no |
+| pubmed/p0.11 | 16 | 11.589 | 19.692 | 0.59 | 0.45 | 0.52 | 0.67 | 0.53 | 0.60 | no |
+| pubmed/p0.2 | 1 | 9.226 | 2.380 | 0.35 | 0.33 | 0.35 | 0.39 | 0.37 | 0.39 | no |
+| pubmed/p0.2 | 16 | 11.587 | 32.516 | 0.61 | 0.49 | 0.61 | 0.75 | 0.63 | 0.75 | no |
+| pubmed/p0.5 | 1 | 9.225 | 5.219 | 0.17 | 0.16 | 0.21 | 0.22 | 0.21 | 0.26 | no |
+| pubmed/p0.5 | 16 | 11.588 | 75.314 | 0.70 | 0.61 | 0.94 | 1.05 | 0.96 | 1.29 | no |
+
+**What it says.**
+
+- **Bits matter more than the projection.** At LiNR's pool (1 % of N), `simhash512` recovers 0.992–1.000 of the exact
+  top-100 on Goodreads and arXiv, and 0.91–0.98 on PubMed's dense filters (≥ 11 % pass). At the same pool, `oporp128`
+  recovers 0.84–1.00 and 0.68–0.89 there. To reach 0.95, `simhash512` needs a pool 4–15× smaller than `oporp128` (1.7× on
+  Goodreads `all4`, and equal on PubMed's sparse filters, where the 2,000 floor already holds every passing item). SimHash
+  at 128 bits is no better than OPORP at 128: it is better on most Goodreads filters and worse on every arXiv and PubMed
+  filter.
+- **"Nearly parity" at 1 % holds with 512 bits.** It holds where 512 ≥ D (Goodreads and arXiv: ≥ 0.992). On PubMed
+  (D = 768) the study's own `oporp768` does better than 512 bits (0.998–1.000 at 1 % of N).
+- **"About 10 % faster" is scale-dependent.** At 0.8 M and 3 M items, V3 is slower than the faster exact arm on every timed
+  cell (1.04–3.3×) except arXiv at 50 % and bs 1 (0.86–0.92× with `oporp128`). At 10 M (PubMed d768) with ≥ 11 % passing,
+  V3 at 1 % of N takes 0.17–0.74× of the faster exact arm with `oporp128` and 0.22–1.05× with `simhash512`. On PubMed's selective
+  filters (`c0_mesh` 0.02 %, `all5` 0.01 %) V3 and V2 are even (0.98–1.23×). That is LiNR's own remark: V2 wins at a low
+  pass rate.
+- **512 bits cost little time at one query.** At the same pool, `simhash512` takes 2–20 % more than `oporp128` at bs 1 on
+  Goodreads and arXiv, and 0–31 % more on PubMed. At bs 16 it takes 0–60 % more.
+
+LiNR measured on 15.5 M jobs at d128 with TF / PyTorch 2023 kernels, and its recall is a label recall@2000; ours is fidelity
+to the exact top-100. The shape agrees (V3 pays off only at a large N and a high pass rate). The numbers are not comparable.
 
 ## Check 3: Meta's bloom with NOT
 
