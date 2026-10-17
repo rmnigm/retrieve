@@ -1,0 +1,2440 @@
+[
+ {
+  "dataset": "arxiv",
+  "dim": 128,
+  "sweep": "all4",
+  "bs": 1,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    512
+   ]
+  ],
+  "pass_rate": 0.00937675824925828
+ },
+ {
+  "dataset": "arxiv",
+  "dim": 128,
+  "sweep": "all4",
+  "bs": 16,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    512
+   ]
+  ],
+  "pass_rate": 0.00937675824925828
+ },
+ {
+  "dataset": "arxiv",
+  "dim": 128,
+  "sweep": "all4",
+  "bs": 64,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    512
+   ]
+  ],
+  "pass_rate": 0.00937675824925828
+ },
+ {
+  "dataset": "arxiv",
+  "dim": 128,
+  "sweep": "c0_maincat",
+  "bs": 64,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    128
+   ],
+   [
+    2048,
+    512
+   ]
+  ],
+  "pass_rate": 0.1363381747248909
+ },
+ {
+  "dataset": "arxiv",
+  "dim": 128,
+  "sweep": "c3_nversions",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    2048,
+    64
+   ],
+   [
+    2048,
+    512
+   ]
+  ],
+  "pass_rate": 0.4443735518548703
+ },
+ {
+  "dataset": "arxiv",
+  "dim": 128,
+  "sweep": "c3_nversions",
+  "bs": 64,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    128
+   ],
+   [
+    2048,
+    512
+   ]
+  ],
+  "pass_rate": 0.4443735518548703
+ },
+ {
+  "dataset": "goodreads",
+  "dim": 128,
+  "sweep": "c0_genre",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    32
+   ],
+   [
+    4096,
+    64
+   ]
+  ],
+  "pass_rate": 0.33065800339244367
+ },
+ {
+  "dataset": "goodreads",
+  "dim": 128,
+  "sweep": "c0_genre",
+  "bs": 1,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    128
+   ],
+   [
+    4096,
+    256
+   ]
+  ],
+  "pass_rate": 0.33065800339244367
+ },
+ {
+  "dataset": "goodreads",
+  "dim": 128,
+  "sweep": "c0_genre",
+  "bs": 1,
+  "k": 2048,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    32
+   ],
+   [
+    4096,
+    64
+   ],
+   [
+    4096,
+    128
+   ],
+   [
+    4096,
+    256
+   ]
+  ],
+  "pass_rate": 0.33065800339244367
+ },
+ {
+  "dataset": "goodreads",
+  "dim": 128,
+  "sweep": "c0_genre",
+  "bs": 16,
+  "k": 2048,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    32
+   ],
+   [
+    4096,
+    64
+   ],
+   [
+    4096,
+    128
+   ],
+   [
+    4096,
+    256
+   ]
+  ],
+  "pass_rate": 0.33065800339244367
+ },
+ {
+  "dataset": "goodreads",
+  "dim": 128,
+  "sweep": "c0_genre",
+  "bs": 64,
+  "k": 2048,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    32
+   ],
+   [
+    4096,
+    64
+   ],
+   [
+    4096,
+    128
+   ],
+   [
+    4096,
+    256
+   ]
+  ],
+  "pass_rate": 0.33065800339244367
+ },
+ {
+  "dataset": "laion10m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    65536,
+    32768
+   ],
+   [
+    65536,
+    49152
+   ]
+  ],
+  "pass_rate": 0.00950986985188233
+ },
+ {
+  "dataset": "laion10m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 1,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    65536,
+    32768
+   ],
+   [
+    65536,
+    49152
+   ]
+  ],
+  "pass_rate": 0.00950986985188233
+ },
+ {
+  "dataset": "laion10m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V3",
+    "pool": 0.05
+   },
+   {
+    "variant": "V3",
+    "pool": 0.1
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    65536,
+    32768
+   ],
+   [
+    65536,
+    49152
+   ]
+  ],
+  "pass_rate": 0.00950986985188233
+ },
+ {
+  "dataset": "laion10m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 16,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    65536,
+    32768
+   ],
+   [
+    65536,
+    49152
+   ]
+  ],
+  "pass_rate": 0.00950986985188233
+ },
+ {
+  "dataset": "laion10m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    65536,
+    32768
+   ],
+   [
+    65536,
+    49152
+   ]
+  ],
+  "pass_rate": 0.00950986985188233
+ },
+ {
+  "dataset": "laion10m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 64,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    65536,
+    32768
+   ],
+   [
+    65536,
+    49152
+   ]
+  ],
+  "pass_rate": 0.00950986985188233
+ },
+ {
+  "dataset": "laion10m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    1024
+   ],
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.00265501142
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    512,
+    24
+   ],
+   [
+    8192,
+    4096
+   ],
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.009517546903929232
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 1,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.009517546903929232
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    512,
+    24
+   ],
+   [
+    8192,
+    4096
+   ],
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.009517546903929232
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 16,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.009517546903929232
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    512,
+    24
+   ],
+   [
+    8192,
+    4096
+   ],
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.009517546903929232
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 64,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.009517546903929232
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    512,
+    24
+   ],
+   [
+    8192,
+    4096
+   ],
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.0026562562
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 1,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.0026562562
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    512,
+    24
+   ],
+   [
+    8192,
+    4096
+   ],
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.0026562562
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 16,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.0026562562
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    512,
+    24
+   ],
+   [
+    8192,
+    4096
+   ],
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.0026562562
+ },
+ {
+  "dataset": "laion1m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 64,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    8192,
+    6144
+   ]
+  ],
+  "pass_rate": 0.0026562562
+ },
+ {
+  "dataset": "laion30m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.0095051050744017
+ },
+ {
+  "dataset": "laion30m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V3",
+    "pool": 0.05
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.0095051050744017
+ },
+ {
+  "dataset": "laion30m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.0095051050744017
+ },
+ {
+  "dataset": "laion30m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 1,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.0026560413999999997
+ },
+ {
+  "dataset": "laion30m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 16,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.0026560413999999997
+ },
+ {
+  "dataset": "laion30m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 64,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.0026560413999999997
+ },
+ {
+  "dataset": "laion3m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    16384,
+    8192
+   ],
+   [
+    16384,
+    12288
+   ]
+  ],
+  "pass_rate": 0.009501322464513476
+ },
+ {
+  "dataset": "laion3m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 1,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    16384,
+    8192
+   ],
+   [
+    16384,
+    12288
+   ]
+  ],
+  "pass_rate": 0.009501322464513476
+ },
+ {
+  "dataset": "laion3m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V3",
+    "pool": 0.005
+   },
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    16384,
+    8192
+   ],
+   [
+    16384,
+    12288
+   ]
+  ],
+  "pass_rate": 0.009501322464513476
+ },
+ {
+  "dataset": "laion3m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 16,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    16384,
+    8192
+   ],
+   [
+    16384,
+    12288
+   ]
+  ],
+  "pass_rate": 0.009501322464513476
+ },
+ {
+  "dataset": "laion3m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    16384,
+    8192
+   ],
+   [
+    16384,
+    12288
+   ]
+  ],
+  "pass_rate": 0.009501322464513476
+ },
+ {
+  "dataset": "laion3m",
+  "dim": 256,
+  "sweep": "c0_domain",
+  "bs": 64,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    16384,
+    8192
+   ],
+   [
+    16384,
+    12288
+   ]
+  ],
+  "pass_rate": 0.009501322464513476
+ },
+ {
+  "dataset": "laion3m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    8192,
+    2048
+   ],
+   [
+    16384,
+    4096
+   ]
+  ],
+  "pass_rate": 0.0026543306333333336
+ },
+ {
+  "dataset": "laion3m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    8192,
+    2048
+   ],
+   [
+    16384,
+    4096
+   ]
+  ],
+  "pass_rate": 0.0026543306333333336
+ },
+ {
+  "dataset": "laion3m",
+  "dim": 256,
+  "sweep": "tags4",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    8192,
+    2048
+   ],
+   [
+    16384,
+    4096
+   ]
+  ],
+  "pass_rate": 0.0026543306333333336
+ },
+ {
+  "dataset": "pubmed",
+  "dim": 768,
+  "sweep": "c0_mesh",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    512
+   ],
+   [
+    16384,
+    2048
+   ],
+   [
+    65536,
+    8192
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.00018935726150925484
+ },
+ {
+  "dataset": "pubmed",
+  "dim": 768,
+  "sweep": "c0_mesh",
+  "bs": 1,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.00018935726150925484
+ },
+ {
+  "dataset": "pubmed",
+  "dim": 768,
+  "sweep": "c0_mesh",
+  "bs": 1,
+  "k": 2048,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    512
+   ],
+   [
+    16384,
+    2048
+   ],
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    8192
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.00018935726150925484
+ },
+ {
+  "dataset": "pubmed",
+  "dim": 768,
+  "sweep": "c0_mesh",
+  "bs": 16,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.00018935726150925484
+ },
+ {
+  "dataset": "pubmed",
+  "dim": 768,
+  "sweep": "c0_mesh",
+  "bs": 16,
+  "k": 2048,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    512
+   ],
+   [
+    16384,
+    2048
+   ],
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    8192
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.00018935726150925484
+ },
+ {
+  "dataset": "pubmed",
+  "dim": 768,
+  "sweep": "c0_mesh",
+  "bs": 64,
+  "k": 1000,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.00018935726150925484
+ },
+ {
+  "dataset": "pubmed",
+  "dim": 768,
+  "sweep": "c0_mesh",
+  "bs": 64,
+  "k": 2048,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    512
+   ],
+   [
+    16384,
+    2048
+   ],
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    8192
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.00018935726150925484
+ },
+ {
+  "dataset": "arxiv-synth",
+  "dim": 128,
+  "sweep": "p0001",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    2048,
+    512
+   ]
+  ],
+  "pass_rate": 0.000991637325710707
+ },
+ {
+  "dataset": "arxiv-synth",
+  "dim": 128,
+  "sweep": "p0001",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    2048,
+    512
+   ]
+  ],
+  "pass_rate": 0.000991637325710707
+ },
+ {
+  "dataset": "arxiv-synth",
+  "dim": 128,
+  "sweep": "p0001",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    2048,
+    512
+   ]
+  ],
+  "pass_rate": 0.000991637325710707
+ },
+ {
+  "dataset": "arxiv-synth",
+  "dim": 128,
+  "sweep": "p1",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    2048,
+    64
+   ],
+   [
+    2048,
+    512
+   ]
+  ],
+  "pass_rate": 1.0
+ },
+ {
+  "dataset": "arxiv-synth",
+  "dim": 128,
+  "sweep": "p1",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    2048,
+    24
+   ],
+   [
+    2048,
+    64
+   ],
+   [
+    2048,
+    512
+   ]
+  ],
+  "pass_rate": 1.0
+ },
+ {
+  "dataset": "goodreads-synth",
+  "dim": 128,
+  "sweep": "p0001",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    2048
+   ]
+  ],
+  "pass_rate": 0.0009898580325285666
+ },
+ {
+  "dataset": "goodreads-synth",
+  "dim": 128,
+  "sweep": "p0001",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    2048
+   ]
+  ],
+  "pass_rate": 0.0009898580325285666
+ },
+ {
+  "dataset": "goodreads-synth",
+  "dim": 128,
+  "sweep": "p001",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    256
+   ],
+   [
+    4096,
+    512
+   ]
+  ],
+  "pass_rate": 0.010017764752522947
+ },
+ {
+  "dataset": "goodreads-synth",
+  "dim": 128,
+  "sweep": "p01",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.9,
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    64
+   ],
+   [
+    4096,
+    128
+   ]
+  ],
+  "pass_rate": 0.09950770558686407
+ },
+ {
+  "dataset": "laion10m-synth",
+  "dim": 256,
+  "sweep": "p0001",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    1024
+   ],
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.0009999
+ },
+ {
+  "dataset": "laion10m-synth",
+  "dim": 256,
+  "sweep": "p0001",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    1024
+   ],
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.0009999
+ },
+ {
+  "dataset": "laion10m-synth",
+  "dim": 256,
+  "sweep": "p0001",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    1024
+   ],
+   [
+    16384,
+    4096
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.0009999
+ },
+ {
+  "dataset": "laion10m-synth",
+  "dim": 256,
+  "sweep": "p05",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    256
+   ],
+   [
+    4096,
+    1024
+   ],
+   [
+    16384,
+    512
+   ],
+   [
+    16384,
+    2048
+   ]
+  ],
+  "pass_rate": 0.49998360000000014
+ },
+ {
+  "dataset": "laion10m-synth",
+  "dim": 256,
+  "sweep": "p1",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    256
+   ],
+   [
+    4096,
+    1024
+   ],
+   [
+    16384,
+    512
+   ],
+   [
+    16384,
+    2048
+   ],
+   [
+    65536,
+    1024
+   ],
+   [
+    65536,
+    4096
+   ]
+  ],
+  "pass_rate": 1.0
+ },
+ {
+  "dataset": "laion30m-synth",
+  "dim": 256,
+  "sweep": "p05",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    256
+   ],
+   [
+    4096,
+    1024
+   ],
+   [
+    16384,
+    512
+   ],
+   [
+    16384,
+    2048
+   ]
+  ],
+  "pass_rate": 0.5000066333333333
+ },
+ {
+  "dataset": "pubmed-synth",
+  "dim": 768,
+  "sweep": "p0001",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    512
+   ],
+   [
+    16384,
+    2048
+   ],
+   [
+    65536,
+    8192
+   ],
+   [
+    65536,
+    16384
+   ]
+  ],
+  "pass_rate": 0.0009924000000000007
+ },
+ {
+  "dataset": "pubmed-synth",
+  "dim": 768,
+  "sweep": "p001",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    512
+   ],
+   [
+    16384,
+    1024
+   ],
+   [
+    65536,
+    4096
+   ]
+  ],
+  "pass_rate": 0.0099602
+ },
+ {
+  "dataset": "pubmed-synth",
+  "dim": 768,
+  "sweep": "p001",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    512
+   ],
+   [
+    16384,
+    1024
+   ],
+   [
+    65536,
+    4096
+   ]
+  ],
+  "pass_rate": 0.0099602
+ },
+ {
+  "dataset": "pubmed-synth",
+  "dim": 768,
+  "sweep": "p001",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    512
+   ],
+   [
+    16384,
+    1024
+   ],
+   [
+    65536,
+    4096
+   ]
+  ],
+  "pass_rate": 0.0099602
+ },
+ {
+  "dataset": "pubmed-synth",
+  "dim": 768,
+  "sweep": "p01",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V2",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    256
+   ],
+   [
+    16384,
+    512
+   ],
+   [
+    65536,
+    2048
+   ]
+  ],
+  "pass_rate": 0.09983279999999996
+ },
+ {
+  "dataset": "pubmed-synth",
+  "dim": 768,
+  "sweep": "p01",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    256
+   ],
+   [
+    16384,
+    512
+   ],
+   [
+    65536,
+    2048
+   ]
+  ],
+  "pass_rate": 0.09983279999999996
+ },
+ {
+  "dataset": "pubmed-synth",
+  "dim": 768,
+  "sweep": "p01",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    256
+   ],
+   [
+    16384,
+    512
+   ],
+   [
+    65536,
+    2048
+   ]
+  ],
+  "pass_rate": 0.09983279999999996
+ },
+ {
+  "dataset": "pubmed-synth",
+  "dim": 768,
+  "sweep": "p1",
+  "bs": 1,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    256
+   ],
+   [
+    16384,
+    512
+   ],
+   [
+    65536,
+    1024
+   ]
+  ],
+  "pass_rate": 1.0
+ },
+ {
+  "dataset": "pubmed-synth",
+  "dim": 768,
+  "sweep": "p1",
+  "bs": 16,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    256
+   ],
+   [
+    16384,
+    512
+   ],
+   [
+    65536,
+    1024
+   ]
+  ],
+  "pass_rate": 1.0
+ },
+ {
+  "dataset": "pubmed-synth",
+  "dim": 768,
+  "sweep": "p1",
+  "bs": 64,
+  "k": 100,
+  "linr": [
+   {
+    "variant": "V1",
+    "pool": null
+   }
+  ],
+  "targets": [
+   0.95
+  ],
+  "points": [
+   [
+    4096,
+    24
+   ],
+   [
+    4096,
+    256
+   ],
+   [
+    16384,
+    512
+   ],
+   [
+    65536,
+    1024
+   ]
+  ],
+  "pass_rate": 1.0
+ }
+]
