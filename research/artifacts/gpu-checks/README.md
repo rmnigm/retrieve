@@ -220,4 +220,45 @@ to the exact top-100. The shape agrees (V3 pays off only at a large N and a high
 
 ## Check 3: Meta's bloom with NOT
 
-Not run yet at this commit.
+Four of the kept sweeps contain a reverse clause and were left out of the bloom head-to-head, because the wrapper refuses
+NOT in bloom mode: Goodreads `c1_lang_reverse` (C1 language) and `all4` (C0-C3, NOT on C1); PubMed `c3_journal_reverse`
+(C3 journal) and `all5` (C0-C4, NOT on C3). Meta's code supports NOT by complementing the bloom mask of `c:v`. A bloom
+false positive on `c:v` therefore becomes a false negative of `NOT c:v`.
+
+**Setup.**
+- The bloom index is built forward-only, as on every bloom cell, at the study's configuration: `m_bits` 1,024 (configured
+  width), `k_hash` 5, no recheck. The query side passes the reverse flags to the adapter's
+  `queries_to_expressions(..., clause_is_reverse)`, which emits Meta's `NOT c:v`. Meta's own parser and
+  `bloom_index_search_batch` do the rest.
+- Per query, over the whole catalog: Meta's full bloom search, unpacked and mapped back from the cluster-sorted doc space,
+  against the exact predicate (`ExactAttributeFilter`), for the NOT clause alone and for the whole filter.
+- Recall@100 against the exact filtered top-100 (LiNR V2), for SilverTorch with the bloom (NOT included) and with its exact
+  filter. Both use one k-means: same seed, `sort_perm` checked equal. The study's `n_lists` (4,096 on both datasets) and
+  `n_probe` 24 plus the `filter` suite's other probes. 2,000 kept queries per filter.
+- Staging's k-means assigns by inner product, while the final run's records were L2-assigned, so these recalls compare only
+  within this index.
+
+| filter | pass rate | NOT clause: FN / passing items | queries with ≥ 1 NOT FN | whole filter: FN / passing items | whole filter: FP / failing items | recall@100, bloom with NOT | recall@100, exact filter |
+|---|---|---|---|---|---|---|---|
+| goodreads `c1_lang_reverse` | 0.614 | 0 | 0 % | 0 | 0 | 0.7188 (np 24), 0.8715 (np 64) | identical |
+| goodreads `all4` | 0.041 | 0 | 0 % | 0 | 0 | 0.4477, 0.6306 | identical |
+| pubmed `c3_journal_reverse` | 0.9994 | 2.4e-8 (mean 0.24 items a query, max 40) | 10.8 % | 2.4e-8 | 0 | 0.7918 (np 24), 0.9268 (512), 0.9308 (1,024) | identical |
+| pubmed `all5` | 0.0001 | 2.2e-8 (mean 0.22, max 40) | 9.5 % | 0 | 4.5e-10 (9 items over 2,000 queries) | 0.4002, 0.8640, 0.9290 | identical |
+
+"Identical" means equal to four decimals at every probe. The low recall at `n_probe` 24 is the IVF probe, not the filter.
+
+**Forward-only sanity run** (`forward_sanity.jsonl`, same code, Goodreads `c0_genre` / `c2_format` / `c3_year`, PubMed
+`c0_mesh` / `c2_year`): 0 false negatives everywhere, so the bloom covers the exact set. False positives appear only on
+PubMed MeSH: 4.4e-8 of the failing items, in 11.6 % of queries, max 114 items. Goodreads' clauses (a handful of genre,
+format and year values over about 7 terms a document) give none at 1,024 bits per document, so its zeros above are the
+bloom's, not a dead code path.
+
+**What it says.** At the study's bloom width, NOT through Meta's complement is practically lossless on these filters:
+- At most 2.4e-8 of the passing items are lost, which is 0.24 of about 10 M a query.
+- On `all5` the conjunction absorbs the NOT clause's false negatives: the lost items fail the other clauses anyway.
+- SilverTorch's recall@100 with the bloom NOT equals its exact-filter recall at every probe.
+
+So the exclusion from the head-to-head cost no quality at this width. The four filters could run in the bloom head-to-head
+with NOT, which was not timed here. The loss depends on the width: a narrower bloom (Meta's upstream width, or the
+`bloomwidth` suite's smaller `m_bits`) has more false positives, and therefore more NOT false negatives. That was not
+measured.
