@@ -15,6 +15,9 @@ and logs are on the Hub under `artifacts/gpu-checks/<check>/` ([hub-index](../hu
 | [`summarize.py`](summarize.py) | the tables below from the records |
 | [`upload.py`](upload.py) | one commit per check to `pinkmeme/eval-results` with a `MANIFEST.json` (sha256 per file), read back and checked; the records are not harness-schema, so `bench upload` does not apply |
 
+The library suite on this pod at the same commit: 643 passed, 1 failed (a k-means++ seeding test none of the checks
+exercises; [validation](../../validation.md#still-unverified-known-defects)).
+
 Run from `evaluation/` (`python ../research/artifacts/gpu-checks/check1_native.py`), with `evaluation/data` pointing at the
 staged datasets.
 

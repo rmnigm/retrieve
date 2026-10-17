@@ -298,6 +298,7 @@ PubMed 10 M d768 is the large scale point.
   sample; safe only because the current files are shuffled.
 - `scripts/check_doc_links.py` cannot parse `for … in f(...)` in a CLI
   module.
+- The library suite at `staging` `61045809` (k-means by inner product) on the gpu-checks pod (A100-SXM4-80GB, driver 570.172.08, 2026-10-17): **643 passed, 1 failed**. `test_kmeans.py::test_kmeanspp_seeds_are_a_valid_d2_sample` fails deterministically: 16 k-means++ seeds land in 15 of the 16 blobs. The study's SilverTorch uses random init; not fixed.
 - Every row above on a new pod, until the library suite has run there.
 
 ## Superseded results
