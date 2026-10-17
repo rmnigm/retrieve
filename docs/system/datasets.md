@@ -1,7 +1,7 @@
 ---
 title: datasets
 created: 2026-09-26
-updated: 2026-10-11
+updated: 2026-10-17
 type: entity
 tags: [datasets, training]
 sources: [evaluation/eval_datasets/, evaluation/training/]
@@ -204,8 +204,8 @@ that feed a `head(k)` keep the left order (`maintain_order="left"`); `prep`'s `b
 keeps the first row per `book_id`. Before this, `group_by` handed back tied values in a
 thread-dependent order, so their ids (C1 language, C4 author, the wide shelves) and the genre
 picked among tied counts changed from build to build. Two builds are byte-identical
-(`tests/eval_datasets/test_goodreads.py`). The staged copy stays canonical, pinned by Hub
-revision `<owner>/eval-goodreads-work-id@4714e9b5` (`item_attrs_narrow.pt` sha256
+(`tests/eval_datasets/test_goodreads.py`). The staged copy stays canonical, pinned by the
+`<anonymous archive>`'s `eval-goodreads-work-id/` (`item_attrs_narrow.pt` sha256
 `584993bd…`, `eval_split.parquet` `f1208e12…`); a rebuild with this code is **not byte-equal** to it.
 
 > `prep` deliberately passes `drop_non_train_items=False`, mirroring
@@ -248,7 +248,7 @@ by name**; the author join before each paper's `head(2)` keeps the left order. B
 tied values (about 1.5 M authors, most of them tied) got thread-dependent ids, so C4 author ids
 and, through the query side, `eval_split.parquet` changed from build to build. Two builds are
 byte-identical (`tests/eval_datasets/test_arxiv.py`). The staged copy stays canonical, pinned by
-Hub revision `<owner>/eval-arxiv-papers@354e6937` (`item_attrs_narrow.pt` sha256 `7f5f2f4d…`,
+the `<anonymous archive>`'s `eval-arxiv-papers/` (`item_attrs_narrow.pt` sha256 `7f5f2f4d…`,
 `eval_split.parquet` `91b58ab2…`); a rebuild with this code is **not byte-equal** to it.
 
 Arxiv has **no user sequences**, so `prep` does no interactions and no
@@ -433,7 +433,7 @@ builds of the same inputs are byte-identical (`test_attrs_two_builds_are_byte_id
 The staged `pubmed-medcpt` predates the tie rule: its journal / language ids are
 one draw of the old order and stay canonical, pinned by sha256
 (`item_attrs_narrow.pt` `8a3bce0f…`, `eval_split.parquet` `3a83c6f9…`); the dot-product build
-`pubmed-medcpt-dot` copies these files, and `<owner>/eval-pubmed@10d48d05` holds them. Pods that need the old one copy it; a rebuild with this code is **not byte-equal** to it.
+`pubmed-medcpt-dot` copies these files, and the `<anonymous archive>`'s `eval-pubmed/` holds them. Pods that need the old one copy it; a rebuild with this code is **not byte-equal** to it.
 
 #### Query sets
 
@@ -671,7 +671,8 @@ and writes their `config/laion{1,3,10}m-synth*.yaml`. A draw built on the
 parent after the subset is copied on with `eval-data subset laion30m laion10m
 --n-items 10000000 --synth-only` (`subset.sync_synth`: the rows are re-derived
 from the seed and must match the subset's recorded `rows_sha256`; the manifest
-is rewritten). The files are not on the Hub.
+is rewritten). Draws 0-2 of goodreads, arxiv and pubmed are in the `<anonymous archive>`, rebuilt from the
+seed (every pass count equal to the final run's records); laion30m's are not.
 
 **Cluster-correlated variant.** `eval-data synth-filter --dataset arxiv
 --correlated [--rates 0.01,0.03,0.1] [--dim 128] [--draw 0]`
@@ -696,7 +697,10 @@ files beside the uniform ones and touches no existing file:
 
 [`arxiv-corr-synth.yaml`](../../evaluation/config/arxiv-corr-synth.yaml)
 reads them at d128 only (the clusters are d128's) with sweeps `c001`,
-`c003` and `c01`.
+`c003` and `c01`. The `<anonymous archive>`'s copy is a rebuild: at 0.03 the
+k-means converges and every query's pass count equals the final run's; at 0.01 and 0.1 it stops at the 25-iteration
+cap and CPU floating-point order moves a few items between clusters (mean pass rate equal to six digits, per-query
+pass counts off by a median relative 9×10⁻⁵ and 6×10⁻⁶), so the run's own files are not reproduced byte for byte.
 
 ### On-disk layout the harness expects
 
@@ -747,15 +751,29 @@ dataset in `EVAL_DATASETS`, and `results_repo()` is `<owner>/eval-results`, the 
 HF user or organisation in `RETRIEVE_HUB_OWNER` (`hub_owner()`, its one reader; unset, every Hub
 command raises with that instruction).
 
-`<owner>/eval-pubmed` (private, revision `10d48d05`, 17.2 GB) holds the dot-product 10 M slice
-(`pubmed-medcpt-dot`, [pubmed](#pubmed)): `content_d768/`, attrs, `eval_split.parquet`, `heldout.parquet`,
-`item_id_map.json` and vocabularies, no titles, abstracts or ETL intermediates (published from a directory of
-hardlinks to exactly those files). `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `<owner>/eval-laion30m` (private) is to hold the
-staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`); not yet published. The old A100
-`checkpoints/gsasrec-d128-shared` was deleted from it to free space.
+**The `<anonymous archive>`** holds the final run's inputs and records, one directory per Hub repo, so the
+harness reads it with `RETRIEVE_HUB_OWNER` set to the archive's owner (or from a local copy linked under the data
+root by `data_dir` name). Every file has its sha256 in the archive's `MANIFEST.json` (`python3 verify.py` checks a
+copy); `LICENSES.md` says what is shipped per dataset; no raw source file or text is.
+`<owner>/eval-pubmed` holds the dot-product 10 M slice (`pubmed-medcpt-dot`, [pubmed](#pubmed)): `content_d768/`,
+attrs, `eval_split.parquet`, `heldout.parquet`, `item_id_map.json` and vocabularies, no titles, abstracts or ETL
+intermediates. `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `<owner>/eval-laion30m` holds the
+staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`).
 
-**Trainer inputs** sit under `trainer/` in the private eval repos, uploaded with
-`upload_folder` (`hub.py` has no helper for them). The trainer's `data_dir` needs
+| directory = repo | `data_dir` | what |
+|---|---|---|
+| `eval-goodreads-work-id/` | `data/goodreads-work-id` | `test.parquet`, `item_id_map.json`, `item_attrs_narrow.pt`, `clause_is_reverse_narrow.pt`, `eval_split.parquet`, vocabularies, synthetic draws 0-2, `checkpoints/sasrec-ssm-logq-d128/` |
+| `eval-arxiv-papers/` | `data/arxiv-papers` | `content/` (d256), `content_d128/`, `heldout.parquet`, `item_id_map.json`, attrs, `eval_split.parquet`, vocabularies, synthetic draws 0-2, the correlated draw 0 |
+| `eval-pubmed/` | `data/pubmed-medcpt-dot` | the dot-product 10 M slice ([pubmed](#pubmed)): `content_d768/`, attrs, `eval_split.parquet`, `heldout.parquet`, `item_id_map.json`, vocabularies, synthetic draws 0-2 (`eval-data fetch pubmed --target data/pubmed-medcpt-dot`) |
+| `eval-yambda-500m/` | `data/yambda-500m` | `test.parquet` (the trainer's split, with `timestamps`), `item_id_map.json`, `checkpoints/sasrec-ssm-logq-d{64,128,256}/` |
+| `eval-results/` | (results trees) | `runs/<run>/`: the final run's 106 legs as `bench` writes them, fetched with `bench fetch --path-in-repo runs/<run>` ([evaluation](evaluation.md#bench-fetch)) |
+| `eval-laion30m/` | `data/laion30m` | not yet in the archive (vectors, attrs, vocab and the synthetic draws; the subsets are rebuilt by `eval-data subset`) |
+
+The oracle blobs and the encode caches are not in it: `bench` rebuilds them on the GPU.
+
+**Trainer inputs** (the training and validation splits) are not in the archive: retraining an encoder rebuilds
+them with the dataset's ETL. Where they sit under `trainer/` of an eval repo, uploaded with
+`upload_folder` (`hub.py` has no helper for them), the trainer's `data_dir` needs
 `train/val/test.parquet` and `item_id_map.json` in one directory:
 
 - `<owner>/eval-goodreads-work-id` `trainer/`: all of `data/goodreads-work-id/trainer/`

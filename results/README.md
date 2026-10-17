@@ -178,12 +178,23 @@ records superseded by a rerun are not included: a cell that was unstable was rer
 the rerun's record replaces it unless it was unstable too, in which case the record keeps its
 flag.
 
-The complete per-run output of the final run (every record, the per-query sidecars, logs; about
-2 GB, one directory per run with its `results.parquet` as `bench report` writes it and a
-`MANIFEST.json` of checksums) is in the archive at `<anonymous archive URL>`. Hosted as a
-Hugging Face dataset repo, one run is fetched and checked with
-`bench fetch --repo-id <owner>/<repo> --path-in-repo <run>`
-([`bench fetch`](../docs/system/evaluation.md#bench-fetch)).
+The complete per-run output of the final run is in the `<anonymous archive>`, directory `eval-results/runs/`:
+106 runs, one per leg (one driver invocation on one GPU), 3,827 records, 0.61 GB. Each is a results tree as
+`bench` writes it: `<suite>/<dataset>-d<dim>.jsonl` (every record, failed attempts included),
+`*.samples.jsonl` (per-call latencies), `*.perquery/*.npz` (per-query recall and pass counts),
+`results.parquet` and a `MANIFEST.json` of checksums. Hosted as the Hugging Face dataset repo
+`<owner>/eval-results`, one run is fetched and checked with
+`bench fetch --repo-id <owner>/eval-results --path-in-repo runs/<run>`
+([`bench fetch`](../docs/system/evaluation.md#bench-fetch)), and `bench merge` reads any set of them. Run
+names are the suite or stage and the seed (`timed-bloom-d128-s0`); a letter marks the parts of one suite run on
+different GPUs and `-rerun` the one rerun of a run's unstable cells. The run's logs are not included; record
+fields that held a machine-local path or a container id hold a relative path or `gpu-host-<n>`.
+
+The same archive holds every input the final run read, laid out as the harness's Hub repos
+(`eval-goodreads-work-id/`, `eval-arxiv-papers/`, `eval-pubmed/`, `eval-yambda-500m/`, with the Goodreads and
+Yambda encoder checkpoints and the synthetic filters; LAION 1M-30M not yet), so `eval-data fetch` and
+`bench run` read it with `RETRIEVE_HUB_OWNER` set to its owner
+([datasets](../docs/system/datasets.md#huggingface-io)).
 
 ## Measured revision
 
