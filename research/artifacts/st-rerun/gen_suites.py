@@ -1,6 +1,7 @@
 """plan.json -> the rerun's suites.yaml: one suite `strerun-<dataset>` per dataset.
 
-usage: python gen_suites.py PLAN_JSON OUT_YAML
+usage: python gen_suites.py PLAN_JSON OUT_YAML [PREFIX]   (PREFIX strerun- by default; strerun-fu- for the
+follow-up plan of gen_followup.py, which adds no n_lists / 4 point)
 
 Per (dataset, sweep): SilverTorch on Meta's bloom (1,024 bits, 5 hashes, recheck off) at every
 (n_lists, n_probe) the final run timed for the sweep's at-risk workloads, plus n_lists / 4 at each
@@ -16,6 +17,7 @@ from collections import defaultdict
 import yaml
 
 plan = json.load(open(sys.argv[1]))
+prefix = sys.argv[3] if len(sys.argv) > 3 else "strerun-"
 ALGO = {"V1": "linr_v1_filter_mask", "V2": "linr_v2", "V3": "linr_v3"}
 by_ds = defaultdict(list)
 for e in plan:
@@ -38,7 +40,7 @@ for (ds, dim), es in by_ds.items():
         for n_lists, n_probe in e["points"]:
             st[(e["sweep"], n_lists)].add(n_probe)
     for (s, n_lists), probes in st.items():
-        if max(probes) > n_lists // 4:
+        if prefix == "strerun-" and max(probes) > n_lists // 4:
             probes.add(n_lists // 4)
     for algo in ("linr_v1_filter_mask", "linr_v2"):
         if linr[algo]:
@@ -69,7 +71,7 @@ for (ds, dim), es in by_ds.items():
                 "datasets": {ds: {"sweeps": [s], "query": {"n_probe": sorted(probes)}}},
             }
         )
-    suites[f"strerun-{ds}"] = {
+    suites[f"{prefix}{ds}"] = {
         "datasets": [ds],
         "dims": [dim],
         "filter_kinds": ["bloom", "clause"],
