@@ -1,7 +1,7 @@
 ---
 title: checkpoints
 created: 2026-09-26
-updated: 2026-10-07
+updated: 2026-10-17
 type: entity
 tags: [training]
 sources: [evaluation/training/, evaluation/eval_datasets/hub.py]
@@ -29,8 +29,8 @@ with logQ, L2-normalized).
 
 | dataset config | ckpt-id | D | where it is |
 |---|---|---|---|
-| `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `<owner>/eval-goodreads-work-id` `checkpoints/` |
-| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | Hub (private) `<owner>/eval-yambda-500m` `checkpoints/`; yambda-500m is in the study, unfiltered |
+| `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | `<owner>/eval-goodreads-work-id` `checkpoints/`; in the `<anonymous archive>`: d128, the one the final run read (`eval-goodreads-work-id/checkpoints/sasrec-ssm-logq-d128/`) |
+| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | `<owner>/eval-yambda-500m` `checkpoints/`; in the `<anonymous archive>`: all three (`eval-yambda-500m/checkpoints/`); yambda-500m is in the study, unfiltered |
 
 Each E1c dir holds `best_model.pt`, `item_embs.pt`, `config.json`,
 `item_id_map.json`, `eval_quality.json`, `train_metrics.json` and a short
@@ -51,6 +51,8 @@ before the switch (the earliest goodreads runs use `gsasrec-d128-drop0.5-id`).
 |---|---|
 | `<owner>/eval-goodreads-work-id` | `gsasrec-d{64,128,256}-drop0.5-id` |
 | `<owner>/eval-yambda-500m` | `gsasrec-d{64,128,256}-drop0.5` |
+
+They are not in the `<anonymous archive>`: no record of the final run reads them.
 
 The yambda-500m ones as recorded at training time (Listen+, full-catalog
 ranking against all 1,866,170 items, no history masking, the
