@@ -268,6 +268,19 @@ Unverified: `target_frequencies` (logQ) is checked only by hand on CPU;
 `--resume` has never run on the GPU; `_resume.pt` is written in place, not
 atomically.
 
+## GPU checks (not citable)
+
+Three checks of the papers' claims outside the final run
+([gpu-checks](artifacts/gpu-checks/README.md); Hub `artifacts/gpu-checks/<check>`), one A100-SXM4-80GB,
+`staging` `61045809`, 2026-10-17. Session scripts with no gate: **not citable**. LAION is not on the Hub, so
+PubMed 10 M d768 is the large scale point.
+
+| check | state | result |
+|---|---|---|
+| 1: LiNR §6's native PyTorch (boolean mask, per-query `nonzero` + gather with host sync; and V1's masked scores) against Triton V1 / V2 in graph replay | **measured**: 30 cells (goodreads, arXiv, PubMed × p 0.001 / 0.01 / 0.1 / 0.11 / 0.5 × bs 1 / 16, k 100), 3 `unstable`; native top-100 overlap with V2 0.988-1.000 | native / custom 0.8-34×, never 100×. The index form costs 0.8-4.7× at bs 1 and 1.7-34× at bs 16 (the top is PubMed at 50 %, bs 16); the masked form 1.6-17×; at LiNR's 11 % point 2.2-9.4×. Native windows are shortened (≥ 10 calls) |
+| 2: LiNR V3 at 512 bits (Sign-OPORP needs k_bits to divide D, so 512 bits at D = 128 is `SimHashKNN`) against 128-bit OPORP / SimHash, pools LiNR's 1 % of N and fractions 0.005-0.2 of the mean pass count | **measured**: 25 filters (every real clause sweep + synthetic 11 / 20 / 50 %; goodreads, arXiv, PubMed), recall@100 against exact V2 on 2,000 queries; 18 filters timed (graph, bs 1 / 16) against V1 / V2 in the same group, 1 `unstable` | At 1 % of N, 512-bit SimHash recovers 0.992-1.000 of the exact top-100 on Goodreads and arXiv and 0.91-0.98 on PubMed's dense filters, against 0.84-1.00 and 0.68-0.89 for 128-bit OPORP. V3 is slower than the faster exact arm at 0.8 M and 3 M (1.04-3.3×, except arXiv 50 % bs 1); at 10 M with ≥ 11 % passing it takes 0.17-0.74× (OPORP-128) and 0.22-1.05× (SimHash-512) |
+| 3: Meta's bloom with NOT (complemented mask) on the four kept reverse-clause filters (goodreads `c1_lang_reverse`, `all4`; PubMed `c3_journal_reverse`, `all5`), `m_bits` 1,024, `k_hash` 5, no recheck, quality only | **measured**: 2,000 queries per filter, the whole catalog per query; one k-means for the bloom and exact SilverTorch (`sort_perm` equal); a forward-only sanity run on 5 filters (0 FN; FP only on PubMed MeSH, 4.4e-8) | NOT false negatives 0 (Goodreads) and 2.2-2.4e-8 of the passing items (PubMed; ≤ 40 items a query, in about 10 % of queries); whole-filter FN 0 except `c3_journal_reverse` (2.4e-8). SilverTorch recall@100 with the bloom NOT equals the exact filter's to 4 decimals at every probe (n_probe 24 / 64 Goodreads, 24 / 512 / 1,024 PubMed) |
+
 ## Still unverified, known defects
 
 - A compiled (`graph`-mode) measurement on a warm inductor cache after a
@@ -285,6 +298,7 @@ atomically.
   sample; safe only because the current files are shuffled.
 - `scripts/check_doc_links.py` cannot parse `for … in f(...)` in a CLI
   module.
+- The library suite at `staging` `61045809` (k-means by inner product) on the gpu-checks pod (A100-SXM4-80GB, driver 570.172.08, 2026-10-17): **643 passed, 1 failed**. `test_kmeans.py::test_kmeanspp_seeds_are_a_valid_d2_sample` fails deterministically: 16 k-means++ seeds land in 15 of the 16 blobs. The study's SilverTorch uses random init; not fixed.
 - Every row above on a new pod, until the library suite has run there.
 
 ## Superseded results
