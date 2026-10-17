@@ -900,8 +900,8 @@ def linr_v3_code_length(r):
 
 def recall_bridge(r):
     """Recall against the exact top-k beside the end-task recall on held-out interactions, per SilverTorch
-    configuration (seed 0): Yambda without a filter (every probe setting), Goodreads genre on the bloom filter (the
-    quality curve and the head-to-head points, one record per n_lists / n_probe)."""
+    configuration (seed 0) on Goodreads genre with the bloom filter (the quality curve and the head-to-head points, one
+    record per n_lists / n_probe)."""
     x = r.filter(
         (pl.col("algo") == "silvertorch")
         & (pl.col("seed") == SEED)

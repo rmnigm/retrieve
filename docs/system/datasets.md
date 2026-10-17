@@ -143,7 +143,7 @@ what it wrote.
 
 ### yambda
 
-yambda-500m is in the study unfiltered only: it has no attributes, so its
+yambda-500m is not in the study, and the release ships no Yambda inputs or results. It has no attributes, so its
 config has no `filters` block and every cell is `none`; `users_limit: 10000`
 keeps the first 10,000 of 45,932 test users.
 The harness reads the E1c checkpoints `checkpoints/sasrec-ssm-logq-d{64,128,256}`
@@ -765,8 +765,7 @@ staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`
 | `eval-goodreads-work-id/` | `data/goodreads-work-id` | `test.parquet`, `item_id_map.json`, `item_attrs_narrow.pt`, `clause_is_reverse_narrow.pt`, `eval_split.parquet`, vocabularies, synthetic draws 0-2, `checkpoints/sasrec-ssm-logq-d128/` |
 | `eval-arxiv-papers/` | `data/arxiv-papers` | `content/` (d256), `content_d128/`, `heldout.parquet`, `item_id_map.json`, attrs, `eval_split.parquet`, vocabularies, synthetic draws 0-2, the correlated draw 0 |
 | `eval-pubmed/` | `data/pubmed-medcpt-dot` | the dot-product 10 M slice ([pubmed](#pubmed)): `content_d768/`, attrs, `eval_split.parquet`, `heldout.parquet`, `item_id_map.json`, vocabularies, synthetic draws 0-2 (`eval-data fetch pubmed --target data/pubmed-medcpt-dot`) |
-| `eval-yambda-500m/` | `data/yambda-500m` | `test.parquet` (the trainer's split, with `timestamps`), `item_id_map.json`, `checkpoints/sasrec-ssm-logq-d{64,128,256}/` |
-| `eval-results/` | (results trees) | `runs/<run>/`: the final run's 106 legs as `bench` writes them, fetched with `bench fetch --path-in-repo runs/<run>` ([evaluation](evaluation.md#bench-fetch)) |
+| `eval-results/` | (results trees) | `runs/<run>/`: the final run's 105 legs as `bench` writes them, fetched with `bench fetch --path-in-repo runs/<run>` ([evaluation](evaluation.md#bench-fetch)) |
 | `eval-laion30m/` | `data/laion30m` | not yet in the archive (vectors, attrs, vocab and the synthetic draws; the subsets are rebuilt by `eval-data subset`) |
 
 The oracle blobs and the encode caches are not in it: `bench` rebuilds them on the GPU.

@@ -30,7 +30,7 @@ with logQ, L2-normalized).
 | dataset config | ckpt-id | D | where it is |
 |---|---|---|---|
 | `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | `<owner>/eval-goodreads-work-id` `checkpoints/`; in the `<anonymous archive>`: d128, the one the final run read (`eval-goodreads-work-id/checkpoints/sasrec-ssm-logq-d128/`) |
-| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | `<owner>/eval-yambda-500m` `checkpoints/`; in the `<anonymous archive>`: all three (`eval-yambda-500m/checkpoints/`); yambda-500m is in the study, unfiltered |
+| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | `<owner>/eval-yambda-500m` `checkpoints/`; not in the `<anonymous archive>`: yambda-500m is not in the study |
 
 Each E1c dir holds `best_model.pt`, `item_embs.pt`, `config.json`,
 `item_id_map.json`, `eval_quality.json`, `train_metrics.json` and a short

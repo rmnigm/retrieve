@@ -17,7 +17,7 @@ relative range of its three timing-window medians above 5 %).
 | [`build_figures.py`](build_figures.py) | `tables/` and `originals.csv` → `figures/` (PDF and PNG), one function per figure |
 | [`NUMBERS.md`](NUMBERS.md) | the facts the paper cites, each with its value and the CSV line(s) it is read from, written by [`build_numbers.py`](build_numbers.py) |
 | [`originals.csv`](originals.csv) | the original papers' numbers the figures draw beside ours, quoted with their source (not measured here) |
-| [`records/records.parquet`](records/records.parquet) | the 3,529 records the tables read (below) |
+| [`records/records.parquet`](records/records.parquet) | the 3,454 records the tables read (below) |
 | [`records/score_path_diagnostic.csv`](records/score_path_diagnostic.csv) | untimed: SilverTorch recall@100 at fixed probed clusters with the exact filter, scored as shipped (int8 inputs, fp16 output) and with fp16 inputs and fp32 accumulation |
 | [`records/bloom_false_positives.csv`](records/bloom_false_positives.csv) | untimed: the bloom filter's false-positive rate over the whole catalogue per width and hash count (false admissions / items failing the exact filter, per query), and the queries with a false negative |
 | [`final-run-config/suites.yaml`](final-run-config/suites.yaml) | the suites that produced the records, in the harness's suite format |
@@ -47,7 +47,7 @@ relative range of its three timing-window medians above 5 %).
 | [`linr_native_pytorch.csv`](tables/linr_native_pytorch.csv) | the LiNR kernels against native PyTorch: per variant, filter, batch and mode (eager, CUDA graph), native and compiled (`max-autotune`, eager only) latency over the Triton kernel of the same run | — |
 | [`linr_native_v2_over_v1.csv`](tables/linr_native_v2_over_v1.csv) | un-fused LiNR: native V2 over native V1 per filter, batch and mode on Goodreads synthetic (the two timed in different runs) | Fig. `linr_v2_over_v1` (diamonds) |
 | [`codesign_medians.csv`](tables/codesign_medians.csv) | the co-design pairs per catalogue size, filter (`all` pools the two) and batch: pairs, stable pairs, their median / min / max, and the share of lists searched | — |
-| [`recall_bridge.csv`](tables/recall_bridge.csv) | per SilverTorch configuration on Yambda (no filter) and Goodreads genre (bloom): recall against the exact top-k and recall of the held-out interactions, k 100 and 1000 | — |
+| [`recall_bridge.csv`](tables/recall_bridge.csv) | per SilverTorch configuration on Goodreads genre (bloom): recall against the exact top-k and recall of the held-out interactions, k 100 and 1000 | — |
 | [`recall_bridge_correlation.csv`](tables/recall_bridge_correlation.csv) | Pearson and Spearman correlation between the two recalls per dataset, dimension and k, with `n` and both ranges | — |
 | [`reverse_clause_points.csv`](tables/reverse_clause_points.csv) | the four filters with a reverse clause: SilverTorch on the exact clause filter at each timed point against the faster exact LiNR at the same batch (separate runs) | — |
 | [`reverse_clause_selections.csv`](tables/reverse_clause_selections.csv) | the same per filter, batch and target: the fastest clause-filter point within a quarter reaching the target | — |
@@ -119,8 +119,7 @@ Every table uses seed 0, and every timed table CUDA-graph timing except the co-d
   graph, so the compiled rows are eager only. Native V1 and native V2 were timed in different runs.
 - **V3 code length** (`linr_v3_code_length`). Quality and timing of V3 at two code lengths per
   dataset (the 512 bits of the original paper at d 128 was not run).
-- **Recall bridge** (`recall_bridge*`). Yambda: every SilverTorch probe setting without a filter;
-  Goodreads: every distinct `n_lists` / `n_probe` of SilverTorch on the genre bloom filter (recheck
+- **Recall bridge** (`recall_bridge*`). Every distinct `n_lists` / `n_probe` of SilverTorch on the genre bloom filter (recheck
   off). Held-out recall is the share of held-out interactions in the returned top-k.
 - **Reverse-clause filters** (`reverse_clause_*`). The bloom path refuses a reverse clause (a
   negated bloom test would turn false positives into misses), so the four filters with one ran on
@@ -179,7 +178,7 @@ the rerun's record replaces it unless it was unstable too, in which case the rec
 flag.
 
 The complete per-run output of the final run is in the `<anonymous archive>`, directory `eval-results/runs/`:
-106 runs, one per leg (one driver invocation on one GPU), 3,827 records, 0.61 GB. Each is a results tree as
+105 runs, one per leg (one driver invocation on one GPU), 3,752 records, about 0.6 GB. Each is a results tree as
 `bench` writes it: `<suite>/<dataset>-d<dim>.jsonl` (every record, failed attempts included),
 `*.samples.jsonl` (per-call latencies), `*.perquery/*.npz` (per-query recall and pass counts),
 `results.parquet` and a `MANIFEST.json` of checksums. Hosted as the Hugging Face dataset repo
@@ -191,8 +190,8 @@ different GPUs and `-rerun` the one rerun of a run's unstable cells. The run's l
 fields that held a machine-local path or a container id hold a relative path or `gpu-host-<n>`.
 
 The same archive holds every input the final run read, laid out as the harness's Hub repos
-(`eval-goodreads-work-id/`, `eval-arxiv-papers/`, `eval-pubmed/`, `eval-yambda-500m/`, with the Goodreads and
-Yambda encoder checkpoints and the synthetic filters; LAION 1M-30M not yet), so `eval-data fetch` and
+(`eval-goodreads-work-id/`, `eval-arxiv-papers/`, `eval-pubmed/`, with the Goodreads encoder checkpoint and the
+synthetic filters; LAION 1M-30M not yet), so `eval-data fetch` and
 `bench run` read it with `RETRIEVE_HUB_OWNER` set to its owner
 ([datasets](../docs/system/datasets.md#huggingface-io)).
 
@@ -235,7 +234,7 @@ shipped. It ran the suites in [`final-run-config/suites.yaml`](final-run-config/
 - `c3`, `c3-real`: the kernels against native and compiled PyTorch (V1); the native V2 rows are
   in `synth`;
 - `v3bits`: the V3 code-length sweep;
-- `curve-d128` (the Goodreads genre points), `yambda`: the recall bridge (quality only);
+- `curve-d128` (the Goodreads genre points): the recall bridge (quality only);
 - `filter`, `linr-bs64`, `linr-bs256`: the exact LiNR on the reverse-clause filters (batch 1 / 16,
   and 64); `timed-clause-lite-d128` / `-d256` / `-d768`: SilverTorch's exact clause filter on
   them, run on a later revision ([Measured revision](#measured-revision)).

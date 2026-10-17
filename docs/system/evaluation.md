@@ -376,7 +376,7 @@ synthetic-selectivity siblings `goodreads-synth.yaml`, `arxiv-synth.yaml`,
 cluster-correlated `arxiv-corr-synth.yaml`, and each one's second and third draw `<name>-synth-s1.yaml` /
 `-s2.yaml` ([datasets](datasets.md#synthetic-selectivity-attrs)) (goodreads, arxiv and
 pubmed in the `filter` suite, pubmed at 768; yambda-500m is unfiltered and
-read by its own suite), and
+not in the study), and
 [`suites.yaml`](../../evaluation/config/suites.yaml). `users_limit:
 10000`. The grid is one backend per algo (`triton` for LiNR, `cuda` for `silvertorch`; records
 written before the adapted code took Meta's names carry `official-fork` / `official`), without LiNR V4 (it was ours, not
