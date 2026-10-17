@@ -15,6 +15,7 @@ relative range of its three timing-window medians above 5 %).
 | [`tables/`](tables/) | the CSVs below, written by `build_tables.py` |
 | [`build_tables.py`](build_tables.py) | records → `tables/`; every selection rule is a constant or a docstring in it |
 | [`build_figures.py`](build_figures.py) | `tables/` and `originals.csv` → `figures/` (PDF and PNG), one function per figure |
+| [`NUMBERS.md`](NUMBERS.md) | the facts the paper cites, each with its value and the CSV line(s) it is read from, written by [`build_numbers.py`](build_numbers.py) |
 | [`originals.csv`](originals.csv) | the original papers' numbers the figures draw beside ours, quoted with their source (not measured here) |
 | [`records/records.parquet`](records/records.parquet) | the 3,529 records the tables read (below) |
 | [`records/score_path_diagnostic.csv`](records/score_path_diagnostic.csv) | untimed: SilverTorch recall@100 at fixed probed clusters with the exact filter, scored as shipped (int8 inputs, fp16 output) and with fp16 inputs and fp32 accumulation |
@@ -37,7 +38,7 @@ relative range of its three timing-window medians above 5 %).
 | [`bloom_width.csv`](tables/bloom_width.csv) | SilverTorch's bloom filter per width (`m_bits`) and hash count (`k_hash`) on Goodreads, arXiv and PubMed: recall@100, index size, whole-catalogue false-positive rate, false-negative queries | — |
 | [`index_memory.csv`](tables/index_memory.csv) | resident index size per arm (SilverTorch per `n_lists`, LiNR V1 / V2 / V3) per dataset | — |
 | [`head_to_head_probe_budgets.csv`](tables/head_to_head_probe_budgets.csv) | all 312 workload × recall-target settings, each with an `outcome`: `within_quarter` (the selection of `head_to_head_selections`), `deeper` (reached only at one half or three quarters of the lists, follow-up points) or `not_reached`; the pick, SilverTorch's best recall at any depth, the dataset's `tie_band` and the tie-aware `verdict` | Figs. `head_to_head`, `catalogue_size` (a) |
-| [`head_to_head_counts.csv`](tables/head_to_head_counts.csv) | counts over the settings per probe budget (`quarter`, `any`), k, filter type and target (`all` pools): settings, reached, SilverTorch faster (strict), wins / ties / losses under the tie band, median ratio, unstable, and the same over the stable settings | — |
+| [`head_to_head_counts.csv`](tables/head_to_head_counts.csv) | counts over the settings per probe budget (`quarter`: within a quarter; `deeper`: reached only beyond it; `any`), k, filter type and target (`all` pools): settings, reached, SilverTorch faster (strict), wins / ties / losses under the tie band, median ratio, unstable, and the same over the stable settings | — |
 | [`timing_spread.csv`](tables/timing_spread.csv) | SilverTorch's seed spread per dataset over its points timed at two or three seeds: time range over median, recall range, and the tie band (half the time spread) | — |
 | [`silvertorch_latency.csv`](tables/silvertorch_latency.csv) | SilverTorch's latency at its within-quarter picks per dataset and batch: min, median, max | — |
 | [`linr_v2_over_v1_batch64.csv`](tables/linr_v2_over_v1_batch64.csv) | LiNR V1 and V2 latency and their ratio on the synthetic filters at batch 64, from the head-to-head runs | Fig. `linr_v2_over_v1` |
@@ -151,6 +152,7 @@ From this directory, with [uv](https://docs.astral.sh/uv/):
 ```bash
 uv run --no-project --with polars==2.0.0 python build_tables.py records/records.parquet tables
 uv run --no-project --with polars==2.0.0 --with matplotlib==3.10.0 python build_figures.py tables figures
+uv run --no-project --with polars==2.0.0 python build_numbers.py
 ```
 
 The CSVs in `tables/` are that command's output, byte for byte. Each was also checked against

@@ -676,15 +676,17 @@ def probe_budgets(quarter, anywhere, spread):
 
 
 def head_to_head_counts(pb):
-    """Counts over the probe-budget table per population: budget (a quarter, or any), k, filter type and target
+    """Counts over the probe-budget table per population: budget (within a quarter, only deeper, any), k, filter type and target
     (`all` pools). `settings` counts every workload x target with a timed SilverTorch point, `timed_within_quarter`
     those with one inside a quarter (the selections' population). Medians are over the reached settings; `stable_*`
     drops the reached settings with timing_unstable."""
     rows = []
-    for budget in ("quarter", "any"):
-        hit = pl.col("outcome") == "within_quarter"
-        if budget == "any":
-            hit = pl.col("outcome") != "not_reached"
+    hits = {
+        "quarter": pl.col("outcome") == "within_quarter",
+        "deeper": pl.col("outcome") == "deeper",
+        "any": pl.col("outcome") != "not_reached",
+    }
+    for budget, hit in hits.items():
         for k in (None, 100, 1000, 2048):
             for ft in (None, "real", "synthetic"):
                 for tg in (None, 0.90, 0.95):
