@@ -298,6 +298,11 @@ paper's Algorithm 1 on Meta's SilverTorch code, adapted: IVF clustering over INT
 codes (one global per-tensor scale, paper §3.2) with an inline attribute predicate. `filter_mode`
 picks the predicate at construction; `backend` is `"cuda"`, the one value.
 
+The IVF is inner product throughout: `KMeans` puts each item in the cluster of the centroid with
+the largest `x·c`, and the probe takes the `n_probe` centroids with the largest `q·c`
+(`query @ centroids.T` + `topk`), so a query's first probe is the cluster `KMeans.assign` would
+put it in.
+
 The predicate, `filter_mode ∈ {"none", "bloom", "exact"}`:
 
 - `"none"`: plain IVF + INT8 ANN, no attribute filter.
@@ -362,18 +367,13 @@ cluster-sorted order:
   `clause_is_reverse[C]` bool.
 - `"none"`: no filter buffers; `prepare_queries` raises and `forward` requires `prepared=None`.
 
-Last, a non-persistent `centroid_half_sqnorm[n_lists]` (`‖c‖²/2`, not in the state dict). The
-probe ranks centroids by `q·c − ‖c‖²/2`, so it picks the `n_probe` nearest centroids by L2, the
-metric `KMeans.assign` put the items in clusters with; `q·c` alone would favour large-norm
-centroids, and Lloyd's means of unit vectors differ in norm.
-
 > **State dicts are portable between the two backends in `"none"`**: both register the same CSR.
 > The exact attrs differ in layout and the bloom index in width, so a filtered module is rebuilt
 > with `register_index` across the boundary. Loading is `nn.Module.load_state_dict` into a module
 > whose `register_index` already ran (or `load_prebuilt` / the builder's `set_state_dict`). A
 > `load_state_dict` post-hook re-derives the two Python scalars the forwards read instead of the
 > buffers, `_global_scale_f` (from `global_scale`) and `_probe_width` (from `cluster_sizes` and
-> `n_probe`), with two `.item()` syncs at load time, and re-registers `centroid_half_sqnorm` last, so a loaded index scores exactly like the
+> `n_probe`), with two `.item()` syncs at load time, so a loaded index scores exactly like the
 > saved one.
 
 ## Utility modules
@@ -396,11 +396,16 @@ centroids, and Lloyd's means of unit vectors differ in norm.
   cleanly under the eval harness's `torch.compile(mode="reduce-overhead",
   dynamic=False, fullgraph=True)`).
 - [`KMeans`](../../retrieve/src/retrieve/indexing/kmeans.py) — pure-torch
-  Lloyd's k-means used by
-  `SilverTorch` for IVF index building (not a `RetrievalModule`);
+  Lloyd's k-means under inner product, used by
+  `SilverTorch` for IVF index building (not a `RetrievalModule`): `assign`
+  takes the centroid of largest `x·c` (chunked `x @ c.T` + `argmax`), and
+  the update is the plain cluster mean, not normalised (as Faiss trains an
+  inner-product IVF);
   `KMeans(n_lists, n_iter=10, seed=0, init="random" | "kmeans++")`,
   `fit(embs) -> (centroids, assignments)`, `assign(embs, centroids)`.
-  `init="kmeans++"` is greedy D² sampling — one `mv` over the index per
+  `init="kmeans++"` is greedy D² sampling on squared L2, standard k-means++
+  (on unit-norm embeddings `‖x − c‖² = 2 − 2x·c`, the inner-product
+  dissimilarity) — one `mv` over the index per
   centroid, the uniform draws from the CPU generator located by
   `searchsorted` on the device-side cumsum, no host sync per step (9.5 s
   against 0.8 s random at N = 3 M × 128, `n_lists = 8192`).

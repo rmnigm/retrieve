@@ -21,11 +21,14 @@ modules use them for you.
 | `project_simhash_1bit_query` | `(query, r) -> [B, k_bits // 64] int64` | `SimHashKNN` |
 
 
-`KMeans.fit` is deterministic: same `seed` and same input give bit-identical centroids and
-assignments on repeated calls, on CPU and on CUDA, with either `init`. The centroid update sums
-each cluster with a float64 one-hot GEMM rather than `index_add_`, whose float atomics reduce in
-scheduling order and are not reproducible on a GPU. `init="kmeans++"` seeds by D² sampling (one
-pass over the index per centroid, no host sync per step) instead of `n_lists` random rows; it is
+`KMeans` clusters by inner product, the metric `SilverTorch`'s probe ranks centroids by:
+`assign` puts each row with the centroid of largest `x·c` (first index on ties), and a centroid
+is its cluster's plain mean, not normalised. `KMeans.fit` is deterministic: same `seed` and
+same input give bit-identical centroids and assignments on repeated calls, on CPU and on CUDA,
+with either `init`. The centroid update sums each cluster with a float64 one-hot GEMM rather
+than `index_add_`, whose float atomics reduce in scheduling order and are not reproducible on a
+GPU. `init="kmeans++"` seeds by D² sampling on squared L2 (one pass over the index per
+centroid, no host sync per step) instead of `n_lists` random rows; it is
 opt-in — `SilverTorch(kmeans_init="kmeans++")`.
 
 For the 1-bit schemes, the query is projected with the **same** `(signs, perm, k_bits)` or `r`,

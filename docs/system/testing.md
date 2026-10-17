@@ -40,7 +40,7 @@ retrieve/tests/
 │   ├── test_combine_filters.py
 │   ├── test_compact.py
 │   ├── test_filters.py             (ExactAttributeFilter; item-range masks)
-│   ├── test_kmeans.py              (KMeans.fit bit-reproducible; kmeans++ init)
+│   ├── test_kmeans.py              (KMeans.fit bit-reproducible; inner-product assign; kmeans++ init)
 │   ├── test_large_offsets.py       (addressing past 2³¹ elements, one planted case per overflow class; skipped
 │   │                                below 48 / 24 GiB free — kernels.md § Addressing)
 │   ├── test_linr.py                (PostfilterKNN, PrefilterKNN, OneBitKNN, SimHashKNN × torch / Triton;
@@ -302,7 +302,8 @@ module under test.
 | `SilverTorch` (qa=None)    | `SilverTorch (no bloom)` directly — `prepared=None` is a documented fast path |
 | `LiNRV1`–`LiNRV3`          | the primitives composed by hand on the same inputs (`torch.equal` scores, ids up to ties) |
 | `SilverTorchBuilder` / `LiNRBuilder` `set_state_dict` | a fresh `set_item_embeddings` build of the same seed (buffers `torch.equal`, forwards equal) |
-| `KMeans(init="kmeans++")`  | the seeds are distinct rows of the index, one per blob on separable blobs; inertia ≤ `init="random"` there |
+| `KMeans.assign`            | `argmax(x @ c.T)` per row (inner product) |
+| `KMeans(init="kmeans++")`  | the seeds are distinct rows of the index, one per blob on separable unit-norm blobs; mean `x·c` to the assigned centroid ≥ `init="random"` there |
 | `PostfilterKNN` semantics | `(q @ x.T).masked_fill(~mask, -inf).topk(k)` |
 | `PrefilterKNN` semantics      | gather + bmm + local topk + scatter |
 | `OneBitKNN` semantics         | `FullScanKNN` recall (asserts ≥ 0.4 at K=200, N=2048) |
@@ -520,6 +521,8 @@ gates are semantic and live in `test_official.py`.
 - `kmeans_init` (`TestKMeansInit`): the default is `"random"`; a `"kmeans++"` module builds on both
   backends, its centroids differ from random init's, are reproducible, and
   `build_timings["kmeans_s"] > 0`.
+- The first probe is the query's `KMeans.assign` cluster on every backend: the probe and the
+  clustering share the inner product.
 - Edge case: `n_lists = N` (one item per cluster) → recall ≥ 0.85 at full probe.
 - Few survivors (`TestFewSurvivorsSentinel`): on a row with fewer than K survivors every `-inf`
   slot carries id `-1` on both backends and both filter modes (a value carried by exactly five
@@ -561,14 +564,16 @@ epilogue every layer's torch path routes through.
 `bincount` counts, a float64 one-hot GEMM for the sums) against a kept
 copy of the float-atomic `index_add_` reduction, whose summation order
 follows block scheduling, at the 200k/128/1024 gate size and a
-chunk-tail size, on CUDA and CPU. And `init="kmeans++"`:
+chunk-tail size, on CUDA and CPU. `KMeans.assign` equals
+`argmax(x @ c.T)` (inner product) across the chunk tail. And `init="kmeans++"`:
 
 - `n_iter=0` exposes the seeds: each is a row of the index, all distinct
   (a point at zero D² mass is never redrawn — `searchsorted(right=True)`),
-  one per blob on 16 separable blobs, and the returned assignments are
+  one per blob on 16 separable unit-norm blobs, and the returned assignments are
   `KMeans.assign` of the returned centroids.
 - Deterministic per seed (two seed-0 fits `torch.equal`; seed 1 differs).
-- Inertia ≤ random init on the separable blobs at `n_iter ∈ {0, 5}`
+- The objective, mean `x·c` to the assigned centroid, ≥ random init's on
+  the separable blobs at `n_iter ∈ {0, 5}`
   (random init lands two seeds in one blob almost surely and Lloyd's cannot
   recover).
 - An unknown `init` raises.
