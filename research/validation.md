@@ -268,6 +268,16 @@ Unverified: `target_frequencies` (logQ) is checked only by hand on CPU;
 `--resume` has never run on the GPU; `_resume.pt` is written in place, not
 atomically.
 
+## GPU follow-ups (not citable)
+
+Session runs on one A100-SXM4-80GB at `staging` `61045809` (library unchanged by the k-means++ test fix) after
+the inner-product k-means and probe; [artifact](artifacts/gpu-followups/README.md). No gate: **nothing here is
+citable**; it says whether the final run's head-to-head still holds under the current code.
+
+| run | state | result |
+|---|---|---|
+| a: the head-to-head's SilverTorch points re-run (bloom 1,024 / 5, recheck off, graph, k 100, bs 1 / 16, seed 0; every real filter of Goodreads, arXiv, PubMed, LAION 1M-30M, two synthetic rates each of Goodreads, arXiv, PubMed, LAION 30M; the selected points, n_probe 24, and deeper probes where a target was no longer met) | **measured** | **0 verdict flips in 84 workload × target pairs**: 58 reached before and now, SilverTorch faster than the recorded best LiNR in all (largest ratio 0.79, PubMed `c0_mesh` bs 1 at 0.95); 24 reached neither before nor now; 2 (LAION 10M `tags4` at 0.95, reached only at 65,536 lists) left to the other pod's targeted rerun. Recall at a fixed point moved −0.042 … +0.047 (median per dataset −0.012 Goodreads … +0.024 LAION 1M). Goodreads' 0.95 targets now need 1.5× the probes (`c0_genre` 64 → 96, synthetic 1 % 512 → 768 at 4,096 lists). Latency ratios against the records mix two boxes (records on other pods): not a timing result |
+
 ## Still unverified, known defects
 
 - A compiled (`graph`-mode) measurement on a warm inductor cache after a
