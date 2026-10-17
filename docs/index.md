@@ -1,7 +1,7 @@
 ---
 title: index
 created: 2026-10-11
-updated: 2026-10-11
+updated: 2026-10-17
 type: summary
 tags: [library, harness]
 sources: [docs/, retrieve/docs/]
@@ -9,7 +9,7 @@ sources: [docs/, retrieve/docs/]
 
 # retrieve documentation
 
-> Last updated: 2026-10-11 | Total pages: 9
+> Last updated: 2026-10-17 | Total pages: 10
 
 How the `retrieve` library (package `torchretrieve`) and the `evaluation`
 harness work, kept in sync with the code.
@@ -45,9 +45,14 @@ their headings are stable.
   dataset reads, loading, embeddings, evaluation, Hub transfer.
 - [storage](system/storage.md): where the harness keeps data, results and
   caches, and the environment variables that point it there.
+- [parity](system/parity.md): the adapted SilverTorch code against Meta's
+  published code: the gate, its recorded results and how to rerun it.
+
+The paper's table and figure data, the records and the final run's
+configuration are in [`results/`](../results/README.md).
 
 ## Contributing
 
-[AGENTS.md](../AGENTS.md)'s rules apply to every change; a change to behaviour updates the matching
+A change to behaviour updates the matching
 `docs/system` page in the same commit, and
 `python3 scripts/check_doc_links.py` stays at zero broken links.

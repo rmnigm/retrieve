@@ -2,7 +2,7 @@
 gates of the adapted code against an independent torch oracle, through the ops and through the
 ``SilverTorch`` layer. The gates against Meta's code as published (pinned at ``21aa35e``) held
 bit-exact at int32 up to tag ``meta-published-parity-final``, where the published code left the
-workspace; what remains is the oracle.
+workspace; what remains is the oracle (docs/system/parity.md).
 
 The upstream-shaped ops (``fused_kmean_ann`` and the bloom searches, the gates' reference path)
 and the one-op forward ``st::search`` read the same cluster-sorted int8 table through the same

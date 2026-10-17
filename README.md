@@ -24,10 +24,14 @@ members sharing a single `.venv` at the workspace root:
 - [`evaluation/`](evaluation/) — the benchmark harness (`bench`), the dataset ETL (`eval-data`)
   and the encoder trainer (`train`); depends on `retrieve` editable. Not published.
 
+[`results/`](results/README.md) (not a workspace member) holds the paper's table and figure data,
+the final run's records they are computed from, the script that computes them, and the final
+run's configuration.
+
 Datasets, virtual environments and results live *outside* the repo; see
 [`docs/system/storage.md`](docs/system/storage.md) for where the harness looks and the
-environment variables. [`infra/runpod/`](infra/runpod/) builds the GPU image the numbers were
-taken on (torch 2.10.0+cu128, triton 3.6.0, CUDA 12.8, Python 3.11; A100-SXM4-80GB).
+environment variables. The numbers were taken on an A100-SXM4-80GB with torch 2.10.0+cu128,
+triton 3.6.0, CUDA 12.8 and Python 3.11.
 
 ## Install (library only)
 
@@ -77,8 +81,13 @@ uv run bench merge results-a results-b --out tables
 ```
 
 What a cell measures, the record format, resume and the suites are in
-[`docs/system/evaluation.md`](docs/system/evaluation.md). The harness reproduces no paper table or
-figure; it runs the evaluations and gives their numbers.
+[`docs/system/evaluation.md`](docs/system/evaluation.md).
+
+**The paper's tables and figures** are rebuilt from the final run's records by
+[`results/build_tables.py`](results/build_tables.py); [`results/README.md`](results/README.md) maps
+each CSV to its table or figure and states the selection rules. The final run did not use
+`evaluation/config/suites.yaml` as shipped: its suites and the configurations it actually executed
+are in [`results/final-run-config/`](results/final-run-config/suites.yaml).
 
 ## Docs
 
@@ -88,6 +97,7 @@ figure; it runs the evaluations and gives their numbers.
 - [`kernels.md`](docs/system/kernels.md) — Triton kernel internals (LiNR and the filters) and the adapter over Meta's SilverTorch ops.
 - [`filtering.md`](docs/system/filtering.md) — clause / Bloom filter semantics, paper vs. implementation.
 - [`testing.md`](docs/system/testing.md) — the correctness / parity / compile suites.
+- [`parity.md`](docs/system/parity.md) — the adapted SilverTorch code against Meta's published code: the gate, its recorded results, how to rerun it.
 - [`evaluation.md`](docs/system/evaluation.md) — the benchmark harness.
 - [`datasets.md`](docs/system/datasets.md) — dataset ETL and the SASRec training pipeline.
 - [`checkpoints.md`](docs/system/checkpoints.md) — trained models + HF Hub workflow.
@@ -100,8 +110,6 @@ someone who installed `torchretrieve` and does not have this repo:
 [filtering-and-quantization](retrieve/docs/filtering-and-quantization.md),
 [indexing-and-ops](retrieve/docs/indexing-and-ops.md),
 [adding-a-dataset](retrieve/docs/adding-a-dataset.md).
-
-Working in this repository: [`AGENTS.md`](AGENTS.md).
 
 ## Licence
 
