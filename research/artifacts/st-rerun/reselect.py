@@ -1,6 +1,6 @@
 """Reselect SilverTorch's pick per at-risk setting on the rerun's records, with the final run's rule.
 
-usage: python reselect.py H2H_CSV RESULTS_DIR OUT_CSV
+usage: python reselect.py H2H_CSV RESULTS_DIR OUT_CSV [--same-grid]   (--same-grid: leave the follow-up runs out)
 H2H_CSV = head_to_head_probe_budgets.csv (all 312 settings; `at_risk` marks the selection's 112, the rest
 are reported only where the rerun timed their old pick point and their LiNR variant).
 
@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 h2h, results, out = sys.argv[1], Path(sys.argv[2]), sys.argv[3]
+same_grid = "--same-grid" in sys.argv[4:]
 ALGO = {"linr_v1_filter_mask": "V1", "linr_v2": "V2", "linr_v3": "V3"}
 
 pts = []  # one per (record, graph perf entry)
@@ -28,6 +29,8 @@ for f in results.glob("*/*.jsonl"):
     for line in open(f):
         r = json.loads(line)
         if r["status"] == "failed" or r["seed"] != 0 or not r.get("perf"):
+            continue
+        if same_grid and r["suite"].startswith("strerun-fu-"):
             continue
         for e in r["perf"]:
             if e["mode"] != "graph" or e.get("median_ms") is None:
