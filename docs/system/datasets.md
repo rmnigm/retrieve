@@ -512,9 +512,10 @@ quantization* and *Build-time 1-bit quantization*).
 
 ### laion30m
 
-**Status: built, `bench check` ok; not on the Hub, so a pod that needs it rebuilds it with the
-steps below (Re-LAION may be shared as vectors only, and the user decides whether:
-[roadmap](../../research/roadmap.md#needs-the-user)).** A 30 M scale point at d256, `filter` only
+**Status: rebuilt with the steps below (2026-10-17) and checked against the final run's records,
+`bench check` ok; not on the private Hub (its quota is nearly full), so a pod that needs it rebuilds
+it; the anonymous archive holds it as `eval-laion30m/` (Re-LAION may be shared as vectors only, and
+the user decides whether: [roadmap](../../research/roadmap.md#needs-the-user)).** A 30 M scale point at d256, `filter` only
 ([decisions](../../research/decisions.md#datasets)). Nothing here is citable. The first dataset staged
 through the [generic ingest](#the-generic-ingest-eval-data-ingest).
 
@@ -522,9 +523,10 @@ through the [generic ingest](#the-generic-ingest-eval-data-ingest).
 they are deterministic. `prep` picks items (`head(keep_items)`) and queries (`df[chosen]`) by row
 position after the domain join, which now keeps the left (rank) order explicitly. polars 1.40
 already kept it, so this guards a future polars rather than changing today's output. Two `prep`
-runs are byte-identical (`test_prep_two_builds_are_byte_identical`). The pod-d copy stays canonical.
-It is not on the Hub, so it is pinned by its files' sha256 at copy time; byte-equality of a
-rebuild with it is expected but not verified.
+runs are byte-identical (`test_prep_two_builds_are_byte_identical`). The final run's copy was lost
+with its pods. The rebuild reproduces its counts and, wherever the records can tell, its filters
+(every per-query pass count, the synthetic pass rates, the subsets' rows); the encode is a new GPU
+run of the same recipe ([validation](../../research/validation.md#datasets)).
 
 `download` → `prep` → `encode_text` → `encode_queries` → `ingest`
 ([`etl/laion.py`](../../evaluation/eval_datasets/etl/laion.py)). The LAION-specific steps write
@@ -771,7 +773,8 @@ published from each repo is a release decision for the user
 (`pubmed-medcpt-dot`, [pubmed](#pubmed)): `content_d768/`, attrs, `eval_split.parquet`, `heldout.parquet`,
 `item_id_map.json` and vocabularies, no titles, abstracts or ETL intermediates (published from a directory of
 hardlinks to exactly those files). `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `pinkmeme/eval-laion30m` (private) is to hold the
-staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`); not yet published. The old A100
+staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`); not published, the
+private quota being nearly full (user, 2026-10-17). The old A100
 `checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).
 
 **Trainer inputs** sit under `trainer/` in the private eval repos, uploaded with

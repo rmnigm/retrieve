@@ -1,0 +1,14 @@
+lc-exact:
+  datasets: [laion1m, laion3m, laion10m, laion30m]
+  dims: [256]
+  filter_kinds: [clause]
+  ks: [100]
+  batch_sizes: [16]
+  seeds: [0]
+  sweeps:
+    laion1m: [c0_domain, tags4]
+    laion3m: [c0_domain, tags4]
+    laion10m: [c0_domain, tags4]
+    laion30m: [c0_domain, tags4]
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton]}
