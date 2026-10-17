@@ -1,10 +1,10 @@
 dataset,filter,pass_rate,batch,k,recall_target,old_outcome,new_outcome,old_pick,new_pick,old_recall,new_recall,old_max_recall,new_max_recall,old_silvertorch_ms,new_silvertorch_ms,linr_variant,old_linr_ms,new_linr_ms,new_linr_recall,old_ratio,new_ratio,tie_band,old_verdict,new_verdict,old_unstable,new_unstable,best_linr_here,best_linr_ms,sm_mhz
-arxiv,all4,0.009377,1,1000,0.95,not_reached,not_run,,,,,0.927,,,,V2,0.644,,,,,0.01249,not_reached,not_run,false,False,,,
-arxiv,all4,0.009377,16,1000,0.95,not_reached,not_run,,,,,0.927,,,,V1,2.218,,,,,0.01249,not_reached,not_run,false,False,,,
-arxiv,all4,0.009377,64,1000,0.95,not_reached,not_run,,,,,0.927,,,,V1,5.781,,,,,0.01249,not_reached,not_run,false,False,,,
-arxiv,c0_maincat,0.1363,64,1000,0.95,within_quarter,not_run,2048x512,,0.959,,0.959,,3.417,,V1,4.586,,,0.745,,0.01249,silvertorch_faster,not_run,false,False,,,
-arxiv,c3_nversions,0.4444,64,100,0.95,within_quarter,not_run,2048x512,,0.953,,0.953,,3.457,,V1,4.049,,,0.854,,0.01249,silvertorch_faster,not_run,false,False,,,
-arxiv,c3_nversions,0.4444,64,1000,0.95,within_quarter,not_run,2048x512,,0.959,,0.959,,4.622,,V1,4.665,,,0.991,,0.01249,tie,not_run,false,False,,,
+arxiv,all4,0.009377,1,1000,0.95,not_reached,not_reached,,,,,0.927,0.9387,,,V2,0.644,0.6446,0.9994,,,0.01249,not_reached,not_reached,false,False,V2,0.6446,
+arxiv,all4,0.009377,16,1000,0.95,not_reached,not_reached,,,,,0.927,0.9387,,,V1,2.218,2.2193,0.9994,,,0.01249,not_reached,not_reached,false,False,V1,2.2193,
+arxiv,all4,0.009377,64,1000,0.95,not_reached,not_reached,,,,,0.927,0.9387,,,V1,5.781,5.782,0.9994,,,0.01249,not_reached,not_reached,false,False,V1,5.782,
+arxiv,c0_maincat,0.1363,64,1000,0.95,within_quarter,within_quarter,2048x512,2048x512,0.959,0.9606,0.959,0.9606,3.417,3.9267,V1,4.586,4.581,0.999,0.745,0.8572,0.01249,silvertorch_faster,silvertorch_faster,false,False,V1,4.581,1410.0/1410.0
+arxiv,c3_nversions,0.4444,64,100,0.95,within_quarter,within_quarter,2048x512,2048x512,0.953,0.9534,0.953,0.9534,3.457,4.1037,V1,4.049,4.0359,0.9986,0.854,1.0168,0.01249,silvertorch_faster,linr_faster,false,False,V1,4.0359,1410.0/1410.0
+arxiv,c3_nversions,0.4444,64,1000,0.95,within_quarter,within_quarter,2048x512,2048x512,0.959,0.96,0.959,0.96,4.622,5.5748,V1,4.665,4.6591,0.999,0.991,1.1965,0.01249,tie,linr_faster,false,False,V1,4.6591,1410.0/1410.0
 goodreads,c0_genre,0.3307,1,100,0.9,within_quarter,within_quarter,4096x32,4096x32,0.918,0.9055,0.959,0.9802,0.19,0.1522,V2,0.245,0.244,0.9997,0.776,0.6237,0.02082,silvertorch_faster,silvertorch_faster,true,False,V2,0.244,1410.0/1410.0
 goodreads,c0_genre,0.3307,1,100,0.95,within_quarter,within_quarter,4096x64,4096x256,0.959,0.9802,0.959,0.9802,0.193,0.1563,V2,0.245,0.244,0.9997,0.785,0.6404,0.02082,silvertorch_faster,silvertorch_faster,true,False,V2,0.244,1410.0/1410.0
 goodreads,c0_genre,0.3307,1,1000,0.9,within_quarter,within_quarter,4096x128,4096x128,0.931,0.9157,0.969,0.9583,0.191,0.1598,V2,0.261,0.2593,0.9998,0.733,0.6162,0.02082,silvertorch_faster,silvertorch_faster,false,False,V2,0.2593,1410.0/1410.0
