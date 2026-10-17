@@ -276,7 +276,7 @@ def _check_params(where: str, algo: str, fk: str, backend: str, build: dict, que
     """The params that mean something on one arm only (raising, never ignored)."""
     if "bloom_path" in build:
         raise ConfigError(
-            f"{where}: bloom_path left with Meta's code as published (RENAME); SilverTorch "
+            f"{where}: bloom_path left with Meta's code as published; SilverTorch "
             "evaluates the bloom over the probed clusters only"
         )
     try:

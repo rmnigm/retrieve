@@ -1,0 +1,7 @@
+paper,quantity,condition,value,where
+LiNR,V2 / V1 latency (PyTorch),"batch 1, pass rate 0.11 (1.7 M of 15.5 M)",3.042,"arXiv 2407.13218v3, Table 3: 14.6 / 4.8 ms"
+LiNR,V2 / V1 latency (TensorFlow),"batch 1, pass rate 0.11 (1.7 M of 15.5 M)",1.095,"arXiv 2407.13218v3, Table 3: 6.9 / 6.3 ms"
+LiNR,pass rate of the Table 3 setting,1.7 M of 15.5 M items,0.1097,"arXiv 2407.13218v3, Table 3"
+SilverTorch,co-design latency improvement (low),"20 M items, d 128, 32 probes",1.79,"arXiv 2511.14881v5, Sec. 6.2.3"
+SilverTorch,co-design latency improvement (high),"20 M items, d 128, 32 probes",2.15,"arXiv 2511.14881v5, Sec. 6.2.3"
+SilverTorch,catalogue size of the co-design setting,"20 M items, d 128, 32 probes",20000000,"arXiv 2511.14881v5, Sec. 6.2.3"

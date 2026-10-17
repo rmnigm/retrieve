@@ -304,7 +304,7 @@ non-null item's bucket is unchanged.
 **Status: the 10 M slice** (`--keep-items 10000000 --seed 0`) under
 `$RETRIEVE_DATA_ROOT/pubmed-medcpt-dot`, **MedCPT as shipped: items and queries not
 normalised**, scored by dot product as MedCPT is trained (`normalize: false` in
-[`config/pubmed.yaml`](../../evaluation/config/pubmed.yaml); user, 2026-10-13). Its attrs,
+[`config/pubmed.yaml`](../../evaluation/config/pubmed.yaml)). Its attrs,
 `eval_split.parquet`, `heldout.parquet`, `queries.parquet`, vocabularies and article parquets are
 copies of the canonical `pubmed-medcpt` (vocab order below), its `item_id_map.json` is byte-equal to
 it, and only `content_d768/` was rebuilt. The older `pubmed-medcpt` holds the same vectors
@@ -431,7 +431,7 @@ name** (`group_by` returns groups in a thread-dependent order, so a count-only s
 gave tied journals different ids, and a different top-5k cut, on every build). Two
 builds of the same inputs are byte-identical (`test_attrs_two_builds_are_byte_identical`).
 The staged `pubmed-medcpt` predates the tie rule: its journal / language ids are
-one draw of the old order and stay canonical (controller, 2026-10-10), pinned by sha256
+one draw of the old order and stay canonical, pinned by sha256
 (`item_attrs_narrow.pt` `8a3bce0f…`, `eval_split.parquet` `3a83c6f9…`); the dot-product build
 `pubmed-medcpt-dot` copies these files, and `<owner>/eval-pubmed@10d48d05` holds them. Pods that need the old one copy it; a rebuild with this code is **not byte-equal** to it.
 
@@ -752,7 +752,7 @@ command raises with that instruction).
 `item_id_map.json` and vocabularies, no titles, abstracts or ETL intermediates (published from a directory of
 hardlinks to exactly those files). `eval-data fetch pubmed --target data/pubmed-medcpt-dot` stages it. `<owner>/eval-laion30m` (private) is to hold the
 staged laion30m (vectors, attrs, vocab; the captions and urls stay under `_raw/`); not yet published. The old A100
-`checkpoints/gsasrec-d128-shared` was deleted from it to free space (user decision).
+`checkpoints/gsasrec-d128-shared` was deleted from it to free space.
 
 **Trainer inputs** sit under `trainer/` in the private eval repos, uploaded with
 `upload_folder` (`hub.py` has no helper for them). The trainer's `data_dir` needs

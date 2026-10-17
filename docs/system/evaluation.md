@@ -313,7 +313,7 @@ C13) sets `OfficialConfig(recheck=…)` on `silvertorch / bloom` through `algos.
 bloom, false positives included, which recall then counts as misses
 against the exact filtered oracle; without the key the library default
 runs, the recheck. The study's bloom suites set it
-`false` (the user's filtering directive of 2026-10-12: no recheck in
+`false` (no recheck in
 timed code). `params` are the merged build + query params over
 `algos.SILVERTORCH_DEFAULTS` (`n_lists 1024, n_probe 24, n_iter 10`); on
 `silvertorch` bloom cells `run.py` merges the suite's `bloom` defaults
@@ -348,7 +348,7 @@ only, clause and bloom filter kinds; capturable.
 ### Query preparation
 
 Every filtered arm encodes its batch's query attrs once, outside the timed
-call, through its `prepare_queries` (the user's rule, 2026-10-10: forward is
+call, through its `prepare_queries` (the forward is
 the algorithm; preparation is reported, not hidden):
 
 | arm | `prepare_queries` returns |
@@ -438,7 +438,7 @@ records are artifacts in their own results tree, never campaign cells. `n_lists`
 and the cap decides where 0.95 is out of reach: that slot takes `n_lists` / 4. An n95 is written only where it was measured. Each value is one
 `datasets:` slot per arm: `filter`'s SilverTorch arms get `{build: {n_lists: [L]}, query:
 {n_probe: [24, n95]}}`, and `synth`'s get `n_lists` only, because it sweeps `n_probe`
-explicitly (user, 2026-10-08). A slot left `{}` runs at the library default `n_lists` with
+explicitly. A slot left `{}` runs at the library default `n_lists` with
 `n_probe` 24 only. n95 / `n_lists` depends on the pass rate as well as N: goodreads `c0_genre`
 (0.33) needs `n_lists` / 64, and PubMed `all5` (0.018) needs more than `n_lists` / 16.
 
@@ -475,7 +475,7 @@ filters:                                                              # optional
 raise `ConfigError` naming the file. `normalize` (default `true`) decides whether a
 `content_dir` dataset's items and queries are L2-normalised at load, so that the oracle and
 every algo score cosine; `false` keeps the stored vectors and every arm and the oracle score
-the raw dot product (PubMed: MedCPT is trained for it; user, 2026-10-13). It is refused on a
+the raw dot product (PubMed: MedCPT is trained for it). It is refused on a
 `checkpoint` dataset, and with `false` the loader refuses vectors whose sidecars do not say
 `normalization: "none"` ([datasets](datasets.md#the-layout-contract-layoutpy)).
 

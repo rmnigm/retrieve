@@ -80,6 +80,12 @@ environments on the same GPU:
 4. **Compare** the two outputs with `torch.equal` on the scores and on the ids
    up to ties at the k-th score.
 
+The co-design suites of the final run (`codesign`, `codesign-laion30m`, `nsweep-codesign` in
+[`results/final-run-config/suites.yaml`](../../results/final-run-config/suites.yaml)) are
+historical in the same way: they ran the published code through a harness arm (`backend`
+`published`, `bloom_path` full / partial) that left the harness with the published code, and the
+shipped harness rejects them.
+
 The cross-build harness that produced the recorded results was not carried
 into this repository; step 3 is the part a rerun has to write. The input
 builders `test_official.py` uses (`make_probe_family` in

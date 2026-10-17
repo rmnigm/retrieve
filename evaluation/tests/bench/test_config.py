@@ -250,7 +250,7 @@ def test_codesign_suite_is_one_bloom_arm():
 
 
 def test_bloom_path_is_a_config_error():
-    """The partial-vs-full ablation left with Meta's code as published (RENAME)."""
+    """The partial-vs-full ablation left with Meta's code as published."""
     with pytest.raises(ConfigError, match="bloom_path left with"):
         load_matrix(MINI, SUITES, "bad_bloom_path")
 
@@ -358,7 +358,7 @@ def test_arm_errors_are_named(tmp_path, arms, match):
 
 # the real grid
 
-GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; change it deliberately
+GRID = {  # (suite, dataset): (jobs, cells), the final run's sizing input; change it deliberately
     ("filter", "goodreads"): (39, 51),
     ("filter", "arxiv"): (45, 63),
     ("filter", "pubmed"): (39, 54),
@@ -373,7 +373,7 @@ GRID = {  # (suite, dataset): (jobs, cells), the final pass's sizing input; chan
     ("c3-real", "goodreads"): (6, 6),
     ("c3-real", "arxiv"): (6, 6),
     ("c3-real", "pubmed"): (6, 6),
-    ("codesign", "arxiv"): (3, 9),  # one bloom arm since RENAME (was 6 / 18 with bloom_path)
+    ("codesign", "arxiv"): (3, 9),  # one bloom arm (6 / 18 with bloom_path)
     ("codesign", "goodreads"): (1, 3),
     ("h2h", "goodreads"): (4, 4),
     ("h2h", "arxiv"): (4, 4),
@@ -432,7 +432,7 @@ def test_grid_covers_every_suite_and_dataset():
 
 @pytest.mark.parametrize(("suite", "dataset"), list(GRID))
 def test_grid_counts_and_invariants(suite, dataset):
-    """The job / cell counts and the final pass's rules on every
+    """The job / cell counts and the final run's rules on every
     expanded cell."""
     jobs = _real(suite, dataset)
     assert (len(jobs), sum(len(j.query) for j in jobs)) == GRID[suite, dataset]
@@ -453,7 +453,7 @@ def test_grid_counts_and_invariants(suite, dataset):
         "silvertorch",
         "postfilter",
     }
-    # the user's cap: SilverTorch scans at most a quarter of the lists
+    # the cap: SilverTorch scans at most a quarter of the lists
     for j, p in cells:
         if j.algo == "silvertorch" and "n_probe" in p:
             assert p["n_probe"] <= p.get("n_lists", 1024) // 4, (j.sweep, p)
@@ -601,7 +601,7 @@ def test_every_shipped_config_parses(dataset_yaml, suite):
 
 def test_interleave_groups_of_the_real_suites():
     """The comparison groups ``--interleave`` times round-robin: h2h's two score paths per
-    (filter kind, seed), filter's V1 / V2 (codesign has none since RENAME: one bloom path); a
+    (filter kind, seed), filter's V1 / V2 (codesign has none: one bloom path); a
     group is per seed, and every arm keeps the key it has without ``--interleave``."""
     units = interleave_units(_real("h2h", "goodreads"))
     groups = [m for by, m in units if by]
