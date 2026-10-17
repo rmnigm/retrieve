@@ -199,7 +199,14 @@ shipped. It ran the suites in [`final-run-config/suites.yaml`](final-run-config/
 - `bloomwidth`: the bloom width grid (quality only);
 - `linr-synth-pubmed`, `linr-corr`, `synth`, `nsweep-synth`, `laion30m-synth`: the V2 / V1
   pass-rate runs;
-- `codesign`, `codesign-laion30m`, `nsweep-codesign`: the co-design pairs.
+- `codesign`, `codesign-laion30m`, `nsweep-codesign`: the co-design pairs;
+- `c3`, `c3-real`: the kernels against native and compiled PyTorch (V1); the native V2 rows are
+  in `synth`;
+- `v3bits`: the V3 code-length sweep;
+- `curve-d128` (the Goodreads genre points), `yambda`: the recall bridge (quality only);
+- `filter`, `linr-bs64`, `linr-bs256`: the exact LiNR on the reverse-clause filters (batch 1 / 16,
+  and 64); `timed-clause-lite-d128` / `-d256` / `-d768`: SilverTorch's exact clause filter on
+  them, run on a later revision.
 
 The follow-up runs at deeper probes and the 20 / 30 / 50 % synthetic timings were generated the
 same way; their configurations are the `followup_run` rows and the 20-50 % `*-synth` rows of
@@ -207,5 +214,16 @@ same way; their configurations are the `followup_run` rows and the 20-50 % `*-sy
 where only some were run, and the seeds, batch sizes and ks per configuration there are those
 that have records. Seed coverage: seed 0 everywhere; seeds 1 and 2 on the head-to-head runs
 only (arXiv, Goodreads, PubMed, LAION 1M-30M and their synthetic sets, except seed 1 on the
-arXiv and Goodreads synthetic sets and seed 2 on LAION 30M synthetic). The `published` arms ran
-Meta's code as published, which this repository no longer installs.
+arXiv and Goodreads synthetic sets and seed 2 on LAION 30M synthetic).
+
+**Historical suites.** Five suites hold an arm on Meta's code as published (`backend`
+`published`, commit `21aa35e`), which this repository no longer installs; the shipped harness
+rejects them (`unknown backends ['published']`, and `bloom_path` for the co-design):
+
+| suite | the published arm | runnable here |
+|---|---|---|
+| `codesign`, `codesign-laion30m`, `nsweep-codesign` | the whole suite (whole-index against searched-cluster bloom filtering, `bloom_path`) | no: needs Meta's code at `21aa35e` and the harness adapter of the time ([parity](../docs/system/parity.md#rerunning-the-comparison-against-the-published-code)) |
+| `synth`, `filter` | one SilverTorch side arm no table reads | yes: `synth-shipped`, `filter-shipped` are the same suites without it |
+
+Every other suite in the file loads with the shipped harness (checked with `load_matrix` for each
+of its datasets).
