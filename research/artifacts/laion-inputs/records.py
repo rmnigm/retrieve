@@ -10,12 +10,12 @@ from pathlib import Path
 import polars as pl
 
 
-def rows_of(root: str) -> pl.DataFrame:
+def rows_of(root: str, statuses: tuple[str, ...] = ("ok",)) -> pl.DataFrame:
     rows = []
     for p in sorted(Path(root).rglob("laion*-d256.jsonl")):
         for line in p.open():
             r = json.loads(line)
-            if r.get("status") != "ok":
+            if r.get("status") not in statuses:
                 continue
             q = r.get("quality") or {}
             base = {

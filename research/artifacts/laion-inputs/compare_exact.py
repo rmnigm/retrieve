@@ -10,7 +10,7 @@ import polars as pl
 sys.path.insert(0, __import__("os").path.dirname(__file__))
 from records import rows_of  # noqa: E402
 
-new = rows_of(sys.argv[1])
+new = rows_of(sys.argv[1], statuses=("ok", "partial"))  # partial: graph mode only
 old = pl.read_parquet(sys.argv[2])
 key = ["dataset", "sweep", "algo", "k", "bs", "mode"]
 cols = ["n_kept", "n_queries_heldout", "n_targets_in_filter", "pass_rate", "oracle_recall", "heldout_recall",
@@ -51,4 +51,4 @@ print(
         "old_n_targets_in_filter",
     )
 )
-j.write_csv(sys.argv[1].rstrip("/") + "-compare.csv")
+j.write_parquet(sys.argv[1].rstrip("/") + "-compare.parquet")

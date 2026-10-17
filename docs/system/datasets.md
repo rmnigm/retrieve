@@ -525,8 +525,8 @@ position after the domain join, which now keeps the left (rank) order explicitly
 already kept it, so this guards a future polars rather than changing today's output. Two `prep`
 runs are byte-identical (`test_prep_two_builds_are_byte_identical`). The final run's copy was lost
 with its pods. The rebuild reproduces its counts and, wherever the records can tell, its filters
-(every per-query pass count, the synthetic pass rates, the subsets' rows); the encode is a new GPU
-run of the same recipe ([validation](../../research/validation.md#datasets)).
+(every per-query pass count, the synthetic pass rates, the subsets' rows) and exact search on it
+returns the run's result ids bit for bit; the encode is a new GPU run of the same recipe ([validation](../../research/validation.md#datasets)).
 
 `download` → `prep` → `encode_text` → `encode_queries` → `ingest`
 ([`etl/laion.py`](../../evaluation/eval_datasets/etl/laion.py)). The LAION-specific steps write
