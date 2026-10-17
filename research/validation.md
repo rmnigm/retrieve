@@ -268,6 +268,19 @@ Unverified: `target_frequencies` (logQ) is checked only by hand on CPU;
 `--resume` has never run on the GPU; `_resume.pt` is written in place, not
 atomically.
 
+## GPU checks (not citable)
+
+Three checks of the papers' claims outside the final run
+([gpu-checks](artifacts/gpu-checks/README.md); Hub `artifacts/gpu-checks/<check>`), one A100-SXM4-80GB,
+`staging` `61045809`, 2026-10-17. Session scripts with no gate: **not citable**. LAION is not on the Hub, so
+PubMed 10 M d768 is the large scale point.
+
+| check | state | result |
+|---|---|---|
+| 1: LiNR §6's native PyTorch (boolean mask, per-query `nonzero` + gather with host sync; and V1's masked scores) against Triton V1 / V2 in graph replay | **measured**: 30 cells (goodreads, arXiv, PubMed × p 0.001 / 0.01 / 0.1 / 0.11 / 0.5 × bs 1 / 16, k 100), 3 `unstable`; native top-100 overlap with V2 0.988-1.000 | native / custom 0.8-34×, never 100×. The index form costs 0.8-4.7× at bs 1 and 1.7-34× at bs 16 (the top is PubMed at 50 %, bs 16); the masked form 1.6-17×; at LiNR's 11 % point 2.2-9.4×. Native windows are shortened (≥ 10 calls) |
+| 2: LiNR V3 at 512 bits | not run yet | |
+| 3: Meta's bloom with NOT on the four kept reverse-clause filters | not run yet | |
+
 ## Still unverified, known defects
 
 - A compiled (`graph`-mode) measurement on a warm inductor cache after a
