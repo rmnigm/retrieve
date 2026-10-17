@@ -84,8 +84,8 @@ What a cell measures, the record format, resume and the suites are in
 [`docs/system/evaluation.md`](docs/system/evaluation.md).
 
 **The paper's tables and figures** are rebuilt from the final run's records by
-[`results/build_tables.py`](results/build_tables.py); [`results/README.md`](results/README.md) maps
-each CSV to its table or figure and states the selection rules. The final run did not use
+[`results/build_tables.py`](results/build_tables.py); [`results/README.md`](results/README.md) describes
+each CSV by what it holds and states the selection rules. The final run did not use
 `evaluation/config/suites.yaml` as shipped: its suites and the configurations it actually executed
 are in [`results/final-run-config/`](results/final-run-config/suites.yaml).
 

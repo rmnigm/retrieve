@@ -1,5 +1,0 @@
-filter_type,recall_target,timed_combinations,target_reached,silvertorch_faster,median_silvertorch_over_linr
-real,0.9,66,51,51,0.26535168477738763
-real,0.95,66,33,32,0.45982025832049794
-synthetic,0.9,78,75,75,0.17405602654285296
-synthetic,0.95,78,60,58,0.34746650660358835

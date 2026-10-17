@@ -1,0 +1,24 @@
+claim,quantity,condition,n,min,max
+LiNR V1/V2 ordering,V2 / V1 latency,"laion1m-synth, pass rate near 10 %, batch 1",1,0.471,0.471
+LiNR V1/V2 ordering,V2 / V1 latency,"laion3m-synth, pass rate near 10 %, batch 1",1,0.337,0.337
+LiNR V1/V2 ordering,V2 / V1 latency,"laion10m-synth, pass rate near 10 %, batch 1",1,0.307,0.307
+LiNR V1/V2 ordering,V2 / V1 latency,"laion30m-synth, pass rate near 10 %, batch 1",1,0.286,0.286
+LiNR V1/V2 ordering,V2 / V1 latency,"laion1m-synth, pass rate near 10 %, batch 16",1,1.49,1.49
+LiNR V1/V2 ordering,V2 / V1 latency,"laion3m-synth, pass rate near 10 %, batch 16",1,1.337,1.337
+LiNR V1/V2 ordering,V2 / V1 latency,"laion10m-synth, pass rate near 10 %, batch 16",1,1.369,1.369
+LiNR V1/V2 ordering,V2 / V1 latency,"laion30m-synth, pass rate near 10 %, batch 16",1,1.378,1.378
+LiNR V1/V2 ordering,pass rate where V2 / V1 reaches 1,"uniform synthetic filters, batch 1",8,0.8483,0.9725
+LiNR V3 shortlist,V3 / faster exact latency,"20-50 % synthetic, LAION 10M/30M, batch 1",12,0.427,0.769
+LiNR V3 shortlist,V3 / faster exact latency,"20-50 % synthetic, LAION 10M/30M, batch 16",12,1.093,1.465
+LiNR V3 shortlist,V3 / faster exact latency,"20-50 % synthetic, LAION 10M/30M, batch 64",12,1.998,2.731
+LiNR V3 shortlist,V3 recall@100,same configurations,12,0.919,0.981
+SilverTorch probes and precision,fastest n_probe reaching recall 0.90,"LAION 30M synthetic, 4,096 lists, batch 16",7,256,1024
+SilverTorch probes and precision,"fixed 1,024 probes / tuned latency",same,7,1.0,3.857
+SilverTorch probes and precision,"recall@100, int8 scores, fp16 output","pubmed c3_journal_reverse, same probed clusters",1,0.931,0.931
+SilverTorch probes and precision,"recall@100, fp16 inputs, fp32 accumulation","pubmed c3_journal_reverse, same probed clusters",1,0.998,0.998
+SilverTorch probes and precision,"recall@100, int8 scores, fp16 output","laion1m c0_domain, same probed clusters",1,0.846,0.846
+SilverTorch probes and precision,"recall@100, fp16 inputs, fp32 accumulation","laion1m c0_domain, same probed clusters",1,0.852,0.852
+SilverTorch co-design,whole-index / searched-cluster filtering latency,"laion1m, stable pairs",8,0.81,0.934
+SilverTorch co-design,whole-index / searched-cluster filtering latency,"laion3m, stable pairs",8,0.823,1.279
+SilverTorch co-design,whole-index / searched-cluster filtering latency,"laion10m, stable pairs",8,0.81,2.403
+SilverTorch co-design,whole-index / searched-cluster filtering latency,"laion30m, stable pairs",12,1.098,5.651

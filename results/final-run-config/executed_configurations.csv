@@ -1,4 +1,64 @@
 experiment,followup_run,dataset,dim,filter_kind,filter,algo,backend,params,seeds,batch_sizes,ks,modes,records
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 1024, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 128, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 2048, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 256, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 512, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 64, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 1024, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 128, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 2048, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 256, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 512, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,all4,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 64, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 1024, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 128, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 2048, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 256, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 512, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 64, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 1024, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 128, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 2048, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 256, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 512, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c0_maincat,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 64, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 1024, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 128, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 2048, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 256, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 512, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 64, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 1024, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 128, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 2048, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 256, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 512, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,arxiv,128,bloom,c3_nversions,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 64, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 1024, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 128, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 2048, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 256, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 512, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 64, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 1024, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 128, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 2048, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 256, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 512, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 64, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 1024, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 128, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 2048, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 256, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 512, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 3, ""m_bits"": 64, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 1024, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 128, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 2048, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 256, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 512, ""recheck"": false}",0,,,quality only,1
+bloom_width,false,pubmed,768,bloom,c0_mesh,silvertorch,cuda,"{""k_hash"": 5, ""m_bits"": 64, ""recheck"": false}",0,,,quality only,1
 codesign,false,arxiv,128,bloom,all4,silvertorch,published,"{""bloom_path"": ""full"", ""n_lists"": 1664, ""n_probe"": 128}",0,1 16,100,eager,2
 codesign,false,arxiv,128,bloom,all4,silvertorch,published,"{""bloom_path"": ""full"", ""n_lists"": 1664, ""n_probe"": 32}",0,1 16,100,eager,2
 codesign,false,arxiv,128,bloom,all4,silvertorch,published,"{""bloom_path"": ""full"", ""n_lists"": 1664, ""n_probe"": 8}",0,1 16,100,eager,2
@@ -105,8 +165,8 @@ head_to_head,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""n_lists"": 
 head_to_head,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""n_lists"": 4096, ""n_probe"": 256, ""recheck"": false}",0 1 2,1 16 64,1000 2048,graph,18
 head_to_head,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""n_lists"": 4096, ""n_probe"": 32, ""recheck"": false}",0 1 2,1 16 64,100 2048,graph,18
 head_to_head,false,goodreads,128,bloom,c0_genre,silvertorch,cuda,"{""n_lists"": 4096, ""n_probe"": 64, ""recheck"": false}",0 1 2,1 16 64,100 2048,graph,18
-head_to_head,false,goodreads-synth,128,clause,p0001,linr_v1_filter_mask,triton,{},0 2,1 16 64,100,graph,6
 head_to_head,true,goodreads-synth,128,clause,p0001,linr_v1_filter_mask,triton,{},0,1 16 64,100,graph,3
+head_to_head,false,goodreads-synth,128,clause,p0001,linr_v1_filter_mask,triton,{},0 2,1 16 64,100,graph,6
 head_to_head,true,goodreads-synth,128,clause,p0001,linr_v2,triton,{},0,1 16 64,100,graph,3
 head_to_head,false,goodreads-synth,128,clause,p0001,linr_v2,triton,{},0 2,1 16 64,100,graph,6
 head_to_head,true,goodreads-synth,128,bloom,p0001,silvertorch,cuda,"{""n_lists"": 4096, ""n_probe"": 2048, ""recheck"": false}",0,1 16 64,100,graph,3
@@ -125,14 +185,14 @@ head_to_head,false,goodreads-synth,128,clause,p1,linr_v1_filter_mask,triton,{},0
 head_to_head,false,goodreads-synth,128,clause,p1,linr_v2,triton,{},0 2,1 16 64,100,graph,6
 head_to_head,false,goodreads-synth,128,bloom,p1,silvertorch,cuda,"{""n_lists"": 4096, ""n_probe"": 24, ""recheck"": false}",0 2,1 16 64,100,graph,6
 head_to_head,false,goodreads-synth,128,bloom,p1,silvertorch,cuda,"{""n_lists"": 4096, ""n_probe"": 64, ""recheck"": false}",0 2,1 16 64,100,graph,6
-head_to_head,false,laion10m,256,clause,c0_domain,linr_v1_filter_mask,triton,{},0 1 2,1 16 64,100,graph,9
 head_to_head,true,laion10m,256,clause,c0_domain,linr_v1_filter_mask,triton,{},0,1 16 64,100 1000,graph,6
+head_to_head,false,laion10m,256,clause,c0_domain,linr_v1_filter_mask,triton,{},0 1 2,1 16 64,100,graph,9
 head_to_head,true,laion10m,256,clause,c0_domain,linr_v2,triton,{},0,1 16 64,100 1000,graph,6
 head_to_head,false,laion10m,256,clause,c0_domain,linr_v2,triton,{},0 1 2,1 16 64,100,graph,9
-head_to_head,false,laion10m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.05}",0 1 2,1 16 64,100,graph,9
 head_to_head,true,laion10m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.05}",0,1 16 64,100,graph,3
-head_to_head,true,laion10m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.1}",0,1 16 64,100,graph,3
+head_to_head,false,laion10m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.05}",0 1 2,1 16 64,100,graph,9
 head_to_head,false,laion10m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.1}",0 1 2,1 16 64,100,graph,9
+head_to_head,true,laion10m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.1}",0,1 16 64,100,graph,3
 head_to_head,false,laion10m,256,bloom,c0_domain,silvertorch,cuda,"{""n_lists"": 4096, ""n_probe"": 24, ""recheck"": false}",0 1 2,1 16 64,100,graph,9
 head_to_head,true,laion10m,256,bloom,c0_domain,silvertorch,cuda,"{""n_lists"": 65536, ""n_probe"": 32768, ""recheck"": false}",0,1 16 64,100 1000,graph,6
 head_to_head,true,laion10m,256,bloom,c0_domain,silvertorch,cuda,"{""n_lists"": 65536, ""n_probe"": 49152, ""recheck"": false}",0,1 16 64,100 1000,graph,6
@@ -206,21 +266,21 @@ head_to_head,false,laion10m-synth,256,bloom,p1,silvertorch,cuda,"{""n_lists"": 6
 head_to_head,false,laion10m-synth,256,bloom,p1,silvertorch,cuda,"{""n_lists"": 65536, ""n_probe"": 4096, ""recheck"": false}",0 1 2,1 16 64,100,graph,9
 head_to_head,false,laion1m,256,clause,c0_domain,linr_v1_filter_mask,triton,{},0 1 2,1 16 64,100,graph,9
 head_to_head,true,laion1m,256,clause,c0_domain,linr_v1_filter_mask,triton,{},0,1 16 64,100 1000,graph,6
-head_to_head,true,laion1m,256,clause,c0_domain,linr_v2,triton,{},0,1 16 64,100 1000,graph,6
 head_to_head,false,laion1m,256,clause,c0_domain,linr_v2,triton,{},0 1 2,1 16 64,100,graph,9
-head_to_head,false,laion1m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.005}",0 1 2,1 16 64,100,graph,9
+head_to_head,true,laion1m,256,clause,c0_domain,linr_v2,triton,{},0,1 16 64,100 1000,graph,6
 head_to_head,true,laion1m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.005}",0,1 16 64,100,graph,3
-head_to_head,false,laion1m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.2}",0 1 2,1 16 64,100,graph,9
+head_to_head,false,laion1m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.005}",0 1 2,1 16 64,100,graph,9
 head_to_head,true,laion1m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.2}",0,1 16 64,100,graph,3
+head_to_head,false,laion1m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.2}",0 1 2,1 16 64,100,graph,9
 head_to_head,false,laion1m,256,bloom,c0_domain,silvertorch,cuda,"{""n_lists"": 512, ""n_probe"": 24, ""recheck"": false}",0 1 2,1 16 64,100,graph,9
 head_to_head,true,laion1m,256,bloom,c0_domain,silvertorch,cuda,"{""n_lists"": 8192, ""n_probe"": 4096, ""recheck"": false}",0,1 16 64,100,graph,3
 head_to_head,true,laion1m,256,bloom,c0_domain,silvertorch,cuda,"{""n_lists"": 8192, ""n_probe"": 6144, ""recheck"": false}",0,1 16 64,100 1000,graph,6
 head_to_head,true,laion1m,256,clause,tags4,linr_v1_filter_mask,triton,{},0,1 16 64,100 1000,graph,6
 head_to_head,false,laion1m,256,clause,tags4,linr_v1_filter_mask,triton,{},0 1 2,1 16 64,100,graph,9
-head_to_head,false,laion1m,256,clause,tags4,linr_v2,triton,{},0 1 2,1 16 64,100,graph,9
 head_to_head,true,laion1m,256,clause,tags4,linr_v2,triton,{},0,1 16 64,100 1000,graph,6
-head_to_head,false,laion1m,256,clause,tags4,linr_v3,triton,"{""candidate_pool_frac"": 0.005}",0 1 2,1 16 64,100,graph,9
+head_to_head,false,laion1m,256,clause,tags4,linr_v2,triton,{},0 1 2,1 16 64,100,graph,9
 head_to_head,true,laion1m,256,clause,tags4,linr_v3,triton,"{""candidate_pool_frac"": 0.005}",0,1 16 64,100,graph,3
+head_to_head,false,laion1m,256,clause,tags4,linr_v3,triton,"{""candidate_pool_frac"": 0.005}",0 1 2,1 16 64,100,graph,9
 head_to_head,false,laion1m,256,bloom,tags4,silvertorch,cuda,"{""n_lists"": 512, ""n_probe"": 24, ""recheck"": false}",0 1 2,1 16 64,100,graph,9
 head_to_head,true,laion1m,256,bloom,tags4,silvertorch,cuda,"{""n_lists"": 8192, ""n_probe"": 4096, ""recheck"": false}",0,1 16 64,100,graph,3
 head_to_head,true,laion1m,256,bloom,tags4,silvertorch,cuda,"{""n_lists"": 8192, ""n_probe"": 6144, ""recheck"": false}",0,1 16 64,100 1000,graph,6
@@ -304,8 +364,8 @@ head_to_head,false,laion30m-synth,256,bloom,p1,silvertorch,cuda,"{""n_lists"": 6
 head_to_head,false,laion30m-synth,256,bloom,p1,silvertorch,cuda,"{""n_lists"": 65536, ""n_probe"": 4096, ""recheck"": false}",0 1,1 16 64,100,graph,6
 head_to_head,true,laion3m,256,clause,c0_domain,linr_v1_filter_mask,triton,{},0,1 16 64,100 1000,graph,6
 head_to_head,false,laion3m,256,clause,c0_domain,linr_v1_filter_mask,triton,{},0 1 2,1 16 64,100,graph,9
-head_to_head,true,laion3m,256,clause,c0_domain,linr_v2,triton,{},0,1 16 64,100 1000,graph,6
 head_to_head,false,laion3m,256,clause,c0_domain,linr_v2,triton,{},0 1 2,1 16 64,100,graph,9
+head_to_head,true,laion3m,256,clause,c0_domain,linr_v2,triton,{},0,1 16 64,100 1000,graph,6
 head_to_head,true,laion3m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.005}",0,1 16 64,100,graph,3
 head_to_head,false,laion3m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.005}",0 1 2,1 16 64,100,graph,9
 head_to_head,true,laion3m,256,clause,c0_domain,linr_v3,triton,"{""candidate_pool_frac"": 0.2}",0,1 16 64,100,graph,3

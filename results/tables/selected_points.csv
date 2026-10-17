@@ -1,0 +1,7 @@
+dataset,filter,batch,recall_target,silvertorch_n_lists,silvertorch_n_probe,silvertorch_recall,silvertorch_ms,linr_variant,linr_ms
+goodreads,c0_genre,1,0.95,4096,64,0.959,0.193,V2,0.245
+arxiv,c0_maincat,1,0.95,2048,512,0.953,0.194,V2,0.392
+pubmed,c0_mesh,1,0.95,65536,16384,0.952,0.583,V2,0.788
+laion10m,tags4,1,0.95,65536,16384,0.951,0.601,V2,1.307
+laion10m,tags4,64,0.95,65536,16384,0.951,14.007,V1,12.081
+laion30m,c0_domain,1,0.9,16384,4096,0.903,0.634,V2,1.918

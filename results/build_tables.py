@@ -1,11 +1,12 @@
-"""Rebuild the paper's tables and figure data from the final run's records.
+"""Rebuild the paper's table and figure data from the final run's records.
 
 usage: python build_tables.py [RECORDS] [OUT]   (defaults: records/records.parquet, tables/)
 
 RECORDS is one Parquet file of `bench` records (one row per timed entry, the harness's own column
-names) with three columns added: `experiment` (which exhibit a record feeds), `run` (records with
+names) with three columns added: `experiment` (which table a record feeds), `run` (records with
 the same run were timed in one process, interleaved) and `followup` (points added later at deeper
-probes, timed in their own run). README.md states the selection rules; they are the constants below.
+probes, timed in their own run). The two untimed measurements sit next to it as CSVs. README.md
+states the selection rules; they are the constants below.
 """
 
 import json
@@ -17,15 +18,14 @@ import polars as pl
 
 RECORDS = Path(sys.argv[1] if len(sys.argv) > 1 else "records/records.parquet")
 OUT = Path(sys.argv[2] if len(sys.argv) > 2 else "tables")
-DIAGNOSTIC = RECORDS.parent / "score_path_diagnostic.csv"
+SCORE_PATH = RECORDS.parent / "score_path_diagnostic.csv"
+FALSE_POSITIVES = RECORDS.parent / "bloom_false_positives.csv"
 
 TARGETS = [0.90, 0.95]
 PROBE_BUDGET = 0.25  # SilverTorch may probe at most a quarter of its lists
-SEED = (
-    0  # every exhibit is seed 0; seeds 1-2 of the head-to-head runs stay in the records
-)
+SEED = 0  # seeds 1-2 of the head-to-head runs stay in the records; no table reads them
 V1, V2, V3 = "linr_v1_filter_mask", "linr_v2", "linr_v3"
-VARIANT = {V1: "V1", V2: "V2", V3: "V3"}
+ARM = {V1: "V1", V2: "V2", V3: "V3", "silvertorch": "SilverTorch"}
 CELL = ["dataset", "dim", "sweep", "perf_bs", "perf_k"]
 SELECTED = [  # the representative real-filter selections (k 100): dataset, filter, target, batch
     ("goodreads", "c0_genre", 0.95, 1),
@@ -56,6 +56,8 @@ def load():
         param("candidate_pool_frac", pl.Float64),
         param("recheck", pl.Boolean),
         param("bloom_path", pl.String),
+        param("m_bits", pl.Int64),
+        param("k_hash", pl.Int64),
     )
     recall = (
         pl.when(pl.col("perf_k") == 1000)
@@ -91,6 +93,18 @@ def exact_linr(x, on):
     )
 
 
+def fastest_reaching(x, key, cols):
+    """Per key and recall target, the fastest row whose recall reaches the target."""
+    return (
+        x.join(pl.DataFrame({"target": TARGETS}), how="cross")
+        .filter(pl.col("recall") >= pl.col("target"))
+        .sort("perf_median_ms", maintain_order=True)
+        .group_by([*key, "target"], maintain_order=True)
+        .first()
+        .select(*key, "target", **cols)
+    )
+
+
 def head_to_head(r):
     """Per workload (dataset, dim, filter, batch, k) and recall target, seed 0: the fastest SilverTorch point
     within the probe budget reaching the target, against the fastest LiNR reaching it (exact V1 / V2, or V3
@@ -120,42 +134,29 @@ def head_to_head(r):
         .first()
         .select(*key, "pass_rate", "synthetic", "exact_ms", "exact_variant")
     )
-    targets = pl.DataFrame({"target": TARGETS})
-    picks = (
-        h.join(targets, how="cross")
-        .filter(pl.col("recall") >= pl.col("target"))
-        .sort("perf_median_ms", maintain_order=True)
-        .group_by([*key, "target"], maintain_order=True)
-        .first()
-        .select(
-            *key,
-            "target",
+    picks = fastest_reaching(
+        h,
+        key,
+        dict(
             st_n_lists="n_lists",
             st_n_probe="n_probe",
             st_recall="recall",
             st_ms="perf_median_ms",
             st_over_exact="st_over_exact",
             flagged="flagged",
-        )
+        ),
     )
-    v3 = (
-        x.filter(pl.col("algo") == V3)
-        .join(targets, how="cross")
-        .filter(pl.col("recall") >= pl.col("target"))
-        .sort("perf_median_ms", maintain_order=True)
-        .group_by([*key, "target"], maintain_order=True)
-        .first()
-        .select(
-            *key,
-            "target",
+    v3 = fastest_reaching(
+        x.filter(pl.col("algo") == V3),
+        key,
+        dict(
             v3_pool="candidate_pool_frac",
-            v3_recall="recall",
             v3_ms="perf_median_ms",
             v3_unstable="unstable",
-        )
+        ),
     )
     t = (
-        base.join(targets, how="cross")
+        base.join(pl.DataFrame({"target": TARGETS}), how="cross")
         .join(picks, on=[*key, "target"], how="left")
         .join(v3, on=[*key, "target"], how="left")
         .with_columns(linr_ms=pl.min_horizontal("exact_ms", "v3_ms"))
@@ -195,16 +196,16 @@ def head_to_head(r):
             pl.when(pl.col("linr_variant") == "V3")
             .then("v3_pool")
             .alias("linr_v3_pool"),
-            pl.col("linr_ms"),
+            "linr_ms",
             pl.col("st_over_linr").alias("silvertorch_over_linr"),
             pl.col("unstable").alias("timing_unstable"),
         )
     )
 
 
-def head_to_head_summary(f1):
+def head_to_head_summary(sel):
     return (
-        f1.group_by("filter_type", "recall_target")
+        sel.group_by("filter_type", "recall_target")
         .agg(
             timed_combinations=pl.len(),
             target_reached=pl.col("silvertorch_reached_target").sum(),
@@ -215,9 +216,9 @@ def head_to_head_summary(f1):
     )
 
 
-def selected_points(f1):
+def selected_points(sel):
     rows = [
-        f1.filter(
+        sel.filter(
             (pl.col("dataset") == ds)
             & (pl.col("filter") == sw)
             & (pl.col("recall_target") == t)
@@ -250,7 +251,7 @@ def crossover(rates, ratios):
     return None
 
 
-def linr_pass_rate(r):
+def linr_v2_over_v1(r):
     """LiNR V2 / V1 against the synthetic pass rate (exact filter, k 100, seed 0), both timed in one run."""
     x = r.filter(pl.col("experiment") == "linr_pass_rate")
     on = ["run", "dataset", "dim", "n_items", "sweep", "pass_rate", "perf_bs"]
@@ -265,15 +266,15 @@ def linr_pass_rate(r):
             pl.col("perf_bs").alias("batch"),
             pl.col("sweep").alias("filter"),
             "pass_rate",
-            pl.col("v1_ms"),
-            pl.col("v2_ms"),
+            "v1_ms",
+            "v2_ms",
             "v2_over_v1",
             pl.col("exact_unstable").alias("timing_unstable"),
         )
     )
 
 
-def v3_vs_exact(r):
+def linr_v3_vs_exact(r):
     """LiNR V3 at every timed pool against the faster exact variant of the same run (seed 0, k 100)."""
     x = r.filter(
         (pl.col("experiment") == "head_to_head")
@@ -329,9 +330,9 @@ def probe_sweep(r):
     )
 
 
-def fixed_vs_tuned(f4, target=0.90):
+def fixed_vs_tuned(sweep, target=0.90):
     """Per filter at FIXED's n_lists: the fastest swept n_probe reaching the target against the fixed n_probe."""
-    x = f4.filter(pl.col("n_lists") == FIXED[0])
+    x = sweep.filter(pl.col("n_lists") == FIXED[0])
     best = (
         x.filter(pl.col("silvertorch_recall") >= target)
         .sort("silvertorch_ms")
@@ -340,47 +341,108 @@ def fixed_vs_tuned(f4, target=0.90):
         .select("filter", tuned_n_probe="n_probe", tuned_ms="silvertorch_ms")
     )
     fixed = x.filter(pl.col("n_probe") == FIXED[1]).select(
-        "filter", fixed_recall="silvertorch_recall", fixed_ms="silvertorch_ms"
+        "filter", fixed_ms="silvertorch_ms"
     )
     return best.join(fixed, on="filter").with_columns(
         fixed_over_tuned=pl.col("fixed_ms") / pl.col("tuned_ms")
     )
 
 
-def codesign(r):
-    """Meta's published code, eager, seed 0: bloom over the full index against probe-then-filter, same run and
-    point; a pair with either side unstable is left out."""
+def codesign_pairs(r):
+    """Meta's published code, eager, seed 0: the bloom filter over the whole index against filtering only the
+    searched clusters, same run and point. LAION 30M was timed in two runs: `repeat` 1 and 2."""
     x = r.filter(pl.col("experiment") == "codesign")
-    on = ["run", "dataset", "dim", "sweep", "perf_bs", "perf_k", "n_lists", "n_probe"]
+    on = ["run", "dataset", "dim", "n_items", "sweep", "pass_rate"]
+    on += ["perf_bs", "perf_k", "n_lists", "n_probe"]
     keep = ["perf_median_ms", "unstable"]
     full = x.filter(pl.col("bloom_path") == "full").select(*on, *keep)
     part = x.filter(pl.col("bloom_path") == "partial").select(*on, *keep)
     return (
         full.join(part, on=on, suffix="_partial", validate="1:1")
-        .filter(~pl.col("unstable") & ~pl.col("unstable_partial"))
         .with_columns(
-            full_over_partial=pl.col("perf_median_ms")
-            / pl.col("perf_median_ms_partial")
+            repeat=pl.col("run")
+            .rank("dense")
+            .over("dataset", "sweep", "perf_bs", "n_lists", "n_probe")
+        )
+        .sort("n_items", "dataset", "sweep", "perf_bs", "n_lists", "n_probe", "repeat")
+        .select(
+            "dataset",
+            "dim",
+            "n_items",
+            pl.col("sweep").alias("filter"),
+            "pass_rate",
+            pl.col("perf_bs").alias("batch"),
+            pl.col("perf_k").alias("k"),
+            "n_lists",
+            "n_probe",
+            "repeat",
+            pl.col("perf_median_ms").alias("whole_index_ms"),
+            pl.col("perf_median_ms_partial").alias("searched_clusters_ms"),
+            (pl.col("perf_median_ms") / pl.col("perf_median_ms_partial")).alias(
+                "whole_index_over_searched_clusters"
+            ),
+            (pl.col("unstable") | pl.col("unstable_partial")).alias("timing_unstable"),
         )
     )
 
 
-def row(claim, quantity, condition, values):
+def bloom_width(r, fp):
+    """SilverTorch's bloom filter per width and hash count (seed 0): recall@100 and index size from the
+    quality-only run, false positives over the whole catalogue from the untimed measurement."""
+    x = r.filter(pl.col("experiment") == "bloom_width").select(
+        "dataset",
+        pl.col("sweep").alias("filter"),
+        "pass_rate",
+        "m_bits",
+        "k_hash",
+        pl.col("recall").alias("recall_at_100"),
+        "index_mib",
+    )
+    return x.join(
+        fp, on=["dataset", "filter", "m_bits", "k_hash"], validate="1:1"
+    ).sort("dataset", "filter", "k_hash", "m_bits")
+
+
+def index_memory(r):
+    """Resident index size per arm from the head-to-head runs (seed 0): the median over their records."""
+    x = r.filter(
+        (pl.col("experiment") == "head_to_head")
+        & (pl.col("seed") == SEED)
+        & pl.col("index_mib").is_not_null()
+    )
+    return (
+        x.with_columns(arm=pl.col("algo").replace_strict(ARM))
+        .group_by("dataset", "dim", "n_items", "arm", "n_lists")
+        .agg(index_mib=pl.col("index_mib").median())
+        .sort("dataset", "dim", "arm", "n_lists", nulls_last=True)
+    )
+
+
+def row(claim, quantity, condition, values, kind="ratio"):
     v = pl.Series(values, dtype=pl.Float64)
     return dict(
         claim=claim,
         quantity=quantity,
         condition=condition,
         n=len(v),
-        min=v.min(),
-        max=v.max(),
+        min=rounded(v.min(), kind),
+        max=rounded(v.max(), kind),
     )
 
 
-def claims(f2, f3, f4, cd, diag):
+def rounded(x, kind):
+    """`min` / `max` hold several kinds of quantity, so they are written as text at each kind's precision."""
+    if kind == "count":
+        return str(round(x))
+    if kind == "pass_rate":
+        return f"{x:.4g}"
+    return str(round(x, 3))
+
+
+def claims(v2v1, v3, sweep, codesign, diag):
     rows = []
     c = "LiNR V1/V2 ordering"
-    near = f2.filter(
+    near = v2v1.filter(
         pl.col("pass_rate").is_between(*NEAR_TEN)
         & ~pl.col("timing_unstable")
         & pl.col("dataset").is_in([f"{d}-synth" for d in LAION])
@@ -399,7 +461,7 @@ def claims(f2, f3, f4, cd, diag):
                 )
             )
     cross = []
-    for (ds, _dim), g in f2.filter(pl.col("batch") == 1).group_by(
+    for (ds, _dim), g in v2v1.filter(pl.col("batch") == 1).group_by(
         "dataset", "dim", maintain_order=True
     ):
         if "corr" in ds:
@@ -414,14 +476,16 @@ def claims(f2, f3, f4, cd, diag):
             "pass rate where V2 / V1 reaches 1",
             "uniform synthetic filters, batch 1",
             cross,
+            "pass_rate",
         )
     )
 
     c = "LiNR V3 shortlist"
-    broad = f3.filter(
+    broad = v3.filter(
         pl.col("dataset").str.ends_with("-synth")
         & pl.col("pass_rate").is_between(*BROAD, closed="none")
-    ).filter(~pl.col("timing_unstable"))
+        & ~pl.col("timing_unstable")
+    )
     for bs in (1, 16, 64):
         v = broad.filter(pl.col("batch") == bs)["v3_over_exact"]
         rows.append(
@@ -432,23 +496,18 @@ def claims(f2, f3, f4, cd, diag):
                 v,
             )
         )
-    rows.append(
-        row(
-            c,
-            "V3 recall@100",
-            "same configurations",
-            broad.filter(pl.col("batch") == 1)["v3_recall"],
-        )
-    )
+    v = broad.filter(pl.col("batch") == 1)["v3_recall"]
+    rows.append(row(c, "V3 recall@100", "same configurations", v, "recall"))
 
     c = "SilverTorch probes and precision"
-    ft = fixed_vs_tuned(f4)
+    ft = fixed_vs_tuned(sweep)
     rows.append(
         row(
             c,
             "fastest n_probe reaching recall 0.90",
             "LAION 30M synthetic, 4,096 lists, batch 16",
             ft["tuned_n_probe"],
+            "count",
         )
     )
     rows.append(
@@ -456,30 +515,34 @@ def claims(f2, f3, f4, cd, diag):
     )
     for ds, sw in (("pubmed", "c3_journal_reverse"), ("laion1m", "c0_domain")):
         d = diag.filter((pl.col("dataset") == ds) & (pl.col("filter") == sw))
+        where = f"{ds} {sw}, same probed clusters"
         rows.append(
             row(
                 c,
                 "recall@100, int8 scores, fp16 output",
-                f"{ds} {sw}, same probed clusters",
+                where,
                 d["recall_at_100_int8_fp16_out"],
+                "recall",
             )
         )
         rows.append(
             row(
                 c,
                 "recall@100, fp16 inputs, fp32 accumulation",
-                f"{ds} {sw}, same probed clusters",
+                where,
                 d["recall_at_100_fp16_fp32_acc"],
+                "recall",
             )
         )
 
     c = "SilverTorch co-design"
+    stable = codesign.filter(~pl.col("timing_unstable"))
     for d in LAION:
-        v = cd.filter(pl.col("dataset") == d)["full_over_partial"]
+        v = stable.filter(pl.col("dataset") == d)["whole_index_over_searched_clusters"]
         rows.append(
             row(
                 c,
-                "full-index / probed-cluster filtering latency",
+                "whole-index / searched-cluster filtering latency",
                 f"{d}, stable pairs",
                 v,
             )
@@ -487,25 +550,45 @@ def claims(f2, f3, f4, cd, diag):
     return pl.DataFrame(rows)
 
 
+def tidy(t):
+    """The precision the paper reports: latency and ratios to 3 decimals, recall to 3 decimals, pass and
+    false-positive rates to 4 significant digits, index size to whole MiB."""
+    out = []
+    for c, dtype in t.schema.items():
+        col = pl.col(c)
+        if dtype != pl.Float64 or c in ("recall_target", "v3_pool", "linr_v3_pool"):
+            out.append(col)
+        elif c == "pass_rate" or c.startswith("fp_rate"):
+            out.append(col.round_sig_figs(4))
+        elif c == "index_mib":
+            out.append(col.round(0).cast(pl.Int64))
+        else:
+            out.append(col.round(3))
+    return t.select(out)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     r = load()
-    f1 = head_to_head(r)
-    f2 = linr_pass_rate(r)
-    f3 = v3_vs_exact(r)
-    f4 = probe_sweep(r)
-    diag = pl.read_csv(DIAGNOSTIC)
+    sel = head_to_head(r)
+    v2v1 = linr_v2_over_v1(r)
+    v3 = linr_v3_vs_exact(r)
+    sweep = probe_sweep(r)
+    codesign = codesign_pairs(r)
     tables = {
-        "table1_claims": claims(f2, f3, f4, codesign(r), diag),
-        "table2_head_to_head": head_to_head_summary(f1),
-        "table3_selected_points": selected_points(f1),
-        "fig1_head_to_head": f1,
-        "fig2_linr_v2_over_v1": f2,
-        "fig3_linr_v3_vs_exact": f3,
-        "fig4_probe_sweep": f4,
+        "claims_summary": claims(v2v1, v3, sweep, codesign, pl.read_csv(SCORE_PATH)),
+        "head_to_head_summary": head_to_head_summary(sel),
+        "head_to_head_selections": sel,
+        "selected_points": selected_points(sel),
+        "linr_v2_over_v1": v2v1,
+        "linr_v3_vs_exact": v3,
+        "probe_sweep": sweep,
+        "codesign_pairs": codesign,
+        "bloom_width": bloom_width(r, pl.read_csv(FALSE_POSITIVES)),
+        "index_memory": index_memory(r),
     }
     for name, t in tables.items():
-        t.write_csv(OUT / f"{name}.csv")
+        tidy(t).write_csv(OUT / f"{name}.csv")
         print(f"{name}.csv: {t.height} rows")
 
 
