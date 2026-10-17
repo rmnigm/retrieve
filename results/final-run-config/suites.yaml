@@ -5369,8 +5369,8 @@ timed-clause-lite-d768:
           n_probe:
           - 1024
 
-# `synth` and `filter` without their arm on Meta's code as published, which this repository no
-# longer installs: the rest of each suite as run, runnable here.
+# `synth` and `filter` without their arm on Meta's code as published, which the harness here does
+# not load: the rest of each suite as run.
 synth-shipped:
   datasets: [goodreads-synth, arxiv-synth, arxiv-corr-synth]
   dims: [128]

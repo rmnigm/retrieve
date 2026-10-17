@@ -40,13 +40,14 @@ their headings are stable.
 - [evaluation](system/evaluation.md): the `bench` harness: measurement
   protocol, config and suites, CLI, cell loop, records, report, upload, the merged tables.
 - [datasets](system/datasets.md): `eval_datasets` ETL per dataset, the
-  on-disk layout contract, Hub I/O, encoder training.
+  on-disk layout contract, Hub I/O, the public input archive, encoder training.
 - [checkpoints](system/checkpoints.md): which encoder checkpoint each
   dataset reads, loading, embeddings, evaluation, Hub transfer.
 - [storage](system/storage.md): where the harness keeps data, results and
   caches, and the environment variables that point it there.
 - [parity](system/parity.md): the adapted SilverTorch code against Meta's
-  published code: the gate, its recorded results and how to rerun it.
+  published code: the gate, its recorded results, the parity tests and how to
+  run the comparison.
 
 The paper's table and figure data, the records and the final run's
 configuration are in [`results/`](../results/README.md).

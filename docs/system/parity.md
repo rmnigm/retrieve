@@ -11,11 +11,10 @@ sources: [retrieve/tests/parity/test_official.py]
 
 [`silvertorch/`](../../silvertorch/) is Meta's SilverTorch code
 (`meta-recsys/silvertorch`, commit `21aa35e28b6dd9a91e9ee35efb0857715e86bda7`),
-adapted. Every change was gated against
-the published code at that commit, built in the same environment, before the
-published code was removed from the workspace. This page gives the gate, its
-recorded results, what this repository still checks, and how to rerun the
-comparison against the published code.
+adapted. Every change was gated against the published code at that commit,
+built in the same environment. This page gives the gate, its recorded results,
+the parity tests in this repository, and how to run the comparison against the
+published code.
 
 ## The gate
 
@@ -38,8 +37,8 @@ comparison against the published code.
 | check | result |
 |---|---|
 | Meta's own test suite run on the adapted code | 122 passed |
-| ids and scores `torch.equal` to the published code, the ≤ 10M grid | 276 / 276 cells at the final revision; 1,488 / 1,488 on a second machine at an earlier revision |
-| the same at 30M (LAION d256) | bloom partial + full 64 / 64 at the final revision; no filter and exact filter 72 / 72 at an earlier revision |
+| ids and scores `torch.equal` to the published code, the ≤ 10M grid | 276 / 276 cells |
+| the same at 30M (LAION d256), bloom partial and full path | 64 / 64 cells |
 | latency, adapted / published, eager | faster on every cell: median 0.230, max 0.764 over 300 cells; 30M bloom median 0.279, max 0.467 |
 | configured bloom width with the exact recheck (an adapted-code option, off in the study) | 0 false positives on every cell; the rechecked bloom `torch.equal` to the exact filter |
 
@@ -47,14 +46,25 @@ The upstream repository has one later commit (`22c2007`, CCCL 3 / CUDA 13
 compatibility), applied verbatim; on CUDA 12.8 it selects the old code path,
 so the compiled behaviour is unchanged.
 
-## What this repository checks
+## The parity tests in this repository
 
-[`retrieve/tests/parity/test_official.py`](../../retrieve/tests/parity/test_official.py)
-gates the adapted ops against an independent dense torch oracle, through the
-ops and through the `SilverTorch` module (GPU only; see
-[testing](testing.md)). It does not load the published code.
+[`retrieve/tests/parity/`](../../retrieve/tests/parity/) holds the GPU parity
+tests (`uv run --directory retrieve pytest tests/parity/ -q`; they skip without
+CUDA). Each calls one op or module and a reference on the same inputs;
+[testing](testing.md#what-each-parity-file-asserts) gives every assertion.
 
-## Rerunning the comparison against the published code
+| file | compares | gate |
+|---|---|---|
+| [`test_official.py`](../../retrieve/tests/parity/test_official.py) | the adapted ops (`torch.ops.st.*`: the upstream-shaped `fused_kmean_ann`, `_with_partial_masks`, `bloom_index_build`, the bloom searches, and `search`, `probe_prep`, the prepared searches) and the `SilverTorch` layer, against a dense torch oracle over the probed positions, against the upstream-shaped ops, and against `quantize_int8` | int32 path: scores `torch.equal`, ids up to ties (plain, exact filter with reverse clauses, the layer); fp16 path: relative error ≤ 2⁻¹⁰ and top-k Jaccard ≥ 0.99 against int32; bloom: no false negatives against the exact predicate, false-positive rate recorded, partial masks equal the full mask; the rechecked bloom `torch.equal` to the exact filter; the op schemas pinned to `21aa35e` |
+| [`test_clause_mask.py`](../../retrieve/tests/parity/test_clause_mask.py), [`test_clause_compact.py`](../../retrieve/tests/parity/test_clause_compact.py), [`test_compact_order.py`](../../retrieve/tests/parity/test_compact_order.py) | the exact clause filter's Triton kernels against pure torch | masks, ids and counts `torch.equal`, in ascending item order |
+| [`test_fused_masked_knn_topk.py`](../../retrieve/tests/parity/test_fused_masked_knn_topk.py), [`test_gemv_scores.py`](../../retrieve/tests/parity/test_gemv_scores.py), [`test_oporp_1bit_match_topk.py`](../../retrieve/tests/parity/test_oporp_1bit_match_topk.py) | the LiNR scoring kernels against gather + bmm + topk, cuBLAS, and a torch popcount | top-k ids up to ties with scores within a stated bound (`fused_masked_knn_topk`), `torch.equal` (the GEMV, the popcount) |
+| [`test_accumulation.py`](../../retrieve/tests/parity/test_accumulation.py) | every scoring kernel against an fp64 computation of the same operation | an accumulation bound fp32 meets and fp16 is asserted to miss |
+
+The comparison with the published code itself (the recorded results above)
+needs both builds, in two environments (below); the tests here run on the
+adapted build alone.
+
+## Comparing against the published code
 
 Both builds register the package `silvertorch` and the op namespace
 `torch.ops.st`, so they cannot load in one process. The comparison runs in two
@@ -76,19 +86,18 @@ environments on the same GPU:
    `st::fused_kmean_ann_with_partial_masks` (partial path). Build one seeded
    input set (a cluster-sorted int8 item table with its CSR offsets, centroids,
    int8 queries, item attributes and a query expression), save it with
-   `torch.save`, call the ops on it in each venv, and save the outputs.
+   `torch.save`, call the ops on it in each venv, and save the outputs. The
+   parity tests' input builders (`make_probe_family` in
+   `retrieve/tests/parity/conftest.py`; `make_index`, `make_query` and the
+   attribute helpers in `retrieve/tests/conftest.py`) produce inputs in the
+   layout these ops take.
 4. **Compare** the two outputs with `torch.equal` on the scores and on the ids
    up to ties at the k-th score.
 
-The co-design suites of the final run (`codesign`, `codesign-laion30m`, `nsweep-codesign` in
-[`results/final-run-config/suites.yaml`](../../results/final-run-config/suites.yaml)) are
-historical in the same way: they ran the published code through a harness arm (`backend`
-`published`, `bloom_path` full / partial) that left the harness with the published code, and the
-shipped harness rejects them.
-
-The cross-build harness that produced the recorded results was not carried
-into this repository; step 3 is the part a rerun has to write. The input
-builders `test_official.py` uses (`make_probe_family` in
-`retrieve/tests/parity/conftest.py`; `make_index`, `make_query` and the
-attribute helpers in `retrieve/tests/conftest.py`) produce inputs in the layout
-these ops take.
+The co-design records of the study (`codesign`, `codesign-laion30m`,
+`nsweep-codesign` in
+[`results/final-run-config/suites.yaml`](../../results/final-run-config/suites.yaml))
+come from Meta's code as published at `21aa35e`, run eagerly through the
+harness with its bloom filter over the whole index or over the searched
+clusters only (`backend` `published`, `bloom_path` full / partial); the records
+are in [`results/records/`](../../results/README.md#the-records).

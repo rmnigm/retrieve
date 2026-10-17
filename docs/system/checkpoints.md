@@ -29,17 +29,21 @@ with logQ, L2-normalized).
 
 | dataset config | ckpt-id | D | where it is |
 |---|---|---|---|
-| `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | `<owner>/eval-goodreads-work-id` `checkpoints/`; in the `<anonymous archive>`: d128, the one the final run read (`eval-goodreads-work-id/checkpoints/sasrec-ssm-logq-d128/`) |
-| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | `<owner>/eval-yambda-500m` `checkpoints/`; not in the `<anonymous archive>`: yambda-500m is not in the study |
+| `goodreads.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | `<owner>/eval-goodreads-work-id` `checkpoints/`; in the [public input archive](datasets.md#the-public-input-archive): d128, the one the final run read (`eval-goodreads-work-id/checkpoints/sasrec-ssm-logq-d128/`) |
+| `yambda-500m.yaml` | `sasrec-ssm-logq-d{dim}` | 64, 128, 256 | `<owner>/eval-yambda-500m` `checkpoints/` (yambda-500m is not part of the study) |
 
 Each E1c dir holds `best_model.pt`, `item_embs.pt`, `config.json`,
 `item_id_map.json`, `eval_quality.json`, `train_metrics.json` and a short
-`README.md`. Fetch one with
+`README.md`. The one the final run read comes from the public input archive with
 
 ```bash
-hf download <owner>/eval-goodreads-work-id --repo-type dataset \
-    --include 'checkpoints/sasrec-ssm-logq-d128/*' --local-dir "$RETRIEVE_DATA_ROOT/goodreads-work-id"
+uv run --directory evaluation hf download filtered-retrieval-repro/filtered-retrieval-inputs --repo-type dataset \
+    --include 'eval-goodreads-work-id/checkpoints/sasrec-ssm-logq-d128/*' --local-dir "$RETRIEVE_DATA_ROOT/_inputs"
 ```
+
+(it lands under `_inputs/eval-goodreads-work-id/`, the directory
+[staging](datasets.md#the-public-input-archive) links as `goodreads-work-id`); from a per-dataset repo of
+your own it is `eval-data fetch goodreads-work-id --include-checkpoints` ([below](#hugging-face-hub)).
 
 ## The published gSASRec checkpoints (kept, not read by the harness)
 
@@ -52,7 +56,7 @@ before the switch (the earliest goodreads runs use `gsasrec-d128-drop0.5-id`).
 | `<owner>/eval-goodreads-work-id` | `gsasrec-d{64,128,256}-drop0.5-id` |
 | `<owner>/eval-yambda-500m` | `gsasrec-d{64,128,256}-drop0.5` |
 
-They are not in the `<anonymous archive>`: no record of the final run reads them.
+The public input archive does not hold them: no record of the final run reads them.
 
 The yambda-500m ones as recorded at training time (Listen+, full-catalog
 ranking against all 1,866,170 items, no history masking, the

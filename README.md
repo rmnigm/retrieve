@@ -4,7 +4,7 @@ GPU retrieval for recommender systems (PyTorch + Triton): the library `torchretr
 benchmark harness behind a reproducibility study of two industrial GPU retrieval papers.
 
 **The study.** **SilverTorch** (Meta), run as Meta's official SilverTorch code, adapted (each
-change gated bit-exact against the published code before it left this repository), against
+change gated bit-exact against the published code at commit `21aa35e`), against
 **LiNR** (LinkedIn) V1–V3, implemented here from the paper's text, on public datasets with real
 and synthetic attribute filters.
 
@@ -23,7 +23,7 @@ members sharing a single `.venv` at the workspace root:
   and the encoder trainer (`train`); depends on `retrieve` editable. Not published.
 
 [`results/`](results/README.md) (not a workspace member) holds the paper's table and figure data,
-the final run's records they are computed from, the script that computes them, and the final
+the final run's records they are computed from, the scripts that compute and draw them, and the final
 run's configuration.
 
 Datasets, virtual environments and results live *outside* the repo; see
@@ -60,8 +60,11 @@ cd evaluation && CUDA_VISIBLE_DEVICES="" uv run pytest tests/ -q
 
 ## Running an evaluation and reading its numbers
 
-Stage a dataset first ([`docs/system/datasets.md`](docs/system/datasets.md): the ETL per
-dataset, or `eval-data fetch` from a Hub copy of yours, `RETRIEVE_HUB_OWNER`), then:
+Stage a dataset first ([`docs/system/datasets.md`](docs/system/datasets.md)): the final run's
+inputs for all four datasets (Goodreads, arXiv, PubMed, LAION 1M-30M) are the public Hugging Face
+dataset repo [`filtered-retrieval-repro/filtered-retrieval-inputs`](https://huggingface.co/datasets/filtered-retrieval-repro/filtered-retrieval-inputs),
+staged as in [the public input archive](docs/system/datasets.md#the-public-input-archive); the ETL
+per dataset rebuilds them from their sources. Then:
 
 ```bash
 cd evaluation
@@ -95,7 +98,7 @@ are in [`results/final-run-config/`](results/final-run-config/suites.yaml).
 - [`kernels.md`](docs/system/kernels.md) — Triton kernel internals (LiNR and the filters) and the adapter over Meta's SilverTorch ops.
 - [`filtering.md`](docs/system/filtering.md) — clause / Bloom filter semantics, paper vs. implementation.
 - [`testing.md`](docs/system/testing.md) — the correctness / parity / compile suites.
-- [`parity.md`](docs/system/parity.md) — the adapted SilverTorch code against Meta's published code: the gate, its recorded results, how to rerun it.
+- [`parity.md`](docs/system/parity.md) — the adapted SilverTorch code against Meta's published code: the gate, its recorded results, the parity tests, how to run the comparison.
 - [`evaluation.md`](docs/system/evaluation.md) — the benchmark harness.
 - [`datasets.md`](docs/system/datasets.md) — dataset ETL and the SASRec training pipeline.
 - [`checkpoints.md`](docs/system/checkpoints.md) — trained models + HF Hub workflow.

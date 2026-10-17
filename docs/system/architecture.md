@@ -10,7 +10,7 @@ sources: [retrieve/src/retrieve/]
 # `retrieve` architecture
 
 This is the high-level map of the `retrieve` package (distribution
-`torchretrieve`, not yet on PyPI): what each retrieval module does, how filters compose, and
+`torchretrieve`, not on PyPI): what each retrieval module does, how filters compose, and
 which kernels back which paths. For per-kernel detail (launch grids, tile
 shapes, autotune keys, numerics) see [kernels.md](kernels.md).
 
@@ -18,8 +18,8 @@ shapes, autotune keys, numerics) see [kernels.md](kernels.md).
 release carries LiNR V1-V3 with their filters and kernels, and `SilverTorch` on Meta's official
 SilverTorch code, adapted (`backend="cuda"`, its only backend; the `silvertorch/` workspace
 member, under Meta's own names). Meta's code as published and our earlier Triton reimplementation
-of SilverTorch are deleted ([kernels](kernels.md#deleted-backends)); the published code's last
-parity run stands behind the tag `meta-published-parity-final`.
+of SilverTorch are not part of it ([kernels](kernels.md#deleted-backends)); the adapted code's
+parity with the published code is in [parity](parity.md).
 
 ## Package layout
 

@@ -1013,9 +1013,8 @@ below, called unchanged by the gates' reference path (`official_probe_score`,
 forward's own ops (`search`, `probe_prep`, the `*_prepared` searches, `bloom_index_build_fixed`;
 [§ cuda](#cuda--the-adapted-forward)). The upstream facts in this section were measured on Meta's
 code as published; they hold for the adapted
-ops wherever § cuda does not say otherwise, and the parity gate of the adapted code against the
-published code held bit-exact at int32 up to the tag `meta-published-parity-final`, where the
-published code left the workspace.
+ops wherever § cuda does not say otherwise, and the adapted code is bit-exact to the published
+code at int32 ([parity](parity.md)).
 
 **Layout.** Phase 1 is ours: the same `KMeans`, the same `quantize_int8_global` codes, the same
 centroid top-`n_probe`. Meta's scorer reads the cluster-sorted CSR the layer registers
@@ -1162,10 +1161,8 @@ whose ties exceed k, so it is not used.
 `meta-recsys/silvertorch` vendored at `21aa35e`, synced to upstream `22c2007`, Apache-2.0 with
 Meta's `LICENSE` and headers and one "Modified by the retrieve authors" line per changed file,
 under Meta's own names (distribution and package `silvertorch`, ops `torch.ops.st.*`, C++
-namespace `st::ops`). Its changes were gated while the member loaded under other names
-(package `silvertorch_fork`, ops `torch.ops.stfork.*`) beside Meta's published package for the
-parity gates; then the published code left the workspace
-and the member took Meta's names back ([Deleted backends](#deleted-backends)).
+namespace `st::ops`). Its changes were gated bit-exact against Meta's published package at `21aa35e`
+([parity](parity.md)).
 `SilverTorch(backend="cuda")`, the default and only value, runs it.
 
 **Forward: one op.** `SilverTorch` runs phase 1 (ours) and then one `torch.ops.st.search` call
@@ -1279,8 +1276,8 @@ build at `21aa35e`, the `official` extra, the published forward in `silvertorch.
 adapter's per-backend plumbing, the adapted-vs-published parity tests, and our `clause_mask_packed`
 kernel that packed the exact predicate into its scorer's bit mask) left the library and the
 workspace when the adapted code took Meta's names (2026-10-16; `backend="cuda"` is its only
-backend). Its last parity run against the adapted code (T1 / T6 and the exact recheck bit-exact at int32) stands
-behind the tag `meta-published-parity-final`.
+backend). Its parity run against the adapted code (T1 / T6 and the exact recheck bit-exact at int32) is in
+[parity](parity.md).
 
 **The Triton SilverTorch** (`SilverTorch(backend="triton")`, its `backend="torch"` reference and
 `bloom_path="full"`: the `codesigned_probe_score*` and `bloom_full_mask` ops, their reference

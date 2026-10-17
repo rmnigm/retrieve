@@ -14,7 +14,7 @@
 #   from the tune; 24 is the paper's n_probe.
 # - SilverTorch is Meta's SilverTorch code, adapted (`cuda`, its only backend), `none` / `bloom` only; LiNR with a bloom
 #   filter is not in the study and runs nowhere (LiNR arms are clause only). The FR records of these suites carry
-#   `official`, Meta's code as published, which is no longer installed (records keep their names). One backend
+#   `official`, Meta's code as published, which the harness here does not load (records keep their names). One backend
 #   per algo (`triton`) except the native PyTorch arms.
 # - No bs 8, no k 500.
 

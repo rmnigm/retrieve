@@ -90,8 +90,8 @@ Every table uses seed 0, and every timed table CUDA-graph timing except the co-d
   and 50 % with no unstable flag.
 - **Probe sweep** (`probe_sweep`). `claims_summary` reads, at 4,096 lists, the fastest swept
   `n_probe` reaching recall 0.90 per filter against a fixed 1,024 probes.
-- **Co-design** (`codesign_pairs`). Meta's code as published (`backend` `published`, commit
-  `21aa35e`; not part of this repository, see [parity](../docs/system/parity.md)), eager, the two
+- **Co-design** (`codesign_pairs`). Meta's code as published (`meta-recsys/silvertorch` at commit
+  `21aa35e`, `backend` `published` in the records), run eagerly through the harness, the two
   filter placements in the same run at the same point. LAION 30M was timed in two runs
   (`repeat` 1 and 2). `claims_summary` leaves out a pair with either side unstable.
 - **Bloom width** (`bloom_width`). Quality only, batch 16, the width grid on the real filters;
@@ -177,44 +177,33 @@ records superseded by a rerun are not included: a cell that was unstable was rer
 the rerun's record replaces it unless it was unstable too, in which case the record keeps its
 flag.
 
-The complete per-run output of the final run is in the `<anonymous archive>`, directory `eval-results/runs/`:
-105 runs, one per leg (one driver invocation on one GPU), 3,752 records, about 0.6 GB. Each is a results tree as
-`bench` writes it: `<suite>/<dataset>-d<dim>.jsonl` (every record, failed attempts included),
-`*.samples.jsonl` (per-call latencies), `*.perquery/*.npz` (per-query recall and pass counts),
-`results.parquet` and a `MANIFEST.json` of checksums. Hosted as the Hugging Face dataset repo
-`<owner>/eval-results`, one run is fetched and checked with
-`bench fetch --repo-id <owner>/eval-results --path-in-repo runs/<run>`
-([`bench fetch`](../docs/system/evaluation.md#bench-fetch)), and `bench merge` reads any set of them. Run
-names are the suite or stage and the seed (`timed-bloom-d128-s0`); a letter marks the parts of one suite run on
-different GPUs and `-rerun` the one rerun of a run's unstable cells. The run's logs are not included; record
-fields that held a machine-local path or a container id hold a relative path or `gpu-host-<n>`.
+The complete per-run output of the final run, and every input it read, are in the public Hugging Face dataset
+repo [`filtered-retrieval-repro/filtered-retrieval-inputs`](https://huggingface.co/datasets/filtered-retrieval-repro/filtered-retrieval-inputs)
+(its `README.md` describes each file; `MANIFEST.json` holds a sha256 per file and `verify.py` checks a copy).
 
-The same archive holds every input the final run read, laid out as the harness's Hub repos
-(`eval-goodreads-work-id/`, `eval-arxiv-papers/`, `eval-pubmed/`, with the Goodreads encoder checkpoint and the
-synthetic filters; LAION 1M-30M not yet), so `eval-data fetch` and
-`bench run` read it with `RETRIEVE_HUB_OWNER` set to its owner
-([datasets](../docs/system/datasets.md#huggingface-io)).
+**Records** (`eval-results/runs/`): 105 runs, one per leg (one driver invocation on one GPU), 3,752 records,
+about 0.6 GB. Each is a results tree as `bench` writes it: `<suite>/<dataset>-d<dim>.jsonl` (every record, failed
+attempts included), `*.samples.jsonl` (per-call latencies), `*.perquery/*.npz` (per-query recall and pass counts),
+`results.parquet` and a `MANIFEST.json` of checksums. One run is fetched and checked against its manifest with
+[`bench fetch`](../docs/system/evaluation.md#bench-fetch), and `bench merge` reads any set of them:
 
-## Measured revision
+```bash
+uv run --directory evaluation bench fetch --repo-id filtered-retrieval-repro/filtered-retrieval-inputs \
+    --path-in-repo eval-results/runs/<run> --results fetched/<run>
+uv run --directory evaluation bench merge fetched/* --out tables/
+```
 
-The records were measured at the commit tagged `measured-final-run` (every record's
-`code_version` is `3c8198dfc35c299ea0f9d3a59a5eaf299494332e`), except the 39 SilverTorch records of
-the reverse-clause runs (`reverse_clause`, `algo` `silvertorch`): those were taken on a branch
-commit outside this history (`code_version` `08d54df3e5d71a2c33b8afccb455f61877d5f9fe`) whose
-code differs from the commit tagged `measured-clause-filter-runs` by one source comment; it adds
-the exact filter's int32 clause-slot layout to the first revision.
+Run names are the suite or stage and the seed (`timed-bloom-d128-s0`);
+a letter marks the parts of one suite run on different GPUs and `-rerun` the one rerun of a run's unstable cells.
+The run's logs are not included; record fields that held a machine-local path or a container id hold a relative
+path or `gpu-host-<n>`. Those records name the backends `official-fork` (`cuda` here; `bench merge` and `bench report` map
+it) and `official` (`published` in `records/records.parquet`).
 
-This tree differs from the measured revision in ways that change names or picks, not the
-measured kernels:
-
-- **Names.** The adapted code was `backend="official-fork"` (package `silvertorch_fork`) and Meta's
-  code as published `backend="official"`; the records here carry today's names (`cuda`,
-  `published`). Meta's code as published is no longer installed.
-- **Clustering metric.** The records' IVF assigned items to clusters by L2 in k-means and probed
-  by inner product; this tree uses inner product for both, so rebuilt indexes, and the probe
-  counts that reach a recall target, can differ.
-- **Removed.** Our Triton SilverTorch reimplementation and our LiNR bloom filter (neither in the
-  records here), and the harness's `bloom_path` arm (see the historical suites below).
+**Inputs**: one top-level directory per dataset, laid out as the dataset directory the harness reads, for all four
+datasets: `eval-goodreads-work-id/` (with the Goodreads encoder checkpoint), `eval-arxiv-papers/`, `eval-pubmed/`
+and `eval-laion30m/` (LAION 30M; `subsets/` pins the nested 1M / 3M / 10M catalogues, which `eval-data subset`
+rebuilds from it), each with its synthetic filters. Staging them under the data root is in
+[datasets](../docs/system/datasets.md#the-public-input-archive).
 
 ## Final-run configuration
 
@@ -237,7 +226,7 @@ shipped. It ran the suites in [`final-run-config/suites.yaml`](final-run-config/
 - `curve-d128` (the Goodreads genre points): the recall bridge (quality only);
 - `filter`, `linr-bs64`, `linr-bs256`: the exact LiNR on the reverse-clause filters (batch 1 / 16,
   and 64); `timed-clause-lite-d128` / `-d256` / `-d768`: SilverTorch's exact clause filter on
-  them, run on a later revision ([Measured revision](#measured-revision)).
+  them.
 
 The follow-up runs at deeper probes and the 20 / 30 / 50 % synthetic timings were generated the
 same way; their configurations are the `followup_run` rows and the 20-50 % `*-synth` rows of
@@ -247,14 +236,11 @@ that have records. Seed coverage: seed 0 everywhere; seeds 1 and 2 on the head-t
 only (arXiv, Goodreads, PubMed, LAION 1M-30M and their synthetic sets, except seed 1 on the
 arXiv and Goodreads synthetic sets and seed 2 on LAION 30M synthetic).
 
-**Historical suites.** Five suites hold an arm on Meta's code as published (`backend`
-`published`, commit `21aa35e`), which this repository no longer installs; the shipped harness
-rejects them (`unknown backends ['published']`, and `bloom_path` for the co-design):
-
-| suite | the published arm | runnable here |
-|---|---|---|
-| `codesign`, `codesign-laion30m`, `nsweep-codesign` | the whole suite (whole-index against searched-cluster bloom filtering, `bloom_path`) | no: needs Meta's code at `21aa35e` and the harness adapter of the time ([parity](../docs/system/parity.md#rerunning-the-comparison-against-the-published-code)) |
-| `synth`, `filter` | one SilverTorch side arm no table reads | yes: `synth-shipped`, `filter-shipped` are the same suites without it |
-
-Every other suite in the file loads with the shipped harness (checked with `load_matrix` for each
-of its datasets).
+**Suites with an arm on Meta's code as published.** `codesign`, `codesign-laion30m` and `nsweep-codesign`
+time Meta's code as published (`meta-recsys/silvertorch` at commit `21aa35e`, `backend` `published`), run
+eagerly through the harness, with its bloom filter applied over the whole index or over the searched clusters only
+(`bloom_path` full / partial). Their records are in `records/records.parquet` (`experiment` `codesign`) and under
+`eval-results/runs/`. The harness in this repository runs the adapted code (`cuda`) and the LiNR kernels; these three
+suites are kept as the configuration that produced those records. `synth` and `filter` each hold one more
+arm on the published code that no table reads; `synth-shipped` and `filter-shipped` are the same suites without it.
+Every other suite in the file loads with this harness (checked with `load_matrix` for each of its datasets).
