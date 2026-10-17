@@ -1,7 +1,7 @@
 # Results
 
-The data behind the paper's tables and figures, the records they are computed from, the script
-that computes them, and the configuration of the run that produced the records.
+The data behind the paper's tables and figures, the records they are computed from, the scripts
+that compute and draw them, and the configuration of the run that produced the records.
 
 Every number comes from one final run on an NVIDIA A100-SXM4-80GB (torch 2.10.0+cu128,
 Triton 3.6.0, CUDA 12.8, Python 3.11), with the code in this repository. SM clocks could not be
@@ -14,6 +14,8 @@ relative range of its three timing-window medians above 5 %).
 |---|---|
 | [`tables/`](tables/) | the CSVs below, written by `build_tables.py` |
 | [`build_tables.py`](build_tables.py) | records → `tables/`; every selection rule is a constant or a docstring in it |
+| [`build_figures.py`](build_figures.py) | `tables/` and `originals.csv` → `figures/` (PDF and PNG), one function per figure |
+| [`originals.csv`](originals.csv) | the original papers' numbers the figures draw beside ours, quoted with their source (not measured here) |
 | [`records/records.parquet`](records/records.parquet) | the 3,529 records the tables read (below) |
 | [`records/score_path_diagnostic.csv`](records/score_path_diagnostic.csv) | untimed: SilverTorch recall@100 at fixed probed clusters with the exact filter, scored as shipped (int8 inputs, fp16 output) and with fp16 inputs and fp32 accumulation |
 | [`records/bloom_false_positives.csv`](records/bloom_false_positives.csv) | untimed: the bloom filter's false-positive rate over the whole catalogue per width and hash count (false admissions / items failing the exact filter, per query), and the queries with a false negative |
@@ -28,21 +30,21 @@ relative range of its three timing-window medians above 5 %).
 | [`head_to_head_summary.csv`](tables/head_to_head_summary.csv) | per filter type (real, synthetic) and recall target: workloads timed, target reached by SilverTorch, SilverTorch faster, median SilverTorch / LiNR latency over the reached ones | — |
 | [`head_to_head_selections.csv`](tables/head_to_head_selections.csv) | the 288 workload × recall-target selections behind the summary, including those SilverTorch does not reach: SilverTorch's selected `n_lists` / `n_probe`, its recall and latency, the selected LiNR variant and its latency | — |
 | [`selected_points.csv`](tables/selected_points.csv) | six real-filter selections at k 100 with absolute latencies | — |
-| [`linr_v2_over_v1.csv`](tables/linr_v2_over_v1.csv) | LiNR V1 and V2 latency and their ratio against the synthetic pass rate, batch 1 and 16 | — |
+| [`linr_v2_over_v1.csv`](tables/linr_v2_over_v1.csv) | LiNR V1 and V2 latency and their ratio against the synthetic pass rate, batch 1 and 16 | Fig. `linr_v2_over_v1` |
 | [`linr_v3_vs_exact.csv`](tables/linr_v3_vs_exact.csv) | LiNR V3 per timed pool: recall, latency, and its ratio to the faster exact variant of the same run, batch 1 / 16 / 64 | — |
-| [`probe_sweep.csv`](tables/probe_sweep.csv) | SilverTorch's recall and latency over its `n_probe` range on LAION 30M with seven synthetic filters (4,096 and 16,384 lists, batch 16), with LiNR V1 as the anchor | — |
-| [`codesign_pairs.csv`](tables/codesign_pairs.csv) | Meta's published code: the bloom filter over the whole index against filtering only the searched clusters, per catalogue size, filter, batch, `n_lists` and `n_probe` | — |
+| [`probe_sweep.csv`](tables/probe_sweep.csv) | SilverTorch's recall and latency over its `n_probe` range on LAION 30M with seven synthetic filters (4,096 and 16,384 lists, batch 16), with LiNR V1 as the anchor | Fig. `probe_sweep` |
+| [`codesign_pairs.csv`](tables/codesign_pairs.csv) | Meta's published code: the bloom filter over the whole index against filtering only the searched clusters, per catalogue size, filter, batch, `n_lists` and `n_probe` | Fig. `catalogue_size` (b) |
 | [`bloom_width.csv`](tables/bloom_width.csv) | SilverTorch's bloom filter per width (`m_bits`) and hash count (`k_hash`) on Goodreads, arXiv and PubMed: recall@100, index size, whole-catalogue false-positive rate, false-negative queries | — |
 | [`index_memory.csv`](tables/index_memory.csv) | resident index size per arm (SilverTorch per `n_lists`, LiNR V1 / V2 / V3) per dataset | — |
-| [`head_to_head_probe_budgets.csv`](tables/head_to_head_probe_budgets.csv) | all 312 workload × recall-target settings, each with an `outcome`: `within_quarter` (the selection of `head_to_head_selections`), `deeper` (reached only at one half or three quarters of the lists, follow-up points) or `not_reached`; the pick, SilverTorch's best recall at any depth, the dataset's `tie_band` and the tie-aware `verdict` | — |
+| [`head_to_head_probe_budgets.csv`](tables/head_to_head_probe_budgets.csv) | all 312 workload × recall-target settings, each with an `outcome`: `within_quarter` (the selection of `head_to_head_selections`), `deeper` (reached only at one half or three quarters of the lists, follow-up points) or `not_reached`; the pick, SilverTorch's best recall at any depth, the dataset's `tie_band` and the tie-aware `verdict` | Figs. `head_to_head`, `catalogue_size` (a) |
 | [`head_to_head_counts.csv`](tables/head_to_head_counts.csv) | counts over the settings per probe budget (`quarter`, `any`), k, filter type and target (`all` pools): settings, reached, SilverTorch faster (strict), wins / ties / losses under the tie band, median ratio, unstable, and the same over the stable settings | — |
 | [`timing_spread.csv`](tables/timing_spread.csv) | SilverTorch's seed spread per dataset over its points timed at two or three seeds: time range over median, recall range, and the tie band (half the time spread) | — |
 | [`silvertorch_latency.csv`](tables/silvertorch_latency.csv) | SilverTorch's latency at its within-quarter picks per dataset and batch: min, median, max | — |
-| [`linr_v2_over_v1_batch64.csv`](tables/linr_v2_over_v1_batch64.csv) | LiNR V1 and V2 latency and their ratio on the synthetic filters at batch 64, from the head-to-head runs | — |
+| [`linr_v2_over_v1_batch64.csv`](tables/linr_v2_over_v1_batch64.csv) | LiNR V1 and V2 latency and their ratio on the synthetic filters at batch 64, from the head-to-head runs | Fig. `linr_v2_over_v1` |
 | [`linr_v3_wins.csv`](tables/linr_v3_wins.csv) | LiNR V3 against the faster exact variant per filter type, batch and pool: pools timed, V3 faster, V3 faster with no unstable flag, the smallest ratio | — |
 | [`linr_v3_code_length.csv`](tables/linr_v3_code_length.csv) | LiNR V3 per code length (`k_bits`: 64 / 128 at d 128, 256 / 768 at d 768), pool, filter, batch and k: recall, latency, latency over the shortest code | — |
 | [`linr_native_pytorch.csv`](tables/linr_native_pytorch.csv) | the LiNR kernels against native PyTorch: per variant, filter, batch and mode (eager, CUDA graph), native and compiled (`max-autotune`, eager only) latency over the Triton kernel of the same run | — |
-| [`linr_native_v2_over_v1.csv`](tables/linr_native_v2_over_v1.csv) | un-fused LiNR: native V2 over native V1 per filter, batch and mode on Goodreads synthetic (the two timed in different runs) | — |
+| [`linr_native_v2_over_v1.csv`](tables/linr_native_v2_over_v1.csv) | un-fused LiNR: native V2 over native V1 per filter, batch and mode on Goodreads synthetic (the two timed in different runs) | Fig. `linr_v2_over_v1` (diamonds) |
 | [`codesign_medians.csv`](tables/codesign_medians.csv) | the co-design pairs per catalogue size, filter (`all` pools the two) and batch: pairs, stable pairs, their median / min / max, and the share of lists searched | — |
 | [`recall_bridge.csv`](tables/recall_bridge.csv) | per SilverTorch configuration on Yambda (no filter) and Goodreads genre (bloom): recall against the exact top-k and recall of the held-out interactions, k 100 and 1000 | — |
 | [`recall_bridge_correlation.csv`](tables/recall_bridge_correlation.csv) | Pearson and Spearman correlation between the two recalls per dataset, dimension and k, with `n` and both ranges | — |
@@ -129,12 +131,26 @@ Every table uses seed 0, and every timed table CUDA-graph timing except the co-d
 Over the 219 reached selections of `head_to_head_selections.csv`, dropping any row with
 `timing_unstable` leaves 206, of which SilverTorch is faster in 203 (median ratio 0.268).
 
-## Rebuilding the tables
+## Figures
+
+`build_figures.py` draws each figure from the CSVs only (and the quoted values of
+`originals.csv`); a legend entry exists only for a drawn series. Hollow markers are a pick beyond
+a quarter of the lists, or a timing flagged unstable (stated per figure in its docstring).
+
+| figure | what it draws |
+|---|---|
+| `linr_v2_over_v1` | LiNR V2 / V1 against the pass rate on the uniform synthetic filters (the cluster-correlated `arxiv-corr-synth` left out), batch 1 / 16 / 64, one line per catalogue and dimension; LiNR's quoted PyTorch and TensorFlow ratios; our native V2 / native V1 at batch 1 |
+| `head_to_head` | SilverTorch / best LiNR at recall 0.90 and 0.95, k 100, per real filter and per synthetic pass rate (catalogues pooled); within a quarter filled, deeper hollow, not reached × |
+| `catalogue_size` | (a) speed-up over the best LiNR on LAION's two real filters at 0.90 against the catalogue size; (b) co-design pairs on LAION, stable pairs only, with the range the SilverTorch paper reports at 20 M |
+| `probe_sweep` | SilverTorch's recall@100 against latency over `n_probe` on LAION 30M at 4,096 lists, four filters, with LiNR V1's latency |
+
+## Rebuilding the tables and figures
 
 From this directory, with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv run --no-project --with polars==2.0.0 python build_tables.py records/records.parquet tables
+uv run --no-project --with polars==2.0.0 --with matplotlib==3.10.0 python build_figures.py tables figures
 ```
 
 The CSVs in `tables/` are that command's output, byte for byte. Each was also checked against
