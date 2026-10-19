@@ -1,0 +1,316 @@
+"""``bench.upload``: the publish path, with no network.
+
+What this pins: run scratch never leaves the machine, the manifest's checksums describe the files
+actually listed, the citability verdict travels with the payload and ``--gate`` cannot beat
+the evidence, the generated README says so in prose, the round-trip check
+catches a changed byte, and the commit carries every file plus the two generated ones with
+``private=True`` unless ``--public`` is passed.
+
+``HfApi`` is replaced by a recorder: the real upload is not a CI dependency.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+
+from bench import records, upload
+
+ENV = {
+    "gpu": "NVIDIA A100-SXM4-80GB", "driver": "580.159.04", "cuda": "12.8",
+    "torch": "2.10.0+cu128", "triton": "3.6.0", "commit": "abc1234", "dirty": False,
+    "git_branch": "development", "code_version": "f" * 40, "host": "box", "python": "3.11.15",
+    "started": "2026-09-15T08:00:00+00:00",
+}  # fmt: skip
+
+
+def _rec(**over):
+    rec = {
+        "schema_version": records.SCHEMA_VERSION,
+        "status": "ok",
+        "dataset": "goodreads",
+        "dim": 128,
+        "suite": "filter",
+        "filter_kind": "clause",
+        "sweep": "c0_genre",
+        "algo": "silvertorch",
+        "backend": "triton",
+        "params": {},
+        "seed": 0,
+        "path": "triton",
+        "perf": None,
+        "unstable": False,
+        "env": dict(ENV),
+    }
+    rec["env"].update(over.pop("env", {}))
+    return {**rec, **over}
+
+
+@pytest.fixture
+def tree(tmp_path):
+    """A results tree with one record file, its samples sidecar, its aggregate and both scratch
+    dirs."""
+    root = tmp_path / "results"
+    records.append_record(root / "filter" / "goodreads-d128.jsonl", _rec())
+    records.append_record(root / "filter" / "goodreads-d128.jsonl", _rec(backend="torch"))
+    records.append_record(
+        root / "filter" / "goodreads-d128.samples.jsonl",
+        {"dataset": "goodreads", "k": 100, "bs": 1, "mode": "eager", "ms": [0.5, 0.51]},
+    )
+    records.aggregate(root)
+    (root / "_logs").mkdir()
+    (root / "_logs" / "campaign.log").write_text("noise")
+    (root / "_parity").mkdir()
+    (root / "_parity" / "deadbeef.npz").write_bytes(b"\x00" * 4096)
+    return root
+
+
+class FakeApi:
+    """Records what would have gone to the Hub."""
+
+    def __init__(self, repo_files=()):
+        self.repo_files = list(repo_files)
+        self.created = None
+        self.commits = []
+
+    def create_repo(self, **kw):
+        self.created = kw
+
+    def list_repo_files(self, **kw):
+        return list(self.repo_files)
+
+    def create_commit(self, **kw):
+        self.commits.append(kw)
+
+
+@pytest.fixture
+def fake_hub(monkeypatch):
+    api = FakeApi()
+    monkeypatch.setattr(upload, "HfApi", lambda *a, **k: api)
+    return api
+
+
+def _run(*args):
+    return CliRunner().invoke(upload.upload, list(args), env={"RETRIEVE_HUB_OWNER": "u"})
+
+
+# ----- the listing: scratch never leaves the machine --------------------------
+
+
+def test_files_skips_campaign_scratch_and_generated_files(tree):
+    (tree / "MANIFEST.json").write_text("{}")
+    (tree / "README.md").write_text("stale")
+    rel = [p.relative_to(tree).as_posix() for p in upload.files(tree)]
+    assert rel == [
+        "filter/goodreads-d128.jsonl",
+        "filter/goodreads-d128.samples.jsonl",
+        "results.parquet",
+    ]
+
+
+# ----- the manifest ----------------------------------------------------------
+
+
+def test_manifest_checksums_match_the_listed_files(tree):
+    listing = upload.files(tree)
+    man = upload.manifest(tree, listing, "c4", None)
+    assert man["n_files"] == len(listing) == len(man["files"])
+    assert man["bytes"] == sum(p.stat().st_size for p in listing)
+    assert man["n_records"] == 2  # the samples sidecar is not a record file
+    for f in man["files"]:
+        p = tree / f["path"]
+        assert f["sha256"] == upload.sha256(p) and f["bytes"] == p.stat().st_size
+
+
+def test_n_records_counts_only_the_suite_form(tree, tmp_path):
+    """Records count only as ``<suite>/<dataset>-d<dim>.jsonl`` under ``--results``: the same
+    file uploaded from the suite directory, or a JSON-only tree, carries every
+    file but ``n_records`` 0, which is how an upload check catches the wrong form."""
+    suite = tree / "filter"
+    listing = upload.files(suite)
+    assert [p.name for p in listing] == ["goodreads-d128.jsonl", "goodreads-d128.samples.jsonl"]
+    man = upload.manifest(suite, listing, "c4", None)
+    assert man["n_records"] == 0 and man["n_files"] == 2
+    ceiling = tmp_path / "ceiling"
+    (ceiling / "laion30m").mkdir(parents=True)
+    (ceiling / "laion30m" / "ceiling.json").write_text("{}")
+    man = upload.manifest(ceiling, upload.files(ceiling), "c6", None)
+    assert man["n_records"] == 0 and man["n_files"] == 1
+
+
+def test_manifest_is_not_citable_without_a_gate(tree):
+    man = upload.manifest(tree, upload.files(tree), "c4", None)
+    assert man["citable"] is False
+    assert any("no --gate" in b for b in man["blockers"])
+    assert man["commits"] == ["abc1234"] and man["branches"] == ["development"]
+    assert man["schema_versions"] == [records.SCHEMA_VERSION]
+    assert man["code_versions"] == ["f" * 40]
+
+
+def test_gate_makes_clean_records_citable(tree):
+    man = upload.manifest(tree, upload.files(tree), "c4", "D1")
+    assert man["citable"] is True and man["blockers"] == [] and man["gate"] == "D1"
+
+
+@pytest.mark.parametrize(
+    ("over", "reason"),
+    [
+        ({"status": "partial"}, "partial"),
+        ({"status": "failed"}, "failed"),
+        ({"env": {"dirty": True}}, "env.dirty"),
+        ({"env": {"git_branch": "dev/x"}}, "dev/x"),
+    ],
+)
+def test_evidence_beats_the_gate(tmp_path, over, reason):
+    root = tmp_path / "results"
+    records.append_record(root / "filter" / "goodreads-d128.jsonl", _rec(**over))
+    man = upload.manifest(root, upload.files(root), "probe", "D1")
+    assert man["citable"] is False
+    assert any(reason in b for b in man["blockers"]), man["blockers"]
+
+
+# ----- the generated README --------------------------------------------------
+
+
+def test_readme_carries_every_subtree_and_its_verdict(tree):
+    a = upload.manifest(tree, upload.files(tree), "c4", None)
+    b = upload.manifest(tree, upload.files(tree), "d1-a", "D1")
+    text = upload.readme([b, a])
+    assert text.index("## `c4`") < text.index("## `d1-a`")  # sorted, not insertion order
+    assert "**NOT CITABLE.** Reasons:" in text and "no --gate" in text
+    assert "**CITABLE** — the uploader declared gate `D1` green." in text
+    assert "| `c4` | 2 | ok=2 | NO |" in text
+    assert "| `d1-a` | 2 | ok=2 | **yes** |" in text
+    assert "abc1234" in text and "NVIDIA A100-SXM4-80GB" in text
+
+
+# ----- the round trip --------------------------------------------------------
+
+
+def test_verify_accepts_a_faithful_copy_and_catches_a_changed_byte(tree, tmp_path):
+    man = upload.manifest(tree, upload.files(tree), "c4", None)
+    copy = tmp_path / "downloaded"
+    for f in man["files"]:
+        dst = copy / f["path"]
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes((tree / f["path"]).read_bytes())
+    assert upload.verify(copy, man) == []
+
+    size = (copy / "results.parquet").stat().st_size
+    (copy / "results.parquet").write_bytes(b"\x00" * size)
+    assert upload.verify(copy, man) == ["sha256 differs: results.parquet"]
+    (copy / "results.parquet").unlink()
+    assert upload.verify(copy, man) == ["missing: results.parquet"]
+
+
+# ----- the CLI ---------------------------------------------------------------
+
+
+def test_dry_run_touches_no_hub(tree, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("--dry-run must not reach the Hub")
+
+    monkeypatch.setattr(upload, "HfApi", boom)
+    r = _run("--results", str(tree), "--path-in-repo", "c4", "--dry-run")
+    assert r.exit_code == 0, r.output
+    man = json.loads(r.output[r.output.index("{") :])
+    assert man["path_in_repo"] == "c4" and man["citable"] is False
+    assert "_parity" not in r.output and "_logs" not in r.output
+
+
+def test_upload_commits_every_file_plus_the_two_generated_ones(tree, fake_hub):
+    (tree / "results.parquet").unlink()  # the upload regenerates it from the records
+    r = _run("--results", str(tree), "--repo-id", "u/r", "--path-in-repo", "c4")
+    assert r.exit_code == 0, r.output
+    assert fake_hub.created == {
+        "repo_id": "u/r", "repo_type": "dataset", "private": True, "exist_ok": True,
+    }  # fmt: skip
+    (commit,) = fake_hub.commits
+    paths = [op.path_in_repo for op in commit["operations"]]
+    assert paths == [
+        "c4/filter/goodreads-d128.jsonl",
+        "c4/filter/goodreads-d128.samples.jsonl",
+        "c4/results.parquet",
+        "c4/MANIFEST.json",
+        "README.md",
+    ]
+    assert "NOT CITABLE" in commit["commit_message"]
+
+
+def test_public_is_never_the_default(tree, fake_hub):
+    assert _run("--results", str(tree), "--repo-id", "u/r").exit_code == 0
+    assert fake_hub.created["private"] is True
+    assert _run("--results", str(tree), "--repo-id", "u/r", "--public").exit_code == 0
+    assert fake_hub.created["private"] is False
+
+
+def test_empty_and_missing_trees_fail_loudly(tmp_path):
+    assert _run("--results", str(tmp_path / "nope")).exit_code != 0
+    scratch = tmp_path / "results" / "_logs"
+    scratch.mkdir(parents=True)
+    (scratch / "x.log").write_text("noise")
+    r = _run("--results", str(scratch.parent))
+    assert r.exit_code != 0 and "no files to upload" in r.output
+
+
+def test_readme_is_rebuilt_from_the_manifests_already_in_the_repo(tree, fake_hub, monkeypatch):
+    """A second upload must not drop the first subtree from the front page."""
+    old = upload.manifest(tree, upload.files(tree), "c4", None)
+    old["source"] = "/elsewhere/c4"
+    fetched = Path(tree.parent / "old.json")
+    fetched.write_text(json.dumps(old))
+    fake_hub.repo_files = ["c4/MANIFEST.json", "c4/results.parquet", "README.md"]
+
+    monkeypatch.setattr(upload, "hf_hub_download", lambda **kw: str(fetched))
+    assert _run("--results", str(tree), "--repo-id", "u/r", "--path-in-repo", "b3").exit_code == 0
+    (readme_op,) = [o for o in fake_hub.commits[0]["operations"] if o.path_in_repo == "README.md"]
+    body = readme_op.path_or_fileobj.decode()
+    assert "## `c4`" in body and "## `b3`" in body and "/elsewhere/c4" in body
+
+
+# ----- fetch: the way back ---------------------------------------------------
+
+
+def _published(tree, tmp_path, monkeypatch):
+    """``snapshot_download`` faked by a copy of ``tree`` under ``c4/`` with its manifest."""
+    man = upload.manifest(tree, upload.files(tree), "c4", None)
+
+    def download(local_dir, **kw):
+        for f in man["files"]:
+            dst = Path(local_dir) / "c4" / f["path"]
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes((tree / f["path"]).read_bytes())
+        (Path(local_dir) / "c4" / "MANIFEST.json").write_text(json.dumps(man))
+        return local_dir
+
+    monkeypatch.setattr(upload, "snapshot_download", download)
+    return man
+
+
+def _fetch(*args):
+    return CliRunner().invoke(upload.fetch, list(args), env={"RETRIEVE_HUB_OWNER": "u"})
+
+
+def test_fetch_restores_a_subtree_resume_can_read(tree, tmp_path, monkeypatch):
+    _published(tree, tmp_path, monkeypatch)
+    dest = tmp_path / "restored"
+    r = _fetch("--path-in-repo", "c4", "--results", str(dest))
+    assert r.exit_code == 0, r.output
+    rel = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file())
+    assert rel == ["MANIFEST.json", *(p.relative_to(tree).as_posix() for p in upload.files(tree))]
+    assert json.loads((dest / "MANIFEST.json").read_text())["path_in_repo"] == "c4"
+    assert "MANIFEST.json" not in {p.name for p in upload.files(dest)}  # never re-uploaded
+    assert len(records.read_keys(dest / "filter" / "goodreads-d128.jsonl")) == 2
+    assert _fetch("--path-in-repo", "c4", "--results", str(dest)).exit_code == 0  # idempotent
+
+
+def test_fetch_never_overwrites_a_different_local_copy(tree, tmp_path, monkeypatch):
+    _published(tree, tmp_path, monkeypatch)
+    dest = tmp_path / "live"
+    records.append_record(dest / "filter" / "goodreads-d128.jsonl", _rec(seed=7))
+    r = _fetch("--path-in-repo", "c4", "--results", str(dest))
+    assert r.exit_code != 0 and "filter/goodreads-d128.jsonl" in r.output
+    assert len(records.read_records(dest / "filter" / "goodreads-d128.jsonl")) == 1

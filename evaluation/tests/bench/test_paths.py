@@ -1,0 +1,39 @@
+"""``algos.PATHS`` is derived from ``retrieve.interfaces.DISPATCH`` plus the harness's
+``postfilter`` row; this pins the derivation against the table the harness has
+always carried and the properties config.py collapses on."""
+
+from __future__ import annotations
+
+from bench import algos as A
+from retrieve.interfaces import DISPATCH as LIBRARY_DISPATCH
+
+EXPECTED = {
+    "linr_v1_filter_mask": {"none": "cublas", "clause": "cublas+{b}", "bloom": None},
+    "linr_v2": {"none": None, "clause": "{b}", "bloom": None},
+    "linr_v3": {"none": "{b}", "clause": "{b}", "bloom": None},
+    "silvertorch": {"none": None, "clause": None, "bloom": None},  # cuda only
+    "postfilter": {"none": None, "clause": "cublas+{b}", "bloom": None},
+}
+
+
+def test_paths_equal_the_derivation_of_dispatch():
+    grid = {(a, f, b) for a in A.ALGOS for f in A.FILTER_KINDS for b in A.BACKENDS}
+    assert set(A.PATHS) == grid
+    for (algo, fk, backend), path in A.PATHS.items():
+        if backend in A.SILVERTORCH_BACKENDS:
+            assert path == (backend if algo == "silvertorch" else None)
+            assert A.DISPATCH[A.ALGOS[algo].__name__][backend] == path
+            continue
+        if algo == "postfilter" and backend == "triton":
+            assert path is None
+            continue
+        want = EXPECTED[algo][fk]
+        assert path == (None if want is None else want.format(b=backend)), (algo, fk, backend)
+
+
+def test_dispatch_covers_every_harness_algo():
+    for algo, cls in A.ALGOS.items():
+        assert set(A.DISPATCH[cls.__name__]) == set(A.BACKENDS), algo
+    assert A.DISPATCH.keys() - LIBRARY_DISPATCH.keys() == {"Postfilter"}
+    assert [A.filter_backend(b) for b in A.SILVERTORCH_BACKENDS] == ["triton"]
+    assert [A.filter_backend(b) for b in ("triton", "torch")] == ["triton", "torch"]

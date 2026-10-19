@@ -1,0 +1,51 @@
+"""The ``eval-data`` console script: the per-dataset ETL programs (``etl/``, argparse, mounted
+as pass-through subcommands) and the Hub, ingest, subset and synth-filter commands."""
+
+from __future__ import annotations
+
+import importlib
+import sys
+
+import click
+
+from eval_datasets.hub import fetch, publish, publish_checkpoint
+from eval_datasets.ingest import ingest_cmd
+from eval_datasets.subset import subset_cmd
+from eval_datasets.synth_filter import synth_filter
+
+ETL = {
+    "arxiv": "arxiv",
+    "goodreads": "goodreads",
+    "synth-arxiv": "synth_arxiv",
+    "pubmed": "pubmed",
+    "laion": "laion",
+}
+
+
+@click.group()
+def main() -> None:
+    """Dataset ETL and Hub transfer."""
+
+
+for command, module in ETL.items():
+
+    @main.command(
+        command,
+        context_settings={"ignore_unknown_options": True, "help_option_names": []},
+        help=f"eval_datasets.etl.{module} (argparse; --help lists its subcommands)",
+    )
+    @click.argument("args", nargs=-1, type=click.UNPROCESSED)
+    def _forward(args: tuple[str, ...], module: str = module) -> None:
+        sys.exit(importlib.import_module(f"eval_datasets.etl.{module}").main(list(args)))
+
+
+main.add_command(fetch)
+main.add_command(publish)
+main.add_command(publish_checkpoint)
+main.add_command(synth_filter)
+main.add_command(ingest_cmd)
+main.add_command(subset_cmd)
+
+
+if __name__ == "__main__":
+    main()

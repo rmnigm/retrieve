@@ -1,0 +1,124 @@
+# Filtering
+
+Attribute-filtered retrieval: only return items matching a structured predicate. The
+quantization utilities are in [`indexing-and-ops.md`](indexing-and-ops.md).
+
+## Attribute filtering
+
+### Clause data layout
+
+A filter evaluates a conjunction of **clauses** (attribute keys) against each item:
+
+- `item_clause_attrs: [N, C, A_max]` int64 — for each item, up to `A_max` values per clause,
+  `-1`-padded. `C` is the number of clauses.
+- `query_clause_attrs: [B, C]` int64 — one queried value per clause per query; `-1` means the
+  clause is **inactive** (always passes).
+- `clause_is_reverse: [C]` bool — invert (NOT) a clause; `ExactAttributeFilter` and
+  `SilverTorch(filter_mode="exact")` support it.
+
+Semantics: a query passes an item iff, for **every** active clause, the query value appears among
+that item's values (OR over the `A_max` slot, AND across clauses).
+
+### Two ways to filter
+
+1. **SilverTorch inline** — the predicate is evaluated inside Meta's search op, over the probed
+   clusters only.
+2. **LiNR decoupled** — a standalone `FilterModule` computes a mask or candidate set. The
+   `LiNRV1`–`LiNRV3` modules hold one as `filter=` and call it for you; the primitives take the
+   mask or candidate set explicitly.
+
+### SilverTorch inline filtering
+
+Pass the item attributes at `register_index` and the prepared query attributes at `forward`:
+
+```python
+import torch
+from retrieve import SilverTorch
+
+item_embs = torch.randn(N, 128, device="cuda")
+item_attrs = ...  # [N, C, A_max] int64, -1 padded
+
+# Bloom: Meta's bloom index; m_bits (power of 2, mult. of 64) is the width per item, k_hash
+# the search k (at most 10). The adapted code rechecks the bloom's survivors exactly by default.
+ann = SilverTorch(k=10, n_lists=1024, n_probe=16,
+                  filter_mode="bloom", m_bits=1024, k_hash=4).cuda()
+ann.register_index(item_embs, item_clause_attrs=item_attrs)
+
+query = torch.randn(4, 128, device="cuda")
+query_attrs = ...  # [B, C] int64, -1 = inactive clause
+prepared = ann.prepare_queries(query_attrs)  # the query side of the filter, outside anything you time
+topk_ids, topk_scores = ann(query, prepared)
+```
+
+For exact-clause filtering (no false positives, supports reverse):
+
+```python
+ann = SilverTorch(k=10, n_lists=1024, n_probe=16, filter_mode="exact").cuda()
+ann.register_index(item_embs, item_clause_attrs=item_attrs,
+                   clause_is_reverse=clause_is_reverse)   # [C] bool, optional
+topk_ids, topk_scores = ann(query, ann.prepare_queries(query_attrs))
+```
+
+`bloom` is Meta's co-designed filter (a bloom per item, tested over the probed clusters; on the
+adapted code its survivors are rechecked exactly, so it returns no false positives); `exact`
+tests the clauses directly. Calling `forward` without a prepared filter skips filtering and runs
+plain ANN.
+
+### LiNR decoupled filtering
+
+The `FilterModule` (`ExactAttributeFilter`) encodes a batch's query attrs once with
+`q = f.prepare_queries(query_clause_attrs)` (the int64 attrs) and exposes three evaluation paths
+over a registered item set, each taking `q`:
+
+- `evaluate_mask(q, start=0, end=None) -> [B, end - start]` bool — dense, over
+  items `[start, end)` (default: all `N`). A range is evaluated on a slice of the item table, so
+  walking a large catalog in chunks never allocates `[B, N]`; each chunk equals the full mask's
+  `[:, start:end]` exactly.
+- `evaluate_indices(q) -> ([B, P] int64, [B] int64)` — a compact candidate set
+  `(ids, counts)`; each row's ids are in ascending item order on both backends.
+- `evaluate_subset(q, candidate_ids) -> [B, P]` bool — re-check an existing
+  candidate set.
+
+Build a filter, then hand it to a LiNR variant — it registers with the index and is evaluated on
+every forward that carries a prepared filter (`m.prepare_queries(query_clause_attrs)`):
+
+```python
+from retrieve import ExactAttributeFilter, LiNRV2
+
+v2 = LiNRV2(k=10, filter=ExactAttributeFilter()).cuda()
+v2.register_index(item_embs, item_attrs, clause_is_reverse)   # registers the filter too
+ids, scores = v2(query, v2.prepare_queries(query_attrs))       # filter → candidates → rescoring
+```
+
+Or feed a filter's output to a primitive yourself:
+
+```python
+from retrieve import ExactAttributeFilter, PostfilterKNN, PrefilterKNN
+
+filt = ExactAttributeFilter().cuda()
+filt.register_index(item_attrs, clause_is_reverse=clause_is_reverse)
+
+# Dense path: mask → PostfilterKNN (or FullScanKNN)
+q = filt.prepare_queries(query_attrs)                # the query encoding, once per batch
+mask = filt.evaluate_mask(q)                         # [B, N] bool
+knn = PostfilterKNN(k=10).cuda(); knn.register_index(item_embs)
+ids, scores = knn(query, mask=mask)
+
+# Sparse path: candidate set → PrefilterKNN (or OneBitKNN)
+cand_ids, counts = filt.evaluate_indices(q)          # ([B, P], [B])
+pre = PrefilterKNN(k=10).cuda(); pre.register_index(item_embs)
+ids, scores = pre(query, candidate_ids=cand_ids, counts=counts)
+```
+
+
+
+Composition helpers (in `retrieve.functional`):
+
+- `combine_masks(*masks)` — element-wise AND of `[B, N]` masks; `None` inputs ignored.
+- `combine_indices(filters, query_clause_attrs)` — sparse cascade across multiple filters; order
+  them most-selective first.
+- `post_filter_topk(topk_ids, post_mask)` — apply a filter **after** top-K; returns
+  `(ids, counts)` with filtered positions set to `-1`.
+
+For deeper filter internals and kernel behavior, see the repo-level
+`docs/system/filtering.md`.

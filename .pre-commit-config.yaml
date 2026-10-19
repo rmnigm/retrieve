@@ -1,0 +1,20 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.6  # = the ruff pin in pyproject.toml's dev group; bump both together
+    hooks:
+      - id: ruff-check
+        files: ^(retrieve|evaluation)/
+      - id: ruff-format
+        files: ^(retrieve|evaluation)/
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]  # raw outputs live on the Hub (docs/system/evaluation.md)
+      # Meta's vendored files keep their bytes.
+      - id: end-of-file-fixer
+        exclude: ^silvertorch/
+      - id: trailing-whitespace
+        exclude: ^silvertorch/

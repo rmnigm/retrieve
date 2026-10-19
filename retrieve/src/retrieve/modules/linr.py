@@ -1,0 +1,219 @@
+"""The LiNR paper's variants V1–V3 as modules: each composes the primitives of
+``modules.knn`` / ``modules.bit_knn`` with an optional ``FilterModule`` held as ``self.filter``
+(so ``buffers()`` covers index and filter) and exposes ``prepare_queries(query_clause_attrs)`` (the
+filter's query encoding, done outside the timed call) and ``forward(query, prepared=None) -> (ids
+[B, k], scores [B, k])``. ``k`` forwards to the primitive that owns the final top-k, so
+it is settable after ``register_index``; ``capturable`` is a class attribute (every LiNR backend
+captures)."""
+
+from __future__ import annotations
+
+from torch import Tensor
+
+from retrieve.functional import masked_topk
+from retrieve.interfaces import FilterModule, LinrBackend, RetrievalModule, load_prebuilt
+from retrieve.modules.bit_knn import OneBitKNN
+from retrieve.modules.knn import PostfilterKNN, PrefilterKNN
+
+__all__ = ["LiNRBuilder", "LiNRV1", "LiNRV2", "LiNRV3"]
+
+
+def _k_of(attr: str) -> property:
+    """``module.k`` forwards to the inner primitive that owns the final top-k."""
+    return property(
+        lambda self: getattr(self, attr).k,
+        lambda self, k: setattr(getattr(self, attr), "k", int(k)),
+    )
+
+
+def _prepare(self, query_clause_attrs: Tensor) -> Tensor:
+    """The filter's query encoding for one batch (``FilterModule.prepare_queries``)."""
+    return _filter(self.filter).prepare_queries(query_clause_attrs)
+
+
+def _filter(filter_mod: FilterModule | None) -> FilterModule:
+    if filter_mod is None:
+        raise ValueError("query or item clause attrs given, but the module has no filter")
+    return filter_mod
+
+
+def _register_filter(
+    filter_mod: FilterModule | None,
+    item_clause_attrs: Tensor | None,
+    clause_is_reverse: Tensor | None,
+) -> None:
+    if item_clause_attrs is not None:
+        _filter(filter_mod).register_index(item_clause_attrs, clause_is_reverse=clause_is_reverse)
+
+
+class LiNRV1(RetrievalModule):
+    """LiNR V1 — dense fp16-input, fp32-score matmul (cuBLAS), the filter folded into the score
+    write (``FilterModule.mask_scores``: one fused pass, no ``[B, N]`` bool), top-k."""
+
+    capturable = True
+    k = _k_of("idx")
+
+    def __init__(
+        self, k: int, *, filter: FilterModule | None = None, backend: LinrBackend = "triton"
+    ) -> None:
+        super().__init__()
+        self.idx = PostfilterKNN(k=k, backend=backend)
+        self.filter = filter
+        self.backend = backend
+
+    def register_index(
+        self,
+        item_embs: Tensor,
+        item_clause_attrs: Tensor | None = None,
+        clause_is_reverse: Tensor | None = None,
+    ) -> None:
+        self.idx.register_index(item_embs)
+        _register_filter(self.filter, item_clause_attrs, clause_is_reverse)
+
+    prepare_queries = _prepare
+
+    def forward(self, query: Tensor, prepared: Tensor | None = None):
+        if prepared is None:
+            return self.idx(query)
+        scores = _filter(self.filter).mask_scores(self.idx.score(query), prepared)
+        return masked_topk(scores, self.idx.k, masked=True)
+
+
+class LiNRV2(RetrievalModule):
+    """LiNR V2 — the filter's compact candidate list rescored exactly (``PrefilterKNN``). The
+    candidate source *is* the filter, so ``prepared`` is required."""
+
+    capturable = True
+    k = _k_of("idx")
+
+    def __init__(self, k: int, *, filter: FilterModule, backend: LinrBackend = "triton") -> None:
+        super().__init__()
+        _filter(filter)  # V2's candidates are the filter's
+        self.idx = PrefilterKNN(k=k, backend=backend)
+        self.filter = filter
+        self.backend = backend
+
+    def register_index(
+        self,
+        item_embs: Tensor,
+        item_clause_attrs: Tensor | None = None,
+        clause_is_reverse: Tensor | None = None,
+    ) -> None:
+        self.idx.register_index(item_embs)
+        _register_filter(self.filter, item_clause_attrs, clause_is_reverse)
+
+    prepare_queries = _prepare
+
+    def forward(self, query: Tensor, prepared: Tensor):
+        cand, counts = self.filter.evaluate_indices(prepared)
+        return self.idx(query, candidate_ids=cand, counts=counts)
+
+
+class LiNRV3(RetrievalModule):
+    """LiNR V3 → V2 cascade: 1-bit OPORP top-``candidate_pool``, then exact rescoring.
+    ``candidate_pool`` is a query-time parameter (``set_query_params``)."""
+
+    capturable = True
+    k = _k_of("stage2")
+
+    def __init__(
+        self,
+        k: int,
+        *,
+        candidate_pool: int = 5000,
+        seed: int = 0,
+        filter: FilterModule | None = None,
+        backend: LinrBackend = "triton",
+    ) -> None:
+        super().__init__()
+        if k > candidate_pool:
+            raise ValueError(f"k={k} exceeds candidate_pool={candidate_pool}")
+        self.stage1 = OneBitKNN(k=candidate_pool, seed=seed, backend=backend)
+        self.stage2 = PrefilterKNN(k=k, backend=backend)
+        self.filter = filter
+        self.backend = backend
+
+    def register_index(
+        self,
+        item_embs: Tensor,
+        item_clause_attrs: Tensor | None = None,
+        clause_is_reverse: Tensor | None = None,
+    ) -> None:
+        self.stage1.register_index(item_embs)
+        self.stage2.register_index(item_embs)
+        _register_filter(self.filter, item_clause_attrs, clause_is_reverse)
+
+    def set_query_params(self, *, candidate_pool: int) -> None:
+        if candidate_pool > self.stage1.item_bits.shape[0]:
+            raise ValueError(f"candidate_pool={candidate_pool} exceeds N")
+        if candidate_pool < self.k:
+            raise ValueError(f"candidate_pool={candidate_pool} is below k={self.k}")
+        self.stage1.k = int(candidate_pool)
+
+    prepare_queries = _prepare
+
+    def forward(self, query: Tensor, prepared: Tensor | None = None):
+        if prepared is None:
+            cand, _ = self.stage1(query)
+            return self.stage2(query, candidate_ids=cand)
+        pos, pcounts = _filter(self.filter).evaluate_indices(prepared)
+        cand, _ = self.stage1(query, candidate_ids=pos, counts=pcounts)
+        # Rows with fewer survivors than candidate_pool carry -1 tails; bound stage 2 by counts.
+        return self.stage2(query, candidate_ids=cand, counts=(cand >= 0).sum(dim=1))
+
+
+VARIANTS = {"v1": LiNRV1, "v2": LiNRV2, "v3": LiNRV3}
+
+
+class LiNRBuilder:
+    """Fluent construction of a registered LiNR variant: ``LiNRBuilder("v3", k=100,
+    candidate_pool=8000)`` takes the variant's constructor keywords, then
+    ``set_item_embeddings`` (+ ``set_filter(filter, item_attrs, clause_is_reverse)``) to build,
+    or ``set_state_dict`` (+ ``set_filter(filter)`` for the filter submodule's buffers) to load
+    a prebuilt index. ``build()`` is construct → register (or load) → ``.to(device)``."""
+
+    def __init__(self, variant: str, **kwargs) -> None:
+        self._cls = VARIANTS[variant]
+        self._kwargs = kwargs
+        self._embs: Tensor | None = None
+        self._attrs: Tensor | None = None
+        self._reverse: Tensor | None = None
+        self._state_dict: dict[str, Tensor] | None = None
+        self._device = None
+
+    def set_item_embeddings(self, item_embs: Tensor) -> LiNRBuilder:
+        self._embs = item_embs
+        return self
+
+    def set_filter(
+        self,
+        filter: FilterModule,
+        item_clause_attrs: Tensor | None = None,
+        clause_is_reverse: Tensor | None = None,
+    ) -> LiNRBuilder:
+        self._kwargs["filter"] = filter
+        self._attrs = item_clause_attrs
+        self._reverse = clause_is_reverse
+        return self
+
+    def set_backend(self, backend: LinrBackend) -> LiNRBuilder:
+        self._kwargs["backend"] = backend
+        return self
+
+    def set_device(self, device) -> LiNRBuilder:
+        self._device = device
+        return self
+
+    def set_state_dict(self, state_dict: dict[str, Tensor]) -> LiNRBuilder:
+        self._state_dict = state_dict
+        return self
+
+    def build(self) -> RetrievalModule:
+        if (self._embs is None) == (self._state_dict is None):
+            raise ValueError("set exactly one of set_item_embeddings / set_state_dict")
+        module = self._cls(**self._kwargs)
+        if self._state_dict is not None:
+            load_prebuilt(module, self._state_dict)
+        else:
+            module.register_index(self._embs, self._attrs, self._reverse)
+        return module if self._device is None else module.to(self._device)

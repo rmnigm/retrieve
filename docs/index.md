@@ -1,0 +1,58 @@
+---
+title: index
+created: 2026-10-11
+updated: 2026-10-17
+type: summary
+tags: [library, harness]
+sources: [docs/, retrieve/docs/]
+---
+
+# retrieve documentation
+
+> Last updated: 2026-10-17 | Total pages: 10
+
+How the `retrieve` library (package `torchretrieve`) and the `evaluation`
+harness work, kept in sync with the code.
+
+## Library user guide
+
+Ships in the sdist, written for someone who installed the package:
+[getting started](../retrieve/docs/getting-started.md),
+[modules](../retrieve/docs/modules.md),
+[filtering and quantization](../retrieve/docs/filtering-and-quantization.md),
+[indexing and ops](../retrieve/docs/indexing-and-ops.md),
+[benchmarking your own dataset](../retrieve/docs/adding-a-dataset.md).
+
+## System
+
+How the code works today. Code comments cite these pages by section, so
+their headings are stable.
+
+- [architecture](system/architecture.md): the `retrieve` package map,
+  modules, filter composition, backend dispatch, module layout.
+- [kernels](system/kernels.md): every Triton kernel, the reference ops and
+  Meta's official ops: launch grids, tiles, autotune, numerics, and which
+  of them ship.
+- [filtering](system/filtering.md): what each paper specifies for filters,
+  the mask and candidate-id paths, bloom hash keys.
+- [testing](system/testing.md): the library suite's layout, fixtures,
+  baselines and what each file asserts.
+- [evaluation](system/evaluation.md): the `bench` harness: measurement
+  protocol, config and suites, CLI, cell loop, records, report, upload, the merged tables.
+- [datasets](system/datasets.md): `eval_datasets` ETL per dataset, the
+  on-disk layout contract, Hub I/O, the public input archive, encoder training.
+- [checkpoints](system/checkpoints.md): which encoder checkpoint each
+  dataset reads, loading, embeddings, evaluation, Hub transfer.
+- [storage](system/storage.md): where the harness keeps data, results and
+  caches, and the environment variables that point it there.
+- [parity](system/parity.md): the adapted SilverTorch code against Meta's
+  published code: the gate, its recorded results, the parity tests and how to
+  run the comparison.
+
+The paper's table and figure data, the records and the final run's
+configuration are in [`results/`](../results/README.md).
+
+## Contributing
+
+A change to behaviour updates the matching
+`docs/system` page in the same commit.

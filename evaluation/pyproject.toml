@@ -1,0 +1,69 @@
+[project]
+name = "retrieve-evaluation"
+version = "0.1.0"
+description = "Training and evaluation for retrieve framework"
+requires-python = ">=3.10"
+dependencies = [
+    "torchretrieve",
+    "torch>=2.4,<3",
+    "polars>=1.0",
+    "pyarrow>=15",
+    "tqdm>=4.66",
+    "click>=8.1",
+    "huggingface-hub>=0.24",
+    "loguru>=0.7",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+    "wandb>=0.16",
+    "sentence-transformers>=3.0",
+    "einops>=0.7",  # nomic-embed-text-v1.5's remote code (arxiv encode)
+    "matplotlib>=3.8",
+    "tldextract>=5.1",  # registered domains for the laion ETL (bundled suffix list, offline)
+]
+
+[project.scripts]
+bench     = "bench.cli:main"
+eval-data = "eval_datasets.cli:main"
+train     = "training.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bench", "eval_datasets", "training"]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torchretrieve = { workspace = true }
+torch = { index = "pytorch-cu128" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The suite tests the checkout it sits in, not whichever one the shared venv's .pth names.
+pythonpath = [".", "../retrieve/src"]
+markers = ["gpu: needs CUDA; skipped without it (tests/conftest.py)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM", "RUF100", "BLE001", "PLC0415"]
+# PLC0415 (no inline imports) is a preview rule; explicit-preview-rules keeps it the only one.
+preview = true
+explicit-preview-rules = true
+
+[tool.ruff.lint.per-file-ignores]
+# The ETL CLIs import torch / sentence-transformers / transformers (1.5-8 s) inside the
+# subcommand that needs them, so download, plan and --help run without paying for them.
+"eval_datasets/etl/*.py" = ["PLC0415"]
+# Per-file broad excepts (download, gzip check, convert) report the file and go on; the ETL is frozen.
+"eval_datasets/etl/goodreads.py" = ["BLE001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["bench", "eval_datasets", "training", "retrieve"]

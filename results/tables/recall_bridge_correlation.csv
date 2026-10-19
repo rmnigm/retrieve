@@ -1,0 +1,3 @@
+dataset,dim,filter,k,n,pearson,spearman,oracle_min,oracle_max,heldout_min,heldout_max
+goodreads,128,c0_genre,100,9,0.993,0.845,0.712,0.985,0.188,0.215
+goodreads,128,c0_genre,1000,9,0.972,1.0,0.407,0.989,0.342,0.525

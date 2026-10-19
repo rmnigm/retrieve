@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import abc
+import importlib
+from types import ModuleType
+from typing import Literal, get_args
+
+import torch
+from torch import Tensor, nn
+
+from retrieve.functional import compact_mask
+
+LinrBackend = Literal["torch", "triton"]
+SilverTorchBackend = Literal["cuda"]
+SILVERTORCH_BACKENDS: tuple[str, ...] = get_args(SilverTorchBackend)
+
+
+def check_backend(backend: str, allowed: object) -> None:
+    """Raise ``ValueError`` unless ``backend`` is one of the ``Literal`` values ``allowed``."""
+    if backend not in get_args(allowed):
+        expected = ", ".join(map(repr, get_args(allowed)))
+        raise ValueError(f"unknown backend {backend!r}; expected one of {expected}")
+
+
+_OPS_NAMESPACE = {"triton": "retrieve.ops.triton", "torch": "retrieve.ops.reference"}
+_OPS_LOADED: dict[str, ModuleType] = {}
+
+
+def ops_for(backend: str) -> ModuleType:
+    """The op namespace a ``LinrBackend`` scores with (``retrieve.ops.triton`` / ``.reference``),
+    imported on first use so ``import retrieve`` registers no kernels. Modules call it once in
+    ``__init__`` (the import, and its errors, happen at construction) and again in ``forward``
+    (a dict hit; not stored on the instance, which must stay deep-copyable)."""
+    if backend in _OPS_LOADED:
+        return _OPS_LOADED[backend]
+    _OPS_LOADED[backend] = importlib.import_module(_OPS_NAMESPACE[backend])
+    return _OPS_LOADED[backend]
+
+
+# The code path each backend runs per module: ``"cublas"`` where the flag is a no-op, ``None``
+# where the constructor raises. Keyed by class name so the table is plain data with no import of
+# ``retrieve.modules``; the harness derives its ``PATHS`` from it (docs/system/architecture.md §
+# Backend dispatch).
+_NO_CUDA: dict[str, str | None] = {"cuda": None}
+DISPATCH: dict[str, dict[str, str | None]] = {
+    "SilverTorch": {"triton": None, "torch": None, "cuda": "cuda"},
+    "LiNRV1": {"triton": "cublas", "torch": "cublas", **_NO_CUDA},
+    "LiNRV2": {"triton": "triton", "torch": "torch", **_NO_CUDA},
+    "LiNRV3": {"triton": "triton", "torch": "torch", **_NO_CUDA},
+    "PostfilterKNN": {"triton": "cublas", "torch": "cublas", **_NO_CUDA},
+    "PrefilterKNN": {"triton": "triton", "torch": "torch", **_NO_CUDA},
+    "OneBitKNN": {"triton": "triton", "torch": "torch", **_NO_CUDA},
+    "SimHashKNN": {"triton": "triton", "torch": "torch", **_NO_CUDA},
+    "ExactAttributeFilter": {"triton": "triton", "torch": "torch", **_NO_CUDA},
+}
+
+
+def load_prebuilt(module: nn.Module, state_dict: dict[str, Tensor]) -> None:
+    """Give a freshly constructed module (no ``register_index``) the buffers of a saved one:
+    one buffer per state-dict key, shaped and placed like the saved tensor, then
+    ``load_state_dict`` so every load hook re-derives its cached scalars. The builders'
+    ``set_state_dict`` path."""
+    for name, t in state_dict.items():
+        owner, _, leaf = name.rpartition(".")
+        module.get_submodule(owner).register_buffer(leaf, torch.empty_like(t))
+    module.load_state_dict(state_dict)
+
+
+class RetrievalModule(nn.Module, abc.ABC):
+    """A top-K retriever over a registered item index: construct with ``k`` (+ knobs) →
+    ``register_index(item_embs, ...)`` exactly once → ``forward(query, ...)`` → ``(ids [B, k]
+    int64, scores [B, k])``, ``-1`` / ``-inf`` the "no item" sentinels. Forward signatures vary
+    by family (mask vs candidates vs prepared filter)."""
+
+    k: int
+
+    @abc.abstractmethod
+    def register_index(self, item_embs: Tensor, **kwargs) -> None: ...
+
+
+class FilterModule(nn.Module, abc.ABC):
+    """Boolean predicate over a registered item index; ``forward`` aliases ``evaluate_mask``.
+
+    A batch's query attrs are encoded once by ``prepare_queries(query_clause_attrs)`` (the int64
+    attrs for the exact filter), outside any timed call, and every
+    eval path takes that encoding ``q``: ``evaluate_mask(q, start=0, end=None) -> [B, end -
+    start] bool`` (dense, over items ``[start, end)``), ``evaluate_indices(q) -> ([B, P] int64,
+    [B] int64)`` (compact candidates), ``evaluate_subset(q, candidate_ids) -> [B, P] bool``
+    (check only the given ids); plus ``mask_scores(scores, q) -> [B, N]``, dense scores with the
+    failing items at ``-inf``."""
+
+    @abc.abstractmethod
+    def register_index(
+        self,
+        item_clause_attrs: Tensor,
+        *,
+        clause_is_reverse: Tensor | None = None,
+    ) -> None: ...
+
+    def prepare_queries(self, query_clause_attrs: Tensor) -> Tensor:
+        """The query side of the predicate for one batch; the exact filter's is the attrs."""
+        return query_clause_attrs.long().contiguous()
+
+    @abc.abstractmethod
+    def evaluate_mask(self, q: Tensor, start: int = 0, end: int | None = None) -> Tensor: ...
+
+    def evaluate_indices(self, q: Tensor) -> tuple[Tensor, Tensor]:
+        return compact_mask(self.evaluate_mask(q))
+
+    def evaluate_subset(self, q: Tensor, candidate_ids: Tensor) -> Tensor:
+        mask = self.evaluate_mask(q)
+        return mask.gather(1, candidate_ids)
+
+    def mask_scores(self, scores: Tensor, q: Tensor) -> Tensor:
+        return torch.where(self.evaluate_mask(q), scores, float("-inf"))
+
+    def forward(self, q: Tensor) -> Tensor:
+        return self.evaluate_mask(q)

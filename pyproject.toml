@@ -1,0 +1,36 @@
+[project]
+name = "retrieve-workspace"
+version = "0"
+description = "Workspace meta-package: retrieve + evaluation share one .venv."
+requires-python = ">=3.10"
+dependencies = [
+    "torchretrieve",
+    "retrieve-evaluation",
+]
+
+
+[tool.uv]
+package = false
+# silvertorch's build backend imports torch (setup.py picks CUDAExtension when CUDA_HOME is
+# set), so it must build against the torch already in this env rather than an isolated one that
+# would pull a different CUDA build.
+no-build-isolation-package = ["silvertorch"]
+
+[tool.uv.workspace]
+members = ["retrieve", "evaluation", "silvertorch"]
+
+[tool.uv.sources]
+torchretrieve = { workspace = true }
+retrieve-evaluation = { workspace = true }
+# Meta's SilverTorch code, adapted: Apache-2.0, ops under torch.ops.st.*.
+silvertorch = { workspace = true }
+
+[dependency-groups]
+# Build tools for the no-build-isolation silvertorch extension, and the one pinned ruff;
+# installed into the shared .venv by a plain `uv sync` at the workspace root.
+dev = [
+    "ninja>=1.11",
+    "setuptools>=61",
+    "wheel",
+    "ruff==0.15.6",  # the rev of .pre-commit-config.yaml's ruff-pre-commit; bump both together
+]

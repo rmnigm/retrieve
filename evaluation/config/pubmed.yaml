@@ -1,0 +1,15 @@
+# PubMed + MedCPT at the encoder's native 768 dims, the 10 M slice, listed in the
+# `filter` suite. Clause layout (docs/system/datasets.md § pubmed):
+# C0 mesh (multi-valued OR, K=4), C1 mesh_cat, C2 year, C3 journal (REVERSE — bloom-
+# incompatible), C4 has_abstract. Pre-encoded text shape: queries from content_d768/query_emb.pt.
+data_dir: data/pubmed-medcpt-dot             # MedCPT as shipped, not normalised
+content_dir: content_d768                 # relative to data_dir
+normalize: false                          # MedCPT scores by dot product
+dims: [768]
+users_limit: 10000
+self_match: true                          # queries are catalogue items (docs/system/evaluation.md § Self-match)
+filters:
+  attrs: item_attrs_narrow.pt
+  reverse: clause_is_reverse_narrow.pt
+  clause: {c0_mesh: [0], c2_year: [2], c3_journal_reverse: [3], c0c2: [0, 2], all5: [0, 1, 2, 3, 4]}
+  bloom: {c0_mesh: [0], c2_year: [2], c0c2: [0, 2]}

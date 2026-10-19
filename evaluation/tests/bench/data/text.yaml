@@ -1,0 +1,5 @@
+# Pre-encoded (arxiv-shaped) fixture: content_dir per dim, no checkpoint, no filters.
+data_dir: data/text
+content_dir: {16: content_d16, 32: content}
+dims: [16, 32]
+users_limit: 5

@@ -1,0 +1,141 @@
+"""The inputs of a ``(dataset, dim)`` process (docs/system/evaluation.md § Inputs): embeddings,
+queries, targets, attrs, the per-sweep query attrs, the filter modules and the perf pool."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import torch
+from loguru import logger
+
+from bench import algos
+from bench.config import Dataset
+from bench.oracle import attrs_digest
+from eval_datasets import layout
+from retrieve.interfaces import FilterModule
+from training.encode import encode_split
+
+
+def load_inputs(ds: Dataset, device: torch.device, *, with_filters: bool = True) -> dict[str, Any]:
+    if ds.checkpoint:
+        item_embs, queries, targets, n_targets = encode_split(
+            ds.checkpoint,
+            ds.data_dir,
+            max_seq_length=ds.encode["max_seq_length"],
+            batch_size=ds.encode["batch_size"],
+            num_workers=ds.encode["num_workers"],
+            device=device,
+        )
+    else:
+        assert ds.content_dir is not None
+        item_embs = layout.load_text_items(ds.content_dir, device, normalize=ds.normalize)
+        queries, targets, n_targets = layout.load_text_queries(
+            ds.data_dir, ds.content_dir, int(item_embs.shape[1]), normalize=ds.normalize
+        )
+    qa = item_attrs = reverse = None
+    if with_filters and ds.attrs is not None:
+        qa = layout.load_query_attrs(ds.query_attrs, queries.shape[0])
+        layout.check_synth_rates(ds.attrs)
+        item_attrs, reverse = layout.load_item_attrs(
+            ds.attrs, ds.reverse, int(item_embs.shape[0]), device
+        )
+    queries, targets, n_targets, qa = layout.apply_users_limit(
+        ds.users_limit, queries, targets, n_targets, qa
+    )
+    logger.info("inputs: items {} queries {} dim {}", item_embs.shape[0], queries.shape[0], ds.dim)
+    return {
+        "item_embs": item_embs,
+        "queries": queries.contiguous(),
+        "targets": targets.contiguous(),
+        "n_targets": n_targets.contiguous(),
+        "qa": qa,
+        "item_attrs": item_attrs,
+        "clause_is_reverse": reverse,
+        "attrs_digest": attrs_digest(item_attrs, reverse),
+        "n_items": int(item_embs.shape[0]),
+        "n_queries": int(queries.shape[0]),
+    }
+
+
+def sweep_qa(
+    qa: torch.Tensor | None, clauses: tuple[int, ...] | None
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """``(qa_sweep, skip_mask)`` of one sweep: inactive clauses coded ``-1``, rows with no live
+    clause skip-masked; ``(None, None)`` on a ``none`` cell."""
+    if clauses is None:
+        return None, None
+    if qa is None:
+        raise ValueError(f"sweep over clauses {clauses} needs query attrs")
+    n_clauses = qa.shape[1]
+    if any(not 0 <= c < n_clauses for c in clauses):
+        raise ValueError(f"clauses {clauses} out of range for {n_clauses} clauses")
+    out = qa.clone()
+    inactive = torch.ones(n_clauses, dtype=torch.bool)
+    inactive[list(clauses)] = False
+    out[:, inactive] = -1
+    return out, (out == -1).all(dim=1)
+
+
+def build_filters(
+    filter_kind: str, inputs: dict[str, Any], backends: list[str]
+) -> dict[str, FilterModule]:
+    """One standalone exact ``FilterModule`` per *filter* backend the cell backends map to, on
+    ``clause`` cells; empty elsewhere (a bloom cell's filter is SilverTorch's own)."""
+    mods: dict[str, FilterModule] = {}
+    if filter_kind != "clause":
+        return mods
+    for fb in dict.fromkeys(algos.filter_backend(b) for b in backends):
+        mods[fb] = algos.build_filter(
+            filter_kind, inputs["item_attrs"], clause_is_reverse=inputs["clause_is_reverse"],
+            backend=fb,
+        )  # fmt: skip
+    logger.info("filter modules ({}): {}", filter_kind, sorted(mods))
+    return mods
+
+
+def exact_filter(
+    filter_kind: str, filters: dict[str, FilterModule], inputs: dict[str, Any], backend: str
+) -> FilterModule | None:
+    """The oracle's exact mask: the clause module on ``clause`` cells, a fresh
+    ``ExactAttributeFilter`` on ``bloom`` cells, ``None`` on ``none``."""
+    fb = algos.filter_backend(backend)
+    if filter_kind == "clause":
+        return filters[fb]
+    if filter_kind == "bloom":
+        return algos.build_filter(
+            "clause",
+            inputs["item_attrs"],
+            clause_is_reverse=inputs["clause_is_reverse"],
+            backend=fb,
+        )
+    return None
+
+
+def query_pool(
+    inputs: dict[str, Any],
+    qa_sweep: torch.Tensor | None,
+    skip_mask: torch.Tensor | None,
+    *,
+    bs: int,
+    seed: int,
+    n_pool: int = 4096,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """The fixed-seed perf pool (§2.5): ``[n_pool, bs, D]`` query batches from the kept rows
+    and the matching ``[n_pool, bs, C]`` attr batches on filter cells."""
+    g = torch.Generator(device="cpu").manual_seed(seed)
+    queries = inputs["queries"]
+    if skip_mask is not None:
+        keep_idx = (~skip_mask.bool()).nonzero(as_tuple=False).reshape(-1)
+        if keep_idx.numel() == 0:
+            raise ValueError("every query is skip-masked; nothing to time")
+        rows = keep_idx[torch.randint(0, keep_idx.numel(), (n_pool, bs), generator=g).reshape(-1)]
+    else:
+        rows = torch.randint(0, queries.shape[0], (n_pool, bs), generator=g).reshape(-1)
+    pool = queries[rows].reshape(n_pool, bs, -1).to(device).contiguous()
+    qa_pool = (
+        qa_sweep[rows].reshape(n_pool, bs, -1).to(device).contiguous()
+        if qa_sweep is not None
+        else None
+    )
+    return pool, qa_pool

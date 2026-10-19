@@ -1,0 +1,211 @@
+"""``bench.algos.build``: every ``(algo, filter_kind)`` cell on the torch path returns a
+module whose ``k`` setter slices the top-k without touching a buffer (no layer bakes
+``k``), the filter is a submodule counted by ``index_bytes``, ``set_query_params``
+re-validates, and ``build`` refuses ``None``-path cells and invalid combos. The three
+the tests that share them are read-only beyond ``.k``."""
+
+from __future__ import annotations
+
+import pytest
+import torch
+
+from bench import algos as A
+from bench.measure import index_bytes
+
+N, D = 256, 64
+
+
+def _prefix_equal(big: tuple, small: tuple) -> None:
+    """``small`` (top-k') is the prefix of ``big`` (top-k): scores exactly, ids up to ties."""
+    ids_b, sc_b = big
+    ids_s, sc_s = small
+    k = ids_s.shape[1]
+    assert torch.equal(sc_s, sc_b[:, :k])
+    for r in range(ids_b.shape[0]):
+        for s in sc_s[r].unique():
+            a = set(ids_s[r][sc_s[r] == s].tolist())
+            g = set(ids_b[r][sc_b[r] == s].tolist())
+            if s > sc_b[r, -1]:  # the tie group is complete in the big run
+                assert a <= g
+                if s > sc_s[r, -1]:  # and in the small run
+                    assert a == g
+
+
+def _data(seed: int = 0):
+    g = torch.Generator().manual_seed(seed)
+    x = torch.randn(N, D, generator=g)
+    q = torch.randn(6, D, generator=g)
+    attrs = torch.randint(0, 3, (N, 2, 1), generator=g)
+    attrs[:, 1] = torch.where(torch.rand(N, 1, generator=g) < 0.4, torch.tensor(-1), attrs[:, 1])
+    qa = torch.tensor([[0, -1], [1, -1], [2, 0], [0, 1], [1, 2], [2, -1]])
+    return x, q, attrs, qa
+
+
+def test_official_config_recheck():
+    """``recheck`` as a build param: the study runs the bloom with it false."""
+    cfg = A.official_config("silvertorch", "bloom", "cuda", {"recheck": False})
+    assert cfg.recheck is False and cfg.score_path == "fp16"
+    assert A.official_config("silvertorch", "bloom", "cuda", {"n_probe": 4}) is None
+    with pytest.raises(ValueError, match="recheck applies to silvertorch/bloom"):
+        A.official_config("silvertorch", "clause", "cuda", {"recheck": False})
+    for algo, backend in [("silvertorch", "triton"), ("linr_v1_filter_mask", "triton")]:
+        with pytest.raises(ValueError, match="applies to silvertorch on"):
+            A.official_config(algo, "bloom", backend, {"recheck": False})
+
+
+def _check_k_slice(module, call, k_big: int = 8, k_small: int = 3) -> None:
+    module.k = k_big
+    before = {n: b.clone() for n, b in module.state_dict().items()}
+    big = call()
+    module.k = k_small
+    small = call()
+    assert small[0].shape[1] == k_small
+    _prefix_equal(big, small)
+    after = module.state_dict()
+    assert before.keys() == after.keys()
+    for name, b in before.items():
+        assert torch.equal(b, after[name]), f"buffer {name} changed with k"
+
+
+def _cells():
+    for algo in A.ALGOS.keys() - {"postfilter"}:  # its pool is alpha*k: no prefix property
+        for fk in A.FILTER_KINDS:
+            if A.PATHS[algo, fk, "torch"] is not None:
+                yield algo, fk
+
+
+@pytest.mark.parametrize("algo,fk", list(_cells()))
+@torch.inference_mode()
+def test_built_module_k_setter_slices(algo, fk):
+    x, q, attrs, qa = _data()
+    f = A.build_filter(fk, attrs, backend="torch")
+    params = {"linr_v3": {"candidate_pool": 64}}.get(algo, {})
+    m = A.build(
+        algo, x, k=8, backend="torch", filter_kind=fk, filter_mod=f, item_attrs=attrs,
+        params=params,
+    )  # fmt: skip
+    assert m.backend == "torch" and m.capturable is True
+    _check_k_slice(m, lambda: m(q, m.prepare_queries(qa) if fk != "none" else None))
+
+
+def test_index_bytes_includes_filter_submodule():
+    x, _, attrs, _ = _data()
+    f = A.build_filter("clause", attrs, backend="torch")
+    m = A.build("linr_v1_filter_mask", x, k=4, backend="torch", filter_kind="clause", filter_mod=f)
+    assert m.filter is f and index_bytes(m) == index_bytes(m.idx) + index_bytes(f) > 0
+    assert A.build_filter("none", None) is None and A.build_filter("bloom", attrs) is None
+
+
+def test_linr_v3_query_params():
+    x, q, _, _ = _data()
+    m = A.build("linr_v3", x, k=4, backend="torch", params={"candidate_pool": 16})
+    assert m.stage1.k == 16
+    m.set_query_params(candidate_pool=32)
+    assert m.stage1.k == 32 and m(q)[0].shape == (6, 4)
+    with pytest.raises(ValueError, match="exceeds N"):
+        m.set_query_params(candidate_pool=N + 1)
+
+
+def test_linr_v3_k_bits():
+    x = torch.randn(N, 128, generator=torch.Generator().manual_seed(0))
+    default = A.build("linr_v3", x, k=4, backend="torch", params={"candidate_pool": 16})
+    assert default.stage1.k_bits == 128 and default.stage1.item_bits.shape == (N, 2)
+    m = A.build("linr_v3", x, k=4, backend="torch", params={"candidate_pool": 16, "k_bits": 64})
+    assert m.stage1.k_bits == 64 and m.stage1.item_bits.shape == (N, 1) and m.stage1.k == 16
+    assert m(x[:6])[0].shape == (6, 4)
+
+
+@pytest.mark.parametrize("fk", ["clause"])
+@pytest.mark.parametrize("seed", [0, 1])
+@torch.inference_mode()
+def test_linr_v3_k_bits_at_d_is_the_default_build(fk, seed):
+    """The swapped stage 1 at k_bits = D is the same V3 as the default build (the v3bits suite's
+    k_bits 128 row against every other suite's V3)."""
+    _, _, attrs, qa = _data()
+    g = torch.Generator().manual_seed(1)
+    x, q = torch.randn(N, 128, generator=g), torch.randn(6, 128, generator=g)
+    out = []
+    for extra in ({}, {"k_bits": 128}):
+        f = A.build_filter(fk, attrs, backend="torch")
+        m = A.build(
+            "linr_v3", x, k=8, backend="torch", filter_kind=fk, filter_mod=f, item_attrs=attrs,
+            params={"candidate_pool": 64, **extra}, seed=seed,
+        )  # fmt: skip
+        out.append(
+            (
+                m(q, m.prepare_queries(qa)),
+                m.stage1.item_bits,
+                m.stage1.oporp_signs,
+                m.stage1.oporp_perm,
+            )
+        )
+    (ids0, s0), *bufs0 = out[0]
+    (ids1, s1), *bufs1 = out[1]
+    assert torch.equal(ids0, ids1) and torch.equal(s0, s1)
+    assert all(torch.equal(a, b) for a, b in zip(bufs0, bufs1, strict=True))
+
+
+def test_build_refusals():
+    x, _, _, _ = _data()
+    with pytest.raises(ValueError, match="no code path"):
+        A.build("linr_v2", x, k=4, backend="torch", filter_kind="none")
+    with pytest.raises(ValueError, match="no code path"):
+        A.build("linr_v1_filter_mask", x, k=4, backend="cuda")
+    with pytest.raises(ValueError, match="invalid params"):
+        A.build("silvertorch", x, k=4, backend="cuda", params={"n_lists": 4, "n_probe": 8})
+    assert A.is_valid_combo("silvertorch", {"n_lists": 16, "n_probe": 16})
+    assert not A.is_valid_combo("silvertorch", {"n_lists": 16})  # default n_probe=24 > 16
+    assert A.is_valid_combo("linr_v3", {"n_probe": 100}) and A.is_valid_combo("silvertorch", {})
+
+
+# ----- postfilter: the generic-torch baseline ----------------------------------------------
+
+
+def _postfilter_reference(x, q, mask, k: int, alpha: int):
+    """matmul -> topk(alpha*k) -> drop ids the dense mask rejects -> first k, -1/-inf pad."""
+    scores = torch.mm(q.half().float(), x.half().t().contiguous().float())
+    top_s, top_i = torch.topk(scores, min(alpha * k, x.shape[0]), dim=1)
+    ids = torch.full((q.shape[0], k), -1, dtype=torch.long)
+    sc = torch.full((q.shape[0], k), float("-inf"))
+    for r in range(q.shape[0]):
+        kept = [j for j in range(top_i.shape[1]) if mask[r, top_i[r, j]]][:k]
+        ids[r, : len(kept)] = top_i[r, kept]
+        sc[r, : len(kept)] = top_s[r, kept]
+    return ids, sc
+
+
+@pytest.mark.parametrize("fk", ["clause"])
+@torch.inference_mode()
+def test_postfilter_equals_the_torch_reference(fk):
+    x, q, attrs, qa = _data()
+    f = A.build_filter(fk, attrs, backend="torch")
+    mask = f.evaluate_mask(f.prepare_queries(qa))
+    m = A.build("postfilter", x, k=8, backend="torch", filter_kind=fk, filter_mod=f)
+    assert m.capturable and m.filter is f and index_bytes(m) > index_bytes(f)
+    short = 0
+    for k in (8, 40, N + 44):  # alpha*k past N at 40; k itself past N at the last
+        m.k = k
+        for alpha in (1, 2, 4, 8):
+            m.set_query_params(alpha=alpha)
+            ids, scores = m(q, m.prepare_queries(qa))
+            ref_ids, ref_scores = _postfilter_reference(x, q, mask, k, alpha)
+            assert torch.equal(scores, ref_scores), (k, alpha)
+            assert torch.equal(ids, ref_ids), (k, alpha)
+            assert bool(mask.gather(1, ids.clamp(min=0))[ids >= 0].all())
+            short += int((ids[:, : min(k, N)] == -1).any())
+    assert short > 0  # the sentinel path ran
+
+
+def test_postfilter_refusals():
+    x, _, attrs, _ = _data()
+    f = A.build_filter("clause", attrs, backend="torch")
+    for fk, backend in (("none", "torch"), ("bloom", "torch"), ("clause", "triton"),
+                        ("clause", "cuda")):  # fmt: skip
+        with pytest.raises(ValueError, match="no code path"):
+            A.build("postfilter", x, k=4, backend=backend, filter_kind=fk, filter_mod=f)
+    m = A.build("postfilter", x, k=4, backend="torch", filter_kind="clause", filter_mod=f,
+                params={"alpha": 4})  # fmt: skip
+    assert m.alpha == 4
+    for bad in (0, 2.0):
+        with pytest.raises(ValueError, match="alpha must be"):
+            m.set_query_params(alpha=bad)

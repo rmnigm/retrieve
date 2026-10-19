@@ -1,0 +1,636 @@
+"""SilverTorch correctness: IVF + INT8 ANN with the optional bloom / exact filter on Meta's
+SilverTorch code, adapted (``backend="cuda"``). Fixtures shrink the paper's eval (D=128, K=2048,
+n_probe=64) to sizes that fit on one GPU. Every cell skips when the ``silvertorch`` extension is
+not installed and fails when the package is present but broken. The bit-exact gates against an
+independent oracle live in ``tests/parity/test_official.py``.
+"""
+
+from __future__ import annotations
+
+import copy
+
+import pytest
+import torch
+
+from retrieve.indexing.kmeans import KMeans
+from retrieve.indexing.quantize import quantize_int8_global
+from retrieve.interfaces import SILVERTORCH_BACKENDS
+from retrieve.modules.knn import FullScanKNN
+from retrieve.modules.silvertorch import (
+    OfficialConfig,
+    PreparedFilter,
+    SilverTorch,
+    SilverTorchBuilder,
+)
+from tests.conftest import (
+    assert_recall_monotone,
+    assert_topk_id_sets_match,
+    make_attrs,
+    make_index,
+    make_query,
+    make_query_attrs,
+    recall_at_k,
+    require_official,
+)
+from tests.parity.conftest import assert_ids_equal_up_to_ties
+
+N, D, B, K = 4096, 128, 16, 64
+N_LISTS, N_PROBE = 64, 8
+M_BITS, K_HASH = 512, 5
+C, A_MAX = 2, 2
+
+BACKENDS = list(SILVERTORCH_BACKENDS)
+INT32 = OfficialConfig(score_path="int32")
+
+
+@pytest.fixture(scope="module")
+def data():
+    embs = make_index(N, D)
+    query = make_query(B, D)
+    attrs = make_attrs(N, c=C, a_max=A_MAX)
+    q_attrs = make_query_attrs(B, c=C)
+    return {"embs": embs, "query": query, "attrs": attrs, "q_attrs": q_attrs}
+
+
+def _build(with_attrs: bool, data, backend: str, **overrides):
+    require_official()
+    kw = {
+        "k": K,
+        "n_lists": N_LISTS,
+        "n_probe": N_PROBE,
+        "filter_mode": "bloom",
+        "m_bits": M_BITS,
+        "k_hash": K_HASH,
+        "n_iter": 3,
+        "backend": backend,
+    }
+    kw.update(overrides)
+    m = SilverTorch(**kw)
+    m.register_index(data["embs"], data["attrs"] if with_attrs else None)
+    return m
+
+
+def _build_no_bloom(data, backend: str, **overrides):
+    require_official()
+    kw = {"k": K, "n_lists": N_LISTS, "n_probe": N_PROBE, "n_iter": 3, "backend": backend}
+    kw.update(overrides)
+    m = SilverTorch(**kw)
+    m.register_index(data["embs"])
+    return m
+
+
+def _build_exact(data, backend: str, clause_is_reverse=None, **overrides):
+    require_official()
+    kw = {
+        "k": K,
+        "n_lists": N_LISTS,
+        "n_probe": N_PROBE,
+        "filter_mode": "exact",
+        "n_iter": 3,
+        "backend": backend,
+    }
+    kw.update(overrides)
+    m = SilverTorch(**kw)
+    m.register_index(data["embs"], data["attrs"], clause_is_reverse=clause_is_reverse)
+    return m
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+class TestShape:
+    def test_with_attrs(self, data, backend):
+        m = _build(with_attrs=True, data=data, backend=backend)
+        ids, scores = m(data["query"], m.prepare_queries(data["q_attrs"]))
+        assert ids.shape == (B, K)
+        assert scores.shape == (B, K)
+        assert ids.dtype == torch.long
+        assert scores.dtype == torch.float32
+
+    def test_without_attrs_bloom_configured(self, data, backend):
+        m = _build(with_attrs=False, data=data, backend=backend)
+        ids, _ = m(data["query"])
+        assert ids.shape == (B, K)
+
+    def test_no_bloom(self, data, backend):
+        m = _build_no_bloom(data, backend=backend)
+        ids, scores = m(data["query"])
+        assert ids.shape == (B, K)
+        assert scores.shape == (B, K)
+        assert ids.dtype == torch.long
+        assert scores.dtype == torch.float32
+
+    def test_exact_with_attrs(self, data, backend):
+        m = _build_exact(data, backend=backend)
+        ids, scores = m(data["query"], m.prepare_queries(data["q_attrs"]))
+        assert ids.shape == (B, K)
+        assert scores.shape == (B, K)
+        assert ids.dtype == torch.long
+        assert scores.dtype == torch.float32
+
+    def test_exact_without_attrs(self, data, backend):
+        """``filter_mode='exact'`` with ``prepared=None`` skips the filter branch and returns
+        plain IVF results."""
+        m = _build_exact(data, backend=backend)
+        ids, _ = m(data["query"])
+        assert ids.shape == (B, K)
+
+    def test_buffer_dtypes(self, data, backend):
+        m = _build_no_bloom(data, backend=backend)
+        assert m.item_codes.dtype == torch.int8
+        # The paper's per-tensor scale: one fp32 scalar, not a [N] gather.
+        assert m.global_scale.dtype == torch.float32
+        assert m.global_scale.shape == ()
+        assert m.centroids.dtype == torch.float32
+        # The cluster-sorted CSR (architecture.md § SilverTorch).
+        assert m.cluster_offsets.shape == (N_LISTS + 1,)
+        assert m.cluster_offsets.dtype == torch.int64
+        assert m.sort_perm.shape == (N,) and m.inv_perm.shape == (N,)
+        assert torch.equal(m.inv_perm[m.sort_perm], torch.arange(N, device="cuda"))
+        assert int(m.cluster_offsets[-1].item()) == N
+        assert torch.equal(m.cluster_offsets.diff(), m.cluster_sizes)
+        assert m._probe_width == int(m.cluster_sizes.topk(N_PROBE).values.sum())
+        assert torch.equal(m.item_codes, quantize_int8_global(data["embs"])[0][m.sort_perm])
+        # No filter → no filter buffers.
+        assert not hasattr(m, "bloom_index")
+        assert not hasattr(m, "item_clause_attrs")
+        assert not hasattr(m, "clause_is_reverse")
+
+    def test_buffer_dtypes_exact(self, data, backend):
+        m = _build_exact(data, backend=backend)
+        assert hasattr(m, "item_clause_attrs")
+        assert hasattr(m, "clause_is_reverse")
+        assert m.clause_is_reverse.dtype == torch.bool
+        assert m.clause_is_reverse.shape == (C,)
+        assert not hasattr(m, "bloom_index")
+        # The clause-major int32 slots over the cluster-sorted docs (kernels.md § cuda).
+        assert m.item_clause_attrs.dtype == torch.int32
+        assert m.item_clause_attrs.shape[1] == N
+        assert m.clause_slots.shape == (C + 1,)
+        assert int(m.clause_slots[-1]) == m.item_clause_attrs.shape[0]
+
+
+class TestParamValidation:
+    def test_invalid_bloom_params_rejected(self):
+        with pytest.raises(ValueError, match="power of 2"):
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="bloom", m_bits=500, k_hash=5)
+        with pytest.raises(ValueError, match="k_hash"):
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="bloom", m_bits=512, k_hash=0)
+
+    def test_partial_bloom_config_rejected(self):
+        with pytest.raises(ValueError, match="m_bits and k_hash"):
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="bloom", m_bits=512)
+        with pytest.raises(ValueError, match="m_bits and k_hash"):
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="bloom", k_hash=4)
+
+    def test_bloom_params_outside_bloom_filter_rejected(self):
+        with pytest.raises(ValueError, match="only apply to filter_mode='bloom'"):
+            SilverTorch(k=5, n_lists=8, n_probe=4, m_bits=512, k_hash=5)
+        with pytest.raises(ValueError, match="only apply to filter_mode='bloom'"):
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="exact", m_bits=512, k_hash=5)
+
+    def test_unknown_filter_rejected(self):
+        with pytest.raises(ValueError, match="filter_mode must be"):
+            SilverTorch(k=5, n_lists=8, n_probe=4, filter_mode="invalid")  # type: ignore[arg-type]
+
+    def test_unknown_backend_rejected(self):
+        """``SilverTorchBackend`` is ``cuda``; any other string raises."""
+        for backend in ("triton", "torch", "official", "official-fork"):
+            with pytest.raises(ValueError, match="unknown backend"):
+                SilverTorch(k=5, n_lists=8, n_probe=4, backend=backend)  # type: ignore[arg-type]
+
+    def test_invalid_ivf_params_rejected(self, data):
+        m = SilverTorch(k=5, n_lists=10_000, n_probe=4)
+        with pytest.raises(ValueError, match="n_lists"):
+            m.register_index(data["embs"])
+        m2 = SilverTorch(k=5, n_lists=8, n_probe=16)
+        with pytest.raises(ValueError, match="n_probe"):
+            m2.register_index(data["embs"])
+
+    def test_prepared_filter_without_filter_rejected(self, data):
+        m = _build_no_bloom(data, "cuda")
+        qa = torch.zeros(B, 1, dtype=torch.long, device="cuda")
+        with pytest.raises(ValueError, match="prepare_queries needs"):
+            m.prepare_queries(qa)
+        with pytest.raises(ValueError, match="a prepared filter requires"):
+            m(data["query"], PreparedFilter(query_attrs=qa))
+
+    def test_item_clause_attrs_without_filter_rejected(self, data):
+        m = SilverTorch(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3)
+        attrs = make_attrs(N, c=1, a_max=1, n_vocab=10)
+        with pytest.raises(ValueError, match="item_clause_attrs requires"):
+            m.register_index(data["embs"], item_clause_attrs=attrs)
+
+    def test_exact_requires_item_clause_attrs(self, data):
+        m = SilverTorch(k=K, n_lists=N_LISTS, n_probe=N_PROBE, filter_mode="exact", n_iter=3)
+        with pytest.raises(ValueError, match="requires item_clause_attrs"):
+            m.register_index(data["embs"])
+
+    def test_clause_is_reverse_rejected_outside_exact(self, data):
+        rev = torch.zeros(C, dtype=torch.bool, device="cuda")
+        m_bloom = SilverTorch(
+            k=K,
+            n_lists=N_LISTS,
+            n_probe=N_PROBE,
+            filter_mode="bloom",
+            m_bits=M_BITS,
+            k_hash=K_HASH,
+            n_iter=3,
+        )
+        with pytest.raises(ValueError, match="clause_is_reverse"):
+            m_bloom.register_index(data["embs"], data["attrs"], clause_is_reverse=rev)
+        m_none = SilverTorch(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3)
+        with pytest.raises(ValueError, match="clause_is_reverse"):
+            m_none.register_index(data["embs"], clause_is_reverse=rev)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+class TestEquivalence:
+    def test_query_clause_attrs_none_equals_no_bloom(self, data, backend):
+        """``prepared=None`` on a bloom-configured module ≡ a no-filter module: the same kmeans
+        seed gives identical centroids, and the filter branch is skipped at query time."""
+        st = _build(with_attrs=True, data=data, backend=backend)
+        nb = _build_no_bloom(data, backend=backend)
+
+        st_ids, st_scores = st(data["query"])
+        nb_ids, nb_scores = nb(data["query"])
+
+        for b in range(B):
+            assert sorted(st_ids[b].tolist()) == sorted(nb_ids[b].tolist())
+        st_sorted, _ = st_scores.sort(dim=1, descending=True)
+        nb_sorted, _ = nb_scores.sort(dim=1, descending=True)
+        assert torch.allclose(st_sorted, nb_sorted, atol=1e-3)
+
+    def test_exact_query_clause_attrs_none_equals_no_filter(self, data, backend):
+        """``prepared=None`` on an exact-configured module ≡ no-filter."""
+        ex = _build_exact(data, backend=backend)
+        nb = _build_no_bloom(data, backend=backend)
+
+        ex_ids, ex_scores = ex(data["query"])
+        nb_ids, nb_scores = nb(data["query"])
+
+        for b in range(B):
+            assert sorted(ex_ids[b].tolist()) == sorted(nb_ids[b].tolist())
+        ex_sorted, _ = ex_scores.sort(dim=1, descending=True)
+        nb_sorted, _ = nb_scores.sort(dim=1, descending=True)
+        assert torch.allclose(ex_sorted, nb_sorted, atol=1e-3)
+
+    def test_exact_all_inactive_query_equals_no_filter(self, data, backend):
+        """``query_clause_attrs == -1`` everywhere → the predicate is identically True → the
+        exact-mode results match the no-filter baseline."""
+        ex = _build_exact(data, backend=backend)
+        nb = _build_no_bloom(data, backend=backend)
+        qa = torch.full((B, C), -1, dtype=torch.long, device="cuda")
+
+        ex_ids, ex_scores = ex(data["query"], ex.prepare_queries(qa))
+        nb_ids, nb_scores = nb(data["query"])
+
+        for b in range(B):
+            assert sorted(ex_ids[b].tolist()) == sorted(nb_ids[b].tolist())
+        ex_sorted, _ = ex_scores.sort(dim=1, descending=True)
+        nb_sorted, _ = nb_scores.sort(dim=1, descending=True)
+        assert torch.allclose(ex_sorted, nb_sorted, atol=1e-3)
+
+
+class TestScorePath:
+    def test_default_fp16_ranks_like_int32(self, data):
+        """The default fp16 path against the int32 path: id sets at ``atol=rtol=1e-3`` (T2 bounds
+        the fp16 rounding at 2^-10 relative). The bit-exact gates are ``test_official.py``'s."""
+        fp16 = _build_exact(data, backend="cuda")
+        int32 = _build_exact(data, backend="cuda", official=INT32)
+        ids_h, sc_h = fp16(data["query"], fp16.prepare_queries(data["q_attrs"]))
+        ids_i, sc_i = int32(data["query"], int32.prepare_queries(data["q_attrs"]))
+        for b in range(B):
+            assert_topk_id_sets_match(ids_h, sc_h, ids_i, sc_i, b, atol=1e-3, rtol=1e-3)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+class TestRecallVsExact:
+    """SilverTorch paper claim: at sufficient probes, recall ≈ exact."""
+
+    def test_recall_at_full_probe(self, data, backend):
+        """When n_probe == n_lists, the IVF candidate set is the full index → recall ≈ 1."""
+        st = _build(with_attrs=False, data=data, n_probe=N_LISTS, backend=backend)
+        ids, _ = st(data["query"])
+
+        exact = FullScanKNN(k=K)
+        exact.register_index(data["embs"])
+        ex_ids, _ = exact(data["query"])
+
+        recall = recall_at_k(ids, ex_ids)
+        # int8 quantization can shuffle ties; allow modest slack.
+        assert recall >= 0.90, f"recall@{K} at full-probe = {recall:.3f}"
+
+    def test_recall_grows_with_probe(self, data, backend):
+        exact = FullScanKNN(k=K)
+        exact.register_index(data["embs"])
+        ex_ids, _ = exact(data["query"])
+
+        recalls = []
+        for nprobe in (1, 4, 16, N_LISTS):
+            m = _build_no_bloom(data, n_probe=nprobe, backend=backend)
+            ids, _ = m(data["query"])
+            recalls.append(recall_at_k(ids, ex_ids))
+        assert_recall_monotone(recalls)
+        assert recalls[-1] >= 0.85, recalls
+
+    def test_recall_at_full_probe_exact_inactive(self, data, backend):
+        """Exact mode at n_probe == n_lists with all clauses inactive → recall ≈ 1 (the predicate
+        always passes; only quantization noise vs FullScanKNN)."""
+        m = _build_exact(data, n_probe=N_LISTS, backend=backend)
+        qa = torch.full((B, C), -1, dtype=torch.long, device="cuda")
+        ids, _ = m(data["query"], m.prepare_queries(qa))
+
+        exact = FullScanKNN(k=K)
+        exact.register_index(data["embs"])
+        ex_ids, _ = exact(data["query"])
+        assert recall_at_k(ids, ex_ids) >= 0.90
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+class TestCandidates:
+    def test_candidate_ids_with_bloom(self, data, backend):
+        """The candidate-id path on a bloom-configured module: a pure re-rank, no filter."""
+        m = _build(with_attrs=True, data=data, k=2, backend=backend)
+        cand = torch.tensor([[10, 20, 30]] * B, dtype=torch.long, device="cuda")
+        ids, _ = m(data["query"], candidate_ids=cand)
+        allowed = {10, 20, 30}
+        assert all(i.item() in allowed for row in ids for i in row)
+
+    def test_candidate_ids_no_bloom(self, data, backend):
+        m = _build_no_bloom(data, k=2, backend=backend)
+        g = torch.Generator(device="cuda").manual_seed(7)
+        cand = torch.randint(0, N, (B, 16), generator=g, device="cuda")
+        ids, _ = m(data["query"], candidate_ids=cand)
+        assert ids.shape == (B, 2)
+        for b in range(B):
+            allowed = set(cand[b].tolist())
+            for j in range(2):
+                assert ids[b, j].item() in allowed
+
+    def test_candidate_ids_with_exact(self, data, backend):
+        """The candidate-id path on an exact-configured module: a pure re-rank, no filter."""
+        m = _build_exact(data, k=2, backend=backend)
+        cand = torch.tensor([[10, 20, 30]] * B, dtype=torch.long, device="cuda")
+        ids, _ = m(data["query"], candidate_ids=cand)
+        allowed = {10, 20, 30}
+        assert all(i.item() in allowed for row in ids for i in row)
+
+    def test_candidates_with_query_attrs_raises(self, data, backend):
+        """The candidate_ids path scores without the fused filter, so passing a prepared filter
+        alongside would be a silent filter-skip: it must raise."""
+        cand = torch.tensor([[10, 20, 30]] * B, dtype=torch.long, device="cuda")
+        for m in (
+            _build(with_attrs=True, data=data, k=2, backend=backend),
+            _build_exact(data, k=2, backend=backend),
+        ):
+            with pytest.raises(ValueError, match="not both"):
+                m(data["query"], m.prepare_queries(data["q_attrs"]), candidate_ids=cand)
+
+    def test_candidate_ids_pad_tail_never_scored(self, data, backend):
+        """``-1``-tailed candidate ids (what every compact producer emits) are padding: never
+        gathered (a raw ``-1`` would wrap to item ``N-1`` through ``inv_perm``), never scored,
+        never returned. Row ``b`` has ``2 + b`` real candidates out of ``P = 24``; with ``k = 8``
+        the first six rows end in ``-1`` / ``-inf``. The finite part equals a pad-free re-rank
+        of the same row (the int8 dot is exact in fp32, so bit-equal), and item ``N-1``,
+        excluded from every candidate list, never appears."""
+        k, p = 8, 24
+        m = _build_no_bloom(data, k=k, backend=backend)
+        g = torch.Generator(device="cuda").manual_seed(13)
+        cand = torch.randint(0, N - 1, (B, p), generator=g, dtype=torch.long, device="cuda")
+        n_valid = torch.arange(B, device="cuda") + 2
+        cand[torch.arange(p, device="cuda")[None, :] >= n_valid[:, None]] = -1
+        ids, scores = m(data["query"], candidate_ids=cand)
+        assert ids.shape == scores.shape == (B, k)
+        assert not (ids == N - 1).any(), "a -1 pad wrapped to the last item"
+        finite = torch.isfinite(scores)
+        assert torch.equal(ids >= 0, finite), "-1 ids exactly where scores are -inf"
+        for b in range(B):
+            nv = int(n_valid[b].item())
+            kk = min(k, nv)
+            assert int(finite[b].sum().item()) == kk
+            row = cand[b, :nv].unsqueeze(0)
+            ref_ids, ref_scores = m(data["query"][b : b + 1], candidate_ids=row)
+            assert torch.equal(scores[b, :kk], ref_scores[0, :kk])
+            assert_ids_equal_up_to_ties(
+                ids[b, :kk][None], ref_ids[0, :kk][None], scores[b, :kk][None]
+            )
+            assert set(ids[b, :kk].tolist()) <= set(row[0].tolist())
+
+    def test_candidate_ids_p_less_than_k(self, data, backend):
+        """``candidate_ids`` smaller than K: forward returns ``min(k, P)`` columns, no pad tail
+        and no sentinels (every score finite, every id a real candidate)."""
+        m = _build_no_bloom(data, backend=backend)
+        p = K // 2
+        g = torch.Generator(device="cuda").manual_seed(42)
+        cand = torch.randint(0, N, (B, p), generator=g, dtype=torch.long, device="cuda")
+        ids, scores = m(data["query"], candidate_ids=cand)
+        assert ids.shape == (B, p)
+        assert scores.shape == (B, p)
+        assert torch.isfinite(scores).all()
+        assert (ids >= 0).all()
+        for b in range(B):
+            allowed = set(cand[b].tolist())
+            for j in range(p):
+                assert int(ids[b, j].item()) in allowed
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+class TestStateDict:
+    """``load_state_dict`` re-derives the two Python-scalar caches the forwards read
+    (``_global_scale_f``, ``_probe_width``) from the loaded buffers, so a loaded index scores
+    exactly like the one that was saved."""
+
+    @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
+    def test_load_state_dict_rederives_cached_scalars(self, data, backend, filter_mode):
+        builders = {
+            "none": lambda: _build_no_bloom(data, backend=backend),
+            "bloom": lambda: _build(with_attrs=True, data=data, backend=backend),
+            "exact": lambda: _build_exact(data, backend=backend),
+        }
+        src = builders[filter_mode]()
+        # A deep copy has the saved module's buffer shapes; its buffers are then zeroed and its
+        # caches poisoned, so anything the load does not restore shows up.
+        twin = copy.deepcopy(src)
+        with torch.no_grad():
+            for buf in twin.buffers():
+                buf.zero_()
+        twin._global_scale_f = float("nan")
+        twin._probe_width = -1
+
+        twin.load_state_dict(src.state_dict())
+
+        assert twin._global_scale_f == src._global_scale_f
+        assert twin._probe_width == src._probe_width
+        for (name, a), (_, b) in zip(src.named_buffers(), twin.named_buffers(), strict=True):
+            assert torch.equal(a, b), name
+        qa = data["q_attrs"] if filter_mode != "none" else None
+        ids_s, sc_s = src(data["query"], None if qa is None else src.prepare_queries(qa))
+        ids_t, sc_t = twin(data["query"], None if qa is None else twin.prepare_queries(qa))
+        assert torch.equal(sc_s, sc_t)
+        for b in range(B):
+            assert_topk_id_sets_match(ids_t, sc_t, ids_s, sc_s, b, atol=0, rtol=0)
+
+
+class TestBuilder:
+    """``SilverTorchBuilder``: construct → register → ``.to(device)`` in one chain, and the
+    prebuilt path (``set_state_dict(sd).build()``) reproduces ``set_item_embeddings(x).build()``
+    for the same seed with no k-means: the buffers come from the state dict and the load hook
+    re-derives the two cached scalars."""
+
+    @staticmethod
+    def _builder(backend, filter_mode, **overrides):
+        kw = {"k": K, "n_lists": N_LISTS, "n_probe": N_PROBE, "n_iter": 3, "backend": backend}
+        if filter_mode == "bloom":
+            kw.update(m_bits=M_BITS, k_hash=K_HASH)
+        kw.update(filter_mode=filter_mode, **overrides)
+        return SilverTorchBuilder(**kw)
+
+    def _fresh(self, data, backend, filter_mode):
+        b = self._builder(backend, filter_mode).set_item_embeddings(data["embs"])
+        if filter_mode != "none":
+            b.set_item_attributes(data["attrs"])
+        return b.build()
+
+    @pytest.mark.parametrize("backend", BACKENDS)
+    @pytest.mark.parametrize("filter_mode", ["none", "bloom", "exact"])
+    def test_state_dict_reproduces_a_fresh_build(self, data, backend, filter_mode):
+        require_official()
+        src = self._fresh(data, backend, filter_mode)
+        twin = self._builder(backend, filter_mode).set_state_dict(src.state_dict()).build()
+        again = self._fresh(data, backend, filter_mode)
+        assert twin.build_timings == {} and set(src.build_timings) == set(again.build_timings)
+        assert list(twin.state_dict()) == list(again.state_dict())
+        for (name, a), (_, b) in zip(again.named_buffers(), twin.named_buffers(), strict=True):
+            assert torch.equal(a, b), name
+        assert twin._global_scale_f == again._global_scale_f
+        assert twin._probe_width == again._probe_width
+        qa = data["q_attrs"] if filter_mode != "none" else None
+        ids_a, sc_a = again(data["query"], None if qa is None else again.prepare_queries(qa))
+        ids_t, sc_t = twin(data["query"], None if qa is None else twin.prepare_queries(qa))
+        assert torch.equal(sc_a, sc_t)
+        assert_ids_equal_up_to_ties(ids_t, ids_a, sc_a)
+
+    def test_chain(self, data):
+        require_official()
+        rev = torch.tensor([True, False], dtype=torch.bool, device="cuda")
+        m = (
+            SilverTorchBuilder(k=K, n_lists=N_LISTS, n_probe=N_PROBE, n_iter=3, filter_mode="exact")
+            .set_item_embeddings(data["embs"])
+            .set_item_attributes(data["attrs"], rev)
+            .set_backend("cuda", official=INT32)
+            .set_device(torch.device("cuda"))
+            .build()
+        )
+        assert isinstance(m, SilverTorch) and m.backend == "cuda"
+        assert m.filter_mode == "exact" and m.official is INT32
+        assert torch.equal(m.clause_is_reverse, rev)
+        ids, _ = m(data["query"], m.prepare_queries(data["q_attrs"]))
+        assert ids.shape == (B, K)
+
+    def test_build_needs_exactly_one_source(self, data):
+        require_official()
+        b = self._builder("cuda", "none")
+        with pytest.raises(ValueError, match="exactly one"):
+            b.build()
+        b.set_item_embeddings(data["embs"]).set_state_dict({})
+        with pytest.raises(ValueError, match="exactly one"):
+            b.build()
+
+
+class TestKMeansInit:
+    """``kmeans_init`` reaches ``indexing.KMeans``; the default stays ``"random"`` (every
+    recorded number was taken on it)."""
+
+    def test_default_is_random(self):
+        require_official()
+        assert SilverTorch(k=1, n_lists=1, n_probe=1).kmeans_init == "random"
+
+    @pytest.mark.parametrize("backend", BACKENDS)
+    def test_kmeanspp_module(self, data, backend):
+        pp = _build_no_bloom(data, backend=backend, kmeans_init="kmeans++")
+        rnd = _build_no_bloom(data, backend=backend)
+        assert pp.kmeans_init == "kmeans++" and not torch.equal(pp.centroids, rnd.centroids)
+        assert pp.build_timings["kmeans_s"] > 0
+        ids, _ = pp(data["query"])
+        assert ids.shape == (B, K)
+        again = _build_no_bloom(data, backend=backend, kmeans_init="kmeans++")
+        assert torch.equal(again.centroids, pp.centroids)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_first_probe_is_the_kmeans_assignment(data, backend):
+    """The probe ranks centroids by the inner product ``KMeans.assign`` clusters by, so a
+    query's first probe is the cluster it would be assigned to."""
+    m = _build_no_bloom(data, backend=backend)
+    first = m._phase1_probe_ids(data["query"])[:, 0]
+    assert torch.equal(first, KMeans.assign(data["query"], m.centroids))
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+class TestEdgeCases:
+    def test_n_lists_equals_n(self, data, backend):
+        """Degenerate clustering (one item per cluster); full probe → recall ≈ 1."""
+        require_official()
+        small_n = 256
+        embs = data["embs"][:small_n]
+        m = SilverTorch(k=K, n_lists=small_n, n_probe=small_n, n_iter=2, backend=backend)
+        m.register_index(embs)
+        ids, _ = m(data["query"])
+
+        exact = FullScanKNN(k=K)
+        exact.register_index(embs)
+        ex_ids, _ = exact(data["query"])
+        # int8 quant + kmeans degeneracy can shuffle near-ties; allow modest slack.
+        assert recall_at_k(ids, ex_ids) >= 0.85
+
+
+class TestFewSurvivorsSentinel:
+    """``-inf`` slots carry the ``-1`` id (``interfaces.py`` names ``-1 / -inf`` as the paired "no
+    item" sentinels), so on a row with fewer than K survivors the ``ids`` tensors compare
+    directly. The index is built so the survivor count is known: one
+    clause, one attribute slot, a value carried by exactly five items, and a query row asking
+    for a value no item carries."""
+
+    K_SMALL = 8
+    N_SMALL = 1024
+
+    @pytest.fixture(scope="class")
+    def few(self):
+        embs = make_index(self.N_SMALL, D, seed=11)
+        attrs = torch.full((self.N_SMALL, 1, 1), 7, dtype=torch.long, device="cuda")
+        attrs[:5, 0, 0] = 3  # exactly five items carry value 3, fewer than K_SMALL
+        # rows: 5 survivors / every item / no item at all.
+        q_attrs = torch.tensor([[3], [7], [99]], dtype=torch.long, device="cuda")
+        return {"embs": embs, "attrs": attrs, "q_attrs": q_attrs, "query": make_query(3, D)}
+
+    def _build_few(self, few, filter_mode, backend):
+        require_official()
+        kw = {
+            "k": self.K_SMALL,
+            "n_lists": 8,
+            "n_probe": 8,
+            "n_iter": 3,
+            "filter_mode": filter_mode,
+            "backend": backend,
+            "official": INT32,
+        }
+        if filter_mode == "bloom":
+            kw.update(m_bits=M_BITS, k_hash=K_HASH)
+        m = SilverTorch(**kw)
+        m.register_index(few["embs"], few["attrs"])
+        return m
+
+    @pytest.mark.parametrize("backend", BACKENDS)
+    @pytest.mark.parametrize("filter_mode", ["exact", "bloom"])
+    def test_minus_one_at_inf_slots(self, few, filter_mode, backend):
+        m = self._build_few(few, filter_mode, backend)
+        ids, scores = m(few["query"], m.prepare_queries(few["q_attrs"]))
+
+        dead = ~torch.isfinite(scores)
+        assert dead.any(), "fixture no longer produces rows with fewer than K survivors"
+        assert torch.equal(ids[dead], torch.full_like(ids[dead], -1)), (
+            f"{filter_mode}: probe-pool ids left at -inf slots: {sorted(set(ids[dead].tolist()))}"
+        )
+        # The last query row asks for a value no item carries: the exact filter admits nobody.
+        if filter_mode == "exact":
+            assert bool(dead[2].all()), "row 2 should have no survivors at all"
+            assert torch.equal(ids[2], torch.full_like(ids[2], -1))

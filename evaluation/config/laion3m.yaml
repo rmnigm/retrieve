@@ -1,0 +1,17 @@
+# Written by `eval-data subset laion30m laion3m` (eval_datasets/subset.py): laion30m's config on the seeded row subset data/laion3m (docs/system/datasets.md § Subsets).
+data_dir: data/laion3m
+content_dir: content_d256
+dims: [256]
+users_limit: 10000
+filters:
+  attrs: item_attrs_narrow.pt
+  reverse: clause_is_reverse_narrow.pt
+  clause:
+    c0_domain: [0]
+    c3_domain_reverse: [3]
+    tags4: [1, 2, 4, 5]
+    all_fwd: [0, 1, 2, 4, 5]
+  bloom:
+    c0_domain: [0]
+    tags4: [1, 2, 4, 5]
+    all_fwd: [0, 1, 2, 4, 5]

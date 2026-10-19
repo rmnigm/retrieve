@@ -1,0 +1,737 @@
+"""CPU-only tests for ``bench.config``'s matrix.
+
+Fixture side (``tests/data/``): job counts and keys per suite, the PATHS collapse and
+``None``-path skips, ``disabled: true`` sweeps, the ``build:`` / ``query:`` split (a job is
+one build carrying its query combos; ``n_probe > n_lists`` combos are dropped per build),
+the seeds rule, ``{dim}`` templating (string and per-dim mapping), the CLI narrows, and the
+``ConfigError`` messages. Real side: expanding ``config/goodreads.yaml`` / ``config/arxiv.yaml``
+with ``config/suites.yaml`` gives the pinned cells (algos × backends × sweeps × ks × batch
+sizes) per suite and dataset.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+from collections import Counter
+from pathlib import Path
+
+import pytest
+import yaml
+
+from bench import cli, config, run
+from bench.algos import official_config
+from bench.config import NONE_SWEEP, ConfigError, interleave_units, load_dataset, load_matrix
+from bench.records import resume_key
+from eval_datasets import synth_filter
+
+FIX = Path(__file__).parent / "data"
+CFG = Path(__file__).resolve().parents[2] / "config"
+MINI, TEXT, SUITES = FIX / "mini.yaml", FIX / "text.yaml", FIX / "suites.yaml"
+REAL_SUITES = yaml.safe_load((CFG / "suites.yaml").read_text())
+_SHIPPED: dict[Path, dict] = {}
+
+
+@pytest.fixture(autouse=True)
+def _parse_shipped_once(monkeypatch):
+    """The shipped ``suites.yaml`` is ~0.3 s of pure-Python YAML and ~600 cases below expand it:
+    each read-only ``config/*.yaml`` is parsed once per session, every reader gets a deep copy."""
+    real = config._read
+
+    def read(path):
+        path = Path(path).resolve()
+        if path.parent != CFG:
+            return real(path)
+        if path not in _SHIPPED:
+            _SHIPPED[path] = real(path)
+        return copy.deepcopy(_SHIPPED[path])
+
+    monkeypatch.setattr(config, "_read", read)
+
+
+# ----- dataset files ----------------------------------------------------------------
+
+
+def test_load_dataset_templates_and_derived_paths():
+    ds = load_dataset(MINI, 32)
+    assert ds.name == "mini" and ds.dim == 32
+    assert ds.checkpoint == Path("data/mini/checkpoints/d32/best_model.pt")
+    assert ds.content_dir is None and ds.users_limit == 100
+    assert ds.encode == {"batch_size": 8, "num_workers": 0, "max_seq_length": 20}
+    assert ds.attrs == Path("data/mini/item_attrs_narrow.pt")
+    assert ds.reverse == Path("data/mini/clause_is_reverse_narrow.pt")
+    assert ds.gt_dir == Path("data/mini/gt_d32")
+    # c9_off is disabled → gone here, once, not at every consumer.
+    assert ds.clauses == {"clause": {"c0": (0,), "c0c1": (0, 1)}, "bloom": {"c0": (0,)}}
+
+
+def test_load_dataset_per_dim_mapping():
+    assert load_dataset(TEXT, 16).content_dir == Path("data/text/content_d16")
+    ds = load_dataset(TEXT, 32)
+    assert ds.content_dir == Path("data/text/content") and ds.checkpoint is None
+    assert ds.attrs is None and ds.clauses == {}
+    with pytest.raises(ConfigError, match="dim 64 not in dims"):
+        load_dataset(TEXT, 64)
+
+
+@pytest.mark.parametrize("parent", ["goodreads", "arxiv"])
+def test_synth_dataset_shares_the_parents_inputs(parent):
+    """``<parent>-synth.yaml``: the parent's items, queries, encoder (so its encode cache) and
+    users_limit; the synth attrs and query attrs; sweep names disjoint from the parent's in
+    the shared ``gt_d{dim}``."""
+    dim = load_dataset(CFG / f"{parent}.yaml", 128).dim
+    p, s = (load_dataset(CFG / f"{n}.yaml", dim) for n in (parent, f"{parent}-synth"))
+    for f in ("dim", "data_dir", "checkpoint", "content_dir", "users_limit", "encode", "inputs"):
+        assert getattr(s, f) == getattr(p, f), f
+    assert s.gt_dir == p.gt_dir and s.name == f"{parent}-synth"
+    assert (s.attrs.name, s.query_attrs.name, s.reverse) == (
+        "item_attrs_synth.pt",
+        "query_attrs_synth.pt",
+        None,
+    )
+    assert p.query_attrs == p.data_dir / "eval_split.parquet"
+    names = ["p0001", "p0003", "p001", "p003", "p005", "p01", "p02", "p03", "p05", "p1"]
+    assert len(names) == len(synth_filter.RATES)
+    want = {r: (j,) for j, r in enumerate(names)}
+    assert s.clauses == {"clause": want, "bloom": want}
+    assert not {sw for fk in p.clauses.values() for sw in fk} & set(want)
+
+
+def test_load_dataset_rejects_bad_files(tmp_path):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("data_dir: d\ndims: [16]\ncheckpoint: c\ncontent_dir: x\n")
+    with pytest.raises(ConfigError, match="exactly one of checkpoint / content_dir"):
+        load_dataset(bad, 16)
+    bad.write_text("data_dir: d\ndims: [16]\ncheckpoint: c\nsplit: test\n")
+    with pytest.raises(ConfigError, match=r"unknown keys \['split'\]"):
+        load_dataset(bad, 16)
+    bad.write_text(
+        "data_dir: d\ndims: [16]\ncheckpoint: c\nfilters: {attrs: a, clause: {s: [0, x]}}\n"
+    )
+    with pytest.raises(ConfigError, match="clause/s: clauses must be ints"):
+        load_dataset(bad, 16)
+    bad.write_text("data_dir: d\ndims: [16]\ncheckpoint: c\nusers_limit: 0\n")
+    with pytest.raises(ConfigError, match="users_limit"):
+        load_dataset(bad, 16)
+
+
+# ----- suite expansion on the fixture --------------------------------------------------
+
+
+def _counts(jobs, *fields):
+    return Counter(tuple(getattr(j, f) for f in fields) for j in jobs)
+
+
+def test_quality_suite_collapses_same_path_backends():
+    jobs = load_matrix(MINI, SUITES, "quality")
+    # per dim: linr_v1 [triton, torch] → 1 (cublas), linr_v3 → 2, silvertorch → 1.
+    assert len(jobs) == 2 * (1 + 2 + 1)
+    assert _counts(jobs, "algo", "backend", "path") == Counter(
+        {
+            ("linr_v1_filter_mask", "triton", "cublas"): 2,
+            ("linr_v3", "triton", "triton"): 2,
+            ("linr_v3", "torch", "torch"): 2,
+            ("silvertorch", "cuda", "cuda"): 2,
+        }
+    )
+    j = jobs[0]
+    assert (j.filter_kind, j.sweep, j.clauses, j.seed) == ("none", NONE_SWEEP, None, 0)
+    assert j.ks == (10, 50) and j.batch_sizes == (1,) and j.build == {} and j.query == ({},)
+    assert j.bloom == {"m_bits": 64, "k_hash": 3}  # top-level default, no suite override
+    assert j.cells() == [{}]
+    assert j.key() == {
+        "dataset": "mini",
+        "dim": 16,
+        "inputs": "d16",
+        "suite": "quality",
+        "filter_kind": "none",
+        "sweep": NONE_SWEEP,
+        "algo": "linr_v1_filter_mask",
+        "backend": "triton",
+        "params": {},
+        "seed": 0,
+    }
+    assert j.group == ("mini", 16, "linr_v1_filter_mask", "triton")
+    # Jobs come out grouped by the process boundary.
+    groups = [j.group for j in jobs]
+    assert groups == sorted(groups, key=groups.index)  # each group contiguous
+
+
+def test_filter_suite_arms_sweeps_and_seeds():
+    jobs = load_matrix(MINI, SUITES, "filter")
+    # (fk, sweep) pairs per dim: clause c0, c0c1 (c9_off disabled) + bloom c0 = 3. Per pair and
+    # seed: linr_v2 2 paths on the 2 clause pairs; linr_v3 (sweeps [c0]) on clause c0;
+    # silvertorch cuda on 3 → 4 + 1 + 3 = 8 per dim and seed (LiNR runs no bloom cell: PATHS is
+    # None there).
+    assert len(jobs) == 2 * 3 * 8
+    assert _counts(jobs, "dim", "filter_kind", "sweep") == Counter(
+        {
+            (d, fk, sw): n
+            for d in (16, 32)
+            for (fk, sw), n in {
+                ("clause", "c0"): 12,
+                ("clause", "c0c1"): 9,
+                ("bloom", "c0"): 3,
+            }.items()
+        }
+    )
+    assert {j.seed for j in jobs} == {0, 1, 2}
+    assert {j.sweep for j in jobs if j.algo == "linr_v3"} == {"c0"}
+    assert all(j.ks == (10, 50) and j.batch_sizes == (1, 2) for j in jobs)
+    assert {j.clauses for j in jobs if j.sweep == "c0c1"} == {(0, 1)}
+    keys = [(j.dim, j.algo, j.backend, j.filter_kind, j.sweep, j.seed) for j in jobs]
+    assert len(set(keys)) == len(jobs)
+
+
+def test_widths_compile_frac_ks_by_sweep_and_empty_slots():
+    jobs = load_matrix(MINI, SUITES, "widths")
+    st_bloom = [
+        j for j in jobs if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "cuda", "bloom")
+    ]
+    # m_bits gridded: the job's bloom carries it, the suite default fills k_hash.
+    assert [(j.build, j.bloom) for j in st_bloom] == [
+        ({"m_bits": 64}, {"m_bits": 64, "k_hash": 3}),
+        ({"m_bits": 256}, {"m_bits": 256, "k_hash": 3}),
+    ]
+    # Not gridded: the key's params stay {} and the bloom is the default, as before.
+    plain = [
+        j for j in jobs if (j.algo, j.backend, j.filter_kind) == ("silvertorch", "cuda", "clause")
+    ]
+    assert plain and all(j.build == {} for j in plain)
+    assert all(j.bloom == {"m_bits": 64, "k_hash": 3} for j in plain)
+    compiled = [j for j in jobs if j.backend == "torch" and j.algo == "linr_v1_filter_mask"]
+    assert compiled and all(j.build == {"compile": "max-autotune"} for j in compiled)
+    v3 = [j for j in jobs if j.algo == "linr_v3"]
+    assert v3 and all(j.query == ({"candidate_pool_frac": 0.1},) for j in v3)
+    assert not any(j.algo == "linr_v2" for j in jobs)  # `datasets: {}` runs nowhere
+    assert {j.sweep: j.ks for j in jobs if j.filter_kind == "clause"} == {
+        "c0": (10, 50),
+        "c0c1": (10,),
+    }
+    assert {j.seed for j in jobs if j.sweep == "c0"} == {0}
+    assert {j.seed for j in jobs if j.sweep == "c0c1"} == {0, 2}
+    assert not any(j.narrowed for j in jobs)
+    narrowed = load_matrix(MINI, SUITES, "widths", ks=[10])
+    assert {j.sweep: j.narrowed for j in narrowed if j.filter_kind == "clause"} == {
+        "c0": True,
+        "c0c1": False,  # --k 10 is that sweep's own list
+    }
+
+
+def test_deep_suite_build_query_split():
+    jobs = load_matrix(MINI, SUITES, "deep")
+    st = [j for j in jobs if j.algo == "silvertorch"]
+    v3 = [j for j in jobs if j.algo == "linr_v3"]
+    # silvertorch: 2 builds × 2 seeds; n_probe ∈ {4, 16, 64} valid per build: {4} | {4, 16, 64}.
+    assert len(st) == 4 and len(v3) == 2 and len(jobs) == 6
+    by_build = {(j.build["n_lists"], j.seed): j.query for j in st}
+    assert by_build[8, 0] == ({"n_probe": 4},)
+    assert by_build[64, 1] == ({"n_probe": 4}, {"n_probe": 16}, {"n_probe": 64})
+    assert st[-1].cells() == [
+        {"n_lists": 64, "n_probe": 4},
+        {"n_lists": 64, "n_probe": 16},
+        {"n_lists": 64, "n_probe": 64},
+    ]
+    assert st[-1].key({"n_lists": 64, "n_probe": 16})["params"] == {"n_lists": 64, "n_probe": 16}
+    assert v3[0].build == {} and v3[0].query == ({"candidate_pool": 20}, {"candidate_pool": 40})
+    assert {j.dim for j in jobs} == {32} and {j.seed for j in jobs} == {0, 1}
+    assert {j.filter_kind for j in st} == {"bloom"} and {j.filter_kind for j in v3} == {"clause"}
+    assert jobs[0].bloom == {"m_bits": 128, "k_hash": 3}  # suite override on top of the default
+
+
+def test_codesign_suite_is_one_bloom_arm():
+    jobs = load_matrix(MINI, SUITES, "codesign")
+    assert [(j.backend, j.filter_kind, j.build) for j in jobs] == [
+        ("cuda", "bloom", {"n_lists": 8})
+    ]
+    assert jobs[0].query == ({"n_probe": 4}, {"n_probe": 8})
+    assert jobs[0].key({"n_lists": 8, "n_probe": 4})["params"] == {"n_lists": 8, "n_probe": 4}
+
+
+def test_bloom_path_is_a_config_error():
+    """The partial-vs-full ablation left with Meta's code as published."""
+    with pytest.raises(ConfigError, match="bloom_path left with"):
+        load_matrix(MINI, SUITES, "bad_bloom_path")
+
+
+def test_narrows_apply_before_collapse():
+    jobs = load_matrix(
+        MINI,
+        SUITES,
+        "quality",
+        dims=[16],
+        backends=["torch"],
+        algos=["linr_v1_filter_mask", "silvertorch"],
+    )  # silvertorch has no torch path: only the cuBLAS job, labelled torch
+    assert [(j.algo, j.backend, j.path) for j in jobs] == [
+        ("linr_v1_filter_mask", "torch", "cublas"),
+    ]
+    jobs = load_matrix(MINI, SUITES, "filter", sweeps=["c0c1"], seeds=[1], ks=[10], batch_sizes=[2])
+    # per dim: linr_v2 on two paths + silvertorch triton (no bloom c0c1, linr_v3 is c0-only)
+    assert len(jobs) == 6 and all(j.sweep == "c0c1" and j.seed == 1 for j in jobs)
+    jobs = load_matrix(
+        MINI, SUITES, "filter", sweeps=["c0"], dims=[32], seeds=[1], ks=[10], batch_sizes=[2]
+    )
+    # linr_v2 on two paths, linr_v3, silvertorch clause + bloom
+    assert len(jobs) == 5 and all(
+        j.ks == (10,) and j.batch_sizes == (2,) and j.seed == 1 for j in jobs
+    )
+
+
+def test_ks_and_batch_sizes_narrows_mark_jobs_narrowed():
+    """``--k`` / ``--bs`` replace the suite's lists (ks [10, 50], batch_sizes [1, 2] in the
+    filter suite): a different set is ``narrowed`` (→ ``partial`` records); the same set,
+    in any order, is not. Cell-selecting narrows never are."""
+    assert not any(j.narrowed for j in load_matrix(MINI, SUITES, "filter"))
+    assert not any(j.narrowed for j in load_matrix(MINI, SUITES, "filter", dims=[16], seeds=[0]))
+    assert not any(j.narrowed for j in load_matrix(MINI, SUITES, "filter", ks=[50, 10]))
+    assert not any(j.narrowed for j in load_matrix(MINI, SUITES, "filter", batch_sizes=[2, 1]))
+    assert all(j.narrowed for j in load_matrix(MINI, SUITES, "filter", ks=[10]))
+    assert all(j.narrowed for j in load_matrix(MINI, SUITES, "filter", batch_sizes=[2]))
+    assert all(j.narrowed for j in load_matrix(MINI, SUITES, "filter", ks=[10, 50, 99]))
+
+
+def test_suite_errors_are_named():
+    with pytest.raises(ConfigError, match="no suite 'nope'"):
+        load_matrix(MINI, SUITES, "nope")
+    with pytest.raises(ConfigError, match="dataset 'text' not in"):
+        load_matrix(TEXT, SUITES, "filter")
+    with pytest.raises(ConfigError, match="query params.*misplaced: build=\\['n_probe'\\]"):
+        load_matrix(MINI, SUITES, "bad_params")
+    with pytest.raises(ConfigError, match="--k"):
+        load_matrix(MINI, SUITES, "quality", ks=[0])
+
+
+@pytest.mark.parametrize(
+    ("arms", "match"),
+    [
+        (
+            "[{algo: silvertorch, backends: [cuda], build: {m_bits: [64]}}]",
+            "silvertorch/bloom only",
+        ),
+        (
+            "[{algo: silvertorch, backends: [cuda], build: {compile: [max-autotune]}}]",
+            "torch arms only",
+        ),
+        (
+            "[{algo: linr_v3, backends: [torch], build: {compile: [default]}}]",
+            "torch arms only",
+        ),
+        (
+            "[{algo: silvertorch, backends: [cuda], query: {candidate_pool_frac: [0.1]}}]",
+            "linr_v3",
+        ),
+        ("[{algo: linr_v2, backends: [triton], sweeps: [nope]}]", r"sweeps \['nope'\] not in mini"),
+        (
+            "[{algo: linr_v2, backends: [triton]}, {algo: linr_v2, backends: [triton]}]",
+            "a cell twice",
+        ),
+        ("[{algo: linr_v2, backends: [triton], datasets: {other: {}}}]", "datasets \\['other'\\]"),
+        (
+            "[{algo: linr_v2, backends: [triton], filter_kinds: [exact]}]",
+            "filter_kinds \\['exact'\\]",
+        ),
+        ("[{algo: linr_v9, backends: [triton]}]", "unknown algo 'linr_v9'"),
+        (
+            "[{algo: linr_v1_filter_mask, backends: [triton]},"
+            " {algo: linr_v1_filter_mask, backends: [torch], filter_kinds: [none]}]",
+            None,  # the cuBLAS path collapses across arms, logged, not an error
+        ),
+    ],
+)
+def test_arm_errors_are_named(tmp_path, arms, match):
+    suites = tmp_path / "suites.yaml"
+    suites.write_text(
+        "s:\n  datasets: [mini]\n  filter_kinds: [none, clause, bloom]\n  ks: [10]\n"
+        f"  batch_sizes: [1]\n  arms: {arms}\n"
+    )
+    if match is None:
+        jobs = load_matrix(MINI, suites, "s", filter_kinds=["none"])
+        assert [(j.algo, j.backend, j.path) for j in jobs] == [
+            ("linr_v1_filter_mask", "triton", "cublas")
+        ] * 2
+        return
+    with pytest.raises(ConfigError, match=match):
+        load_matrix(MINI, suites, "s")
+
+
+# the real grid
+
+GRID = {  # (suite, dataset): (jobs, cells), the final run's sizing input; change it deliberately
+    ("filter", "goodreads"): (39, 51),
+    ("filter", "arxiv"): (45, 63),
+    ("filter", "pubmed"): (39, 54),
+    ("deep", "goodreads"): (1, 8),
+    ("deep", "arxiv"): (3, 21),
+    ("synth", "goodreads-synth"): (40, 54),
+    ("synth", "arxiv-synth"): (20, 20),
+    ("synth", "arxiv-corr-synth"): (6, 12),
+    ("c3", "goodreads-synth"): (18, 18),
+    ("c3", "arxiv-synth"): (12, 12),
+    ("c3", "laion30m-synth"): (6, 6),
+    ("c3-real", "goodreads"): (6, 6),
+    ("c3-real", "arxiv"): (6, 6),
+    ("c3-real", "pubmed"): (6, 6),
+    ("codesign", "arxiv"): (3, 9),  # one bloom arm (6 / 18 with bloom_path)
+    ("codesign", "goodreads"): (1, 3),
+    ("h2h", "goodreads"): (4, 4),
+    ("h2h", "arxiv"): (4, 4),
+    ("bloomwidth", "goodreads"): (2, 2),
+    ("bloomwidth", "arxiv"): (6, 6),
+    ("bloomwidth", "pubmed"): (2, 2),
+    ("bloomwidth-timed", "goodreads"): (1, 1),
+    ("bloomwidth-timed", "arxiv"): (3, 3),
+    ("bloomwidth-timed", "pubmed"): (1, 1),
+    ("v3bits", "goodreads-synth"): (14, 28),
+    ("v3bits", "goodreads"): (6, 12),
+    ("v3bits", "pubmed"): (6, 12),
+    ("laion30m", "laion30m"): (4, 4),
+    ("laion30m-synth", "laion30m-synth"): (18, 18),
+    ("codesign-laion30m", "laion30m"): (2, 4),
+    ("laion30m-x", "laion30m"): (4, 4),
+    ("c7-scorepath", "laion30m"): (4, 8),
+    ("nsweep-synth", "laion1m-synth"): (18, 18),
+    ("nsweep-synth", "laion3m-synth"): (18, 18),
+    ("nsweep-synth", "laion10m-synth"): (18, 18),
+    ("nsweep-synth", "laion30m-synth"): (18, 18),
+    ("nsweep-synth", "arxiv-synth"): (18, 18),
+    ("nsweep", "laion1m"): (4, 4),
+    ("nsweep", "laion3m"): (4, 4),
+    ("nsweep", "laion10m"): (4, 4),
+    ("nsweep", "laion30m"): (4, 4),
+    ("nsweep-codesign", "laion1m"): (2, 4),
+    ("nsweep-codesign", "laion3m"): (2, 4),
+    ("nsweep-codesign", "laion10m"): (2, 4),
+    ("nsweep-codesign", "laion30m"): (2, 4),
+    ("seeds-c1", "arxiv-synth"): (12, 12),
+    ("seeds-c1-laion30m", "laion30m-synth"): (12, 12),
+    ("seeds-c7", "laion30m"): (12, 24),
+}
+KEPT = {
+    "goodreads": {"c0_genre", "c1_lang_reverse", "all4"},
+    "arxiv": {"c3_nversions", "c0_maincat", "all4"},
+    "pubmed": {"c0_mesh", "c3_journal_reverse", "all5"},
+}
+SYNTH_N = {"goodreads-synth": 797_084, "arxiv-synth": 2_988_996, "arxiv-corr-synth": 2_988_996,
+           "laion30m-synth": 30_000_000}  # fmt: skip
+RATE = {"p0001": 0.001, "p0003": 0.003, "p001": 0.01, "p003": 0.03, "p005": 0.05, "p01": 0.1,
+        "p02": 0.2, "p03": 0.3, "p05": 0.5, "p1": 1.0,
+        "c001": 0.01, "c003": 0.03, "c01": 0.1}  # fmt: skip
+
+
+def _real(suite: str, dataset: str, **kw):
+    return load_matrix(CFG / f"{dataset}.yaml", CFG / "suites.yaml", suite, **kw)
+
+
+def test_grid_covers_every_suite_and_dataset():
+    listed = {(s, d) for s, v in REAL_SUITES.items() if isinstance(v, dict) and "datasets" in v
+              for d in v["datasets"]}  # fmt: skip
+    assert listed == set(GRID)
+
+
+@pytest.mark.parametrize(("suite", "dataset"), list(GRID))
+def test_grid_counts_and_invariants(suite, dataset):
+    """The job / cell counts and the final run's rules on every
+    expanded cell."""
+    jobs = _real(suite, dataset)
+    assert (len(jobs), sum(len(j.query) for j in jobs)) == GRID[suite, dataset]
+    cells = [(j, {**j.build, **q}) for j in jobs for q in j.query]
+    # seed 0 everywhere; seeds 0-2 in `filter` and in the `seeds-*` suites
+    want_seeds = {0, 1, 2} if suite == "filter" or suite.startswith("seeds-") else {0}
+    assert {j.seed for j in jobs} == want_seeds
+    bs64 = ("codesign-laion30m", "c7-scorepath", "nsweep-codesign", "seeds-c7", "tune-timed")
+    big = {64} if suite in bs64 else set()
+    assert all(set(j.batch_sizes) <= {1, 16} | big and set(j.ks) <= {100, 1000} for j in jobs)
+    if suite in ("filter", "deep", "synth", "codesign"):
+        assert all(j.batch_sizes == (1, 16) for j in jobs)
+    assert {j.algo for j in jobs} <= {
+        "linr_v1_filter_mask",
+        "linr_v2",
+        "linr_v3",
+        "silvertorch",
+        "postfilter",
+    }
+    # the cap: SilverTorch scans at most a quarter of the lists
+    for j, p in cells:
+        if j.algo == "silvertorch" and "n_probe" in p:
+            assert p["n_probe"] <= p.get("n_lists", 1024) // 4, (j.sweep, p)
+    assert not any(j.narrowed for j in jobs)
+    if suite in ("filter", "c3-real") and dataset in KEPT:
+        assert {j.sweep for j in jobs} == KEPT[dataset]
+    st_torch = {j.algo for j in jobs if j.backend == "torch" and j.algo == "silvertorch"}
+    assert not st_torch  # the torch arms are V1 / V2 (`c3`, `c3-real`, synth's V2 arms)
+    if suite in (
+        "synth",
+        "laion30m-synth",
+    ):  # k 1000 where N * p >= 4 * 1000; LAION synth at k 100
+        for j in jobs:
+            big_enough = SYNTH_N[dataset] * RATE[j.sweep] >= 4 * 1000
+            k100_only = dataset == "laion30m-synth"
+            assert (1000 in j.ks) == (big_enough and not k100_only), j.sweep
+    if suite == "synth":
+        torch_arms = {(j.algo, json.dumps(j.build)) for j in jobs if j.backend == "torch"}
+        assert torch_arms == {
+            "goodreads-synth": {
+                ("postfilter", "{}"),
+                ("linr_v2", "{}"),
+                ("linr_v2", '{"compile": "max-autotune"}'),
+            },
+            "arxiv-corr-synth": {("postfilter", "{}")},
+        }.get(dataset, set())
+        exact = {
+            j.algo
+            for j in jobs
+            if j.algo in ("linr_v1_filter_mask", "linr_v2") and j.backend == "triton"
+        }
+        assert exact == (
+            set() if dataset == "arxiv-corr-synth" else {"linr_v1_filter_mask", "linr_v2"}
+        )
+        assert any(j.algo == "linr_v3" for j in jobs) == (
+            dataset in ("goodreads-synth", "arxiv-corr-synth")
+        )
+        st = {(j.backend, j.filter_kind): tuple(q["n_probe"] for q in j.query)
+              for j in jobs if j.algo == "silvertorch"}  # fmt: skip
+        assert st == {
+            "goodreads-synth": {},
+            "arxiv-synth": {("cuda", "bloom"): (24,)},
+            "arxiv-corr-synth": {},
+        }[dataset]  # fmt: skip
+        if dataset == "arxiv-synth":  # nine rates
+            assert {j.sweep for j in jobs if j.algo == "linr_v2"} == {
+                "p0001", "p0003", "p001", "p003", "p005", "p01", "p02", "p05", "p1"
+            }  # fmt: skip
+
+
+IVF_ARXIV = ({"n_probe": 24}, {"n_probe": 256})
+
+
+def test_filter_suite_arms():
+    jobs = _real("filter", "arxiv", seeds=[0])
+    arms = {
+        (j.algo, j.backend, j.filter_kind, json.dumps(j.build), json.dumps(j.query)) for j in jobs
+    }
+    want = {
+        (a, "triton", "clause", "{}", json.dumps(({},)))
+        for a in ("linr_v1_filter_mask", "linr_v2", "linr_v3")
+    }
+    want.add(("postfilter", "torch", "clause", "{}", json.dumps(({"alpha": 1}, {"alpha": 8}))))
+    want.add(("silvertorch", "cuda", "bloom", '{"n_lists": 2048}', json.dumps(IVF_ARXIV)))
+    assert arms == want
+    ds = jobs[0].data
+    assert ds.users_limit == 10000 and ds.gt_dir == Path("data/arxiv-papers/gt_d128")
+    assert all(j.bloom == {"m_bits": 1024, "k_hash": 5} for j in jobs)
+
+
+def test_deep_suite_is_silvertorch_at_the_tuned_n_lists():
+    """F3: Meta's bloom along n_probe at the tune's n_lists, up to the n_lists / 4 cap."""
+    want = {"goodreads": (4096, 1024), "arxiv": (2048, 512)}
+    for dataset, (n_lists, top) in want.items():
+        jobs = _real("deep", dataset)
+        assert {(j.algo, j.backend, j.filter_kind) for j in jobs} == {
+            ("silvertorch", "cuda", "bloom")
+        }
+        assert {j.build["n_lists"] for j in jobs} == {n_lists}
+        probes = tuple(n for n in (8, 16, 32, 64, 128, 256, 512, 1024) if n <= top)
+        assert all(j.query == tuple({"n_probe": n} for n in probes) for j in jobs)
+
+
+def test_codesign_and_bloomwidth_suites():
+    cd = _real("codesign", "goodreads", seeds=[0])
+    assert {j.sweep for j in cd} == {"c0_genre"}
+    assert {(j.backend, j.build["n_lists"]) for j in cd} == {("cuda", 1024)}
+    assert not any("bloom_path" in j.build for j in cd)
+    assert {(j.ks, j.batch_sizes) for j in cd} == {((100,), (1, 16))}
+    bw = _real("bloomwidth", "pubmed", seeds=[0])
+    assert {j.sweep for j in bw} == {"c0_mesh"} and {j.backend for j in bw} == {"cuda"}
+    # only k_hash is gridded; m_bits stays the harness default
+    assert sorted(j.build["k_hash"] for j in bw) == [3, 5]
+    assert not any("m_bits" in j.build for j in bw)
+    timed = _real("bloomwidth-timed", "pubmed", seeds=[0])
+    assert {(j.ks, j.batch_sizes, j.bloom["k_hash"]) for j in timed} == {((100,), (16,), 5)}
+    assert not any(j.timed for j in bw) and all(j.timed for j in timed + cd)
+
+
+# Pinned resume keys: existing records must keep matching (docs/system/evaluation.md § Resume);
+# the filter cells of self_match datasets carry ``self_excluded`` (docs/system/evaluation.md
+# § Self-match).
+OLD_KEYS = [
+    ("filter", "arxiv", '{"algo":"linr_v3","backend":"triton","code_version":"CV","dataset":"arxiv","dim":128,"filter_kind":"clause","inputs":"content_d128","params":{},"seed":1,"self_excluded":true,"suite":"filter","sweep":"all4"}'),  # noqa: E501
+    ("filter", "goodreads", '{"algo":"postfilter","backend":"torch","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{"alpha":8},"seed":0,"suite":"filter","sweep":"c1_lang_reverse"}'),  # noqa: E501
+    ("filter", "goodreads", '{"algo":"linr_v1_filter_mask","backend":"triton","code_version":"CV","dataset":"goodreads","dim":128,"filter_kind":"clause","inputs":"sasrec-ssm-logq-d128","params":{},"seed":2,"suite":"filter","sweep":"all4"}'),  # noqa: E501
+    ("filter", "pubmed", '{"algo":"linr_v2","backend":"triton","code_version":"CV","dataset":"pubmed","dim":768,"filter_kind":"clause","inputs":"content_d768","params":{},"seed":0,"self_excluded":true,"suite":"filter","sweep":"all5"}'),  # noqa: E501
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("suite", "dataset", "key"), OLD_KEYS)
+def test_pinned_cells_keep_their_keys(suite, dataset, key):
+    new = {resume_key(j.key(p), "CV") for j in _real(suite, dataset) for p in j.cells()}
+    assert key in new
+
+
+DATASET_YAMLS = sorted(p for p in CFG.glob("*.yaml") if p.name != "suites.yaml")
+SUITE_NAMES = sorted(k for k, v in REAL_SUITES.items()
+                     if isinstance(v, dict) and "datasets" in v)  # fmt: skip
+
+
+def test_the_config_globs_found_the_shipped_files():
+    assert len(DATASET_YAMLS) >= 5 and len(SUITE_NAMES) >= 2, (DATASET_YAMLS, SUITE_NAMES)
+
+
+@pytest.mark.parametrize("suite", SUITE_NAMES)
+@pytest.mark.parametrize("dataset_yaml", DATASET_YAMLS, ids=lambda p: p.stem)
+def test_every_shipped_config_parses(dataset_yaml, suite):
+    """Every ``config/*.yaml`` against every suite through the real loader: a listed dataset
+    expands to jobs at each of its dims the suite runs; an unlisted one is refused by name
+    and still resolves at every dim it declares."""
+    spec = REAL_SUITES[suite]
+    if dataset_yaml.stem in spec["datasets"]:
+        jobs = load_matrix(dataset_yaml, CFG / "suites.yaml", suite)
+        assert jobs and all(j.dataset == dataset_yaml.stem for j in jobs)
+        dims = yaml.safe_load(dataset_yaml.read_text())["dims"]
+        assert {j.dim for j in jobs} == set(dims) & set(spec.get("dims", dims))
+        return
+    with pytest.raises(ConfigError, match=f"dataset {dataset_yaml.stem!r} not in"):
+        load_matrix(dataset_yaml, CFG / "suites.yaml", suite)
+    for dim in yaml.safe_load(dataset_yaml.read_text())["dims"]:
+        assert load_dataset(dataset_yaml, dim).dim == dim
+
+
+def test_interleave_groups_of_the_real_suites():
+    """The comparison groups ``--interleave`` times round-robin: h2h's two score paths per
+    (filter kind, seed), filter's V1 / V2 (codesign has none: one bloom path); a
+    group is per seed, and every arm keeps the key it has without ``--interleave``."""
+    units = interleave_units(_real("h2h", "goodreads"))
+    groups = [m for by, m in units if by]
+    assert len(groups) == len(units) == 2  # none + bloom, seed 0
+    for m in groups:
+        assert [(j.backend, j.build.get("score_path")) for j in m] == [
+            ("cuda", "fp16"), ("cuda", "int32")
+        ]  # fmt: skip
+        assert len({j.seed for j in m}) == 1 and all(j.query == ({"n_probe": 24},) for j in m)
+    assert [run.group_label(j, ("backend", "score_path")) for j in groups[0]] == [
+        "silvertorch/cuda/score_path=fp16", "silvertorch/cuda/score_path=int32",
+    ]  # fmt: skip
+    assert not any(by for by, _ in interleave_units(_real("codesign", "arxiv")))
+    fil = [m for by, m in interleave_units(_real("filter", "arxiv")) if by]
+    assert sorted({tuple(f"{j.algo}/{j.backend}" for j in m) for m in fil}) == [
+        ("linr_v1_filter_mask/triton", "linr_v2/triton"),
+    ]
+    assert cli._children(_real("filter", "arxiv"), True) == [
+        ("arxiv", 128, ("linr_v1_filter_mask", "linr_v2"), ("triton",)),
+        ("arxiv", 128, ("linr_v3",), ("triton",)),
+        ("arxiv", 128, ("silvertorch",), ("cuda",)),
+        ("arxiv", 128, ("postfilter",), ("torch",)),
+    ]
+    assert len(cli._children(_real("filter", "arxiv"), False)) == 5  # one per Job.group
+
+
+@pytest.mark.parametrize(
+    ("spec", "match"),
+    [
+        ("[{by: n_probe}]", "by is algo, backend or build params"),
+        ("[{by: [algo, backend], values: [x]}]", "one by field only"),
+        ("[{by: algo, extra: 1}]", "unknown keys"),
+    ],
+)
+def test_interleave_errors_are_named(tmp_path, spec, match):
+    suites = tmp_path / "suites.yaml"
+    suites.write_text(
+        "s:\n  datasets: [mini]\n  filter_kinds: [clause]\n  ks: [10]\n  batch_sizes: [1]\n"
+        f"  interleave: {spec}\n  arms: [{{algo: linr_v2, backends: [triton]}}]\n"
+    )
+    with pytest.raises(ConfigError, match=match):
+        load_matrix(MINI, suites, "s")
+
+
+def test_a_job_in_two_groups_is_a_config_error(tmp_path):
+    suites = tmp_path / "suites.yaml"
+    suites.write_text(
+        "s:\n  datasets: [mini]\n  filter_kinds: [clause]\n  ks: [10]\n  batch_sizes: [1]\n"
+        "  interleave: [{by: algo}, {by: backend}]\n  arms:\n"
+        "    - {algo: linr_v2, backends: [triton, torch]}\n"
+        "    - {algo: linr_v1_filter_mask, backends: [triton]}\n"
+    )
+    with pytest.raises(ConfigError, match="in two interleave groups"):
+        load_matrix(MINI, suites, "s")
+
+
+def test_score_path_is_a_silvertorch_build_param():
+    cfg = official_config("silvertorch", "none", "cuda", {"score_path": "int32"})
+    assert cfg.score_path == "int32"
+    assert official_config("silvertorch", "bloom", "cuda", {}) is None
+    with pytest.raises(ValueError, match="score_path applies to silvertorch on"):
+        official_config("silvertorch", "bloom", "triton", {"score_path": "int32"})
+
+
+# SilverTorch n_lists / n95 per dataset (the IVF tune, docs/system/evaluation.md § IVF tuning);
+# None = open
+IVF = {
+    "goodreads": (4096, 64),
+    "arxiv": (2048, 256),
+    "pubmed": (4096, 1024),
+}
+
+
+@pytest.mark.parametrize("dataset", list(IVF))
+def test_filter_silvertorch_runs_at_the_tuned_ivf(dataset):
+    """`filter` runs Meta's bloom at {24, n95} on the tuned n_lists; PubMed (0.95 out
+    of reach) at 24, c0_mesh's tuned 512 and the cap 1024."""
+    n_lists, n95 = IVF[dataset]
+    st = [j for j in _real("filter", dataset, seeds=[0]) if j.algo == "silvertorch"]
+    main = [j for j in st if j.build.get("n_lists") == n_lists]
+    want = {24, 512, 1024} if dataset == "pubmed" else {24, n95}
+    assert main and all({q["n_probe"] for q in j.query} == want for j in main)
+    extra = {
+        (j.sweep, j.build["n_lists"], tuple(q["n_probe"] for q in j.query))
+        for j in st
+        if j not in main
+    }
+    assert extra == set()
+
+
+@pytest.mark.parametrize("dataset", ["arxiv"])
+def test_synth_silvertorch_runs_on_the_real_datasets_ivf(dataset):
+    st = [j for j in _real("synth", f"{dataset}-synth", seeds=[0]) if j.algo == "silvertorch"]
+    assert st and {j.build["n_lists"] for j in st} == {IVF[dataset][0]}
+
+
+def test_v3bits_pubmed_is_clause_only_at_k_bits_256_and_768():
+    """V3-BITS-PUBMED: PubMed d768 at k_bits 256 and 768, clause only; goodreads keeps 64 / 128."""
+    pm = _real("v3bits", "pubmed")
+    assert {(j.dim, j.algo, j.backend, j.filter_kind) for j in pm} == {
+        (768, "linr_v3", "triton", "clause")
+    }
+    assert {j.build["k_bits"] for j in pm} == {256, 768}
+    assert {j.sweep for j in pm} == KEPT["pubmed"]
+    assert {q["candidate_pool_frac"] for j in pm for q in j.query} == {0.01, 0.05}
+    gr = _real("v3bits", "goodreads")
+    assert {j.build["k_bits"] for j in gr} == {64, 128}
+
+
+def test_normalize_is_off_for_pubmed_only(tmp_path):
+    """MedCPT scores by dot product: PubMed and its synth draws; every other
+    dataset is L2-normalised."""
+    off = {f.stem for f in sorted(CFG.glob("*.yaml"))
+           if f.stem != "suites" and not load_dataset(f, _ds_dim(f)).normalize}  # fmt: skip
+    assert off == {"pubmed", "pubmed-synth", "pubmed-synth-s1", "pubmed-synth-s2"}
+    bad = tmp_path / "x.yaml"
+    bad.write_text("data_dir: d\ncheckpoint: c.pt\ndims: [8]\nnormalize: false\n")
+    with pytest.raises(ConfigError, match="content_dir dataset only"):
+        load_dataset(bad, 8)
+    bad.write_text("data_dir: d\ncontent_dir: c\ndims: [8]\nnormalize: 0\n")
+    with pytest.raises(ConfigError, match="true or false"):
+        load_dataset(bad, 8)
+
+
+def _ds_dim(f: Path) -> int:
+    return yaml.safe_load(f.read_text())["dims"][0]
+
+
+def test_nsweep_codesign_scales_n_lists_to_the_30m_list_size():
+    """The fixed-d N-sweep: n_lists ~ N / 1,831 (30 M's 16384 lists) to a power of two
+    (the partial-vs-full mask ablation ran on Meta's code as published)."""
+    n_lists = {"laion1m": 512, "laion3m": 2048, "laion10m": 4096, "laion30m": 16384}
+    for ds, nl in n_lists.items():
+        assert not any(j.algo == "silvertorch" for j in _real("nsweep", ds))
+        cd = _real("nsweep-codesign", ds)
+        assert {(j.backend, j.build["n_lists"]) for j in cd} == {("cuda", nl)}

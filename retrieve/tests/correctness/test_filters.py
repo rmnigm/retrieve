@@ -1,0 +1,261 @@
+"""ExactAttributeFilter correctness — evaluate_mask + evaluate_indices."""
+
+from __future__ import annotations
+
+import pytest
+import torch
+
+from retrieve.functional import compact_mask
+from retrieve.modules import ExactAttributeFilter
+from retrieve.modules.bit_knn import OneBitKNN
+from tests.conftest import make_attrs, make_index, make_query, make_query_attrs
+
+
+def test_clause_index_and_or_semantics():
+    """Per-clause OR over attributes; AND across clauses."""
+    n = 200
+    attrs = torch.full((n, 2, 2), -1, dtype=torch.long, device="cuda")
+    attrs[:100, 0, 0] = 1
+    attrs[100:, 0, 0] = 2
+    attrs[:, 1, 0] = 50
+    # Some items in [50, 70) also carry clause-0 attr=3 → multi-value clause.
+    attrs[50:70, 0, 1] = 3
+
+    ci = ExactAttributeFilter()
+    ci.register_index(attrs)
+
+    q = torch.tensor(
+        [
+            [1, 50],  # items 0..99 ∩ all-have-50 → 0..99
+            [2, 50],  # items 100..199
+            [3, -1],  # items in [50, 70) (multi-value clause), any 2nd-clause
+            [-1, -1],  # both inactive → all
+        ],
+        dtype=torch.long,
+        device="cuda",
+    )
+    mask = ci.evaluate_mask(ci.prepare_queries(q))
+    assert mask.shape == (4, n)
+    assert mask[0, :100].all() and not mask[0, 100:].any()
+    assert mask[1, 100:].all() and not mask[1, :100].any()
+    assert mask[2, 50:70].all()
+    assert not mask[2, :50].any() and not mask[2, 70:].any()
+    assert mask[3].all()
+
+
+def test_evaluate_indices_matches_compact_evaluate_mask():
+    """The fused kernel path must produce the same passing-set as the dense path."""
+    n = 4096
+    attrs = make_attrs(n, c=3, a_max=4, n_vocab=20, pad_rate=0.3, seed=99)
+    ci = ExactAttributeFilter()
+    ci.register_index(attrs)
+    q = make_query_attrs(b=8, c=3, n_vocab=20, inactive_rate=0.2, seed=100)
+
+    expected_mask = ci.evaluate_mask(ci.prepare_queries(q))
+    expected_ids, expected_counts = compact_mask(expected_mask)
+
+    got_ids, got_counts = ci.evaluate_indices(ci.prepare_queries(q))
+
+    # counts must match exactly.
+    assert torch.equal(got_counts, expected_counts), (
+        f"counts mismatch: got {got_counts.tolist()} vs {expected_counts.tolist()}"
+    )
+
+    # ids per row must match as sets (kernel order is unspecified).
+    for b in range(q.shape[0]):
+        c = int(expected_counts[b].item())
+        exp_set = set(expected_ids[b, :c].tolist())
+        got_set = set(got_ids[b, :c].tolist())
+        assert exp_set == got_set, f"row {b} set mismatch (n_passing={c})"
+
+
+def test_evaluate_indices_with_reverse_clauses():
+    """Reverse clauses + inactive query slots both honored on the kernel path."""
+    n = 1024
+    attrs = make_attrs(n, c=2, a_max=3, n_vocab=10, pad_rate=0.2, seed=7)
+    is_reverse = torch.tensor([True, False], device="cuda")
+    ci = ExactAttributeFilter()
+    ci.register_index(attrs, clause_is_reverse=is_reverse)
+    q = make_query_attrs(b=4, c=2, n_vocab=10, inactive_rate=0.5, seed=8)
+
+    expected_mask = ci.evaluate_mask(ci.prepare_queries(q))
+    expected_ids, expected_counts = compact_mask(expected_mask)
+    got_ids, got_counts = ci.evaluate_indices(ci.prepare_queries(q))
+
+    assert torch.equal(got_counts, expected_counts)
+    for b in range(q.shape[0]):
+        c = int(expected_counts[b].item())
+        assert set(got_ids[b, :c].tolist()) == set(expected_ids[b, :c].tolist())
+
+
+def test_evaluate_indices_all_inactive_passes_all():
+    n = 256
+    attrs = make_attrs(n, c=2, a_max=2, n_vocab=8, pad_rate=0.0, seed=1)
+    ci = ExactAttributeFilter()
+    ci.register_index(attrs)
+    q = torch.full((3, 2), -1, dtype=torch.long, device="cuda")
+    cand, counts = ci.evaluate_indices(ci.prepare_queries(q))
+    assert torch.equal(counts, torch.full((3,), n, dtype=torch.int64, device="cuda"))
+    for b in range(3):
+        assert set(cand[b, :n].tolist()) == set(range(n))
+
+
+def test_clause_index_all_reverse():
+    """Every clause reverse → an item passes iff *no* clause attribute matches the query."""
+    n, c = 256, 2
+    attrs = make_attrs(n, c=c, a_max=2, n_vocab=20, pad_rate=0.0, seed=51)
+    is_reverse = torch.ones(c, dtype=torch.bool, device="cuda")
+    ci = ExactAttributeFilter().to("cuda")
+    ci.register_index(attrs, clause_is_reverse=is_reverse)
+
+    q = make_query_attrs(b=4, c=c, n_vocab=20, inactive_rate=0.0, seed=52)
+    mask = ci.evaluate_mask(ci.prepare_queries(q))
+
+    # Reference: a_match[r, b, n, c] := q[b, c] in attrs[n, c, :]
+    item = attrs.unsqueeze(0)  # [1, N, C, A]
+    qb = q.unsqueeze(1).unsqueeze(-1)  # [B, 1, C, 1]
+    matched = (item == qb).any(dim=-1)  # [B, N, C]
+    expected = (~matched).all(dim=-1)  # AND over reversed-clauses
+    assert torch.equal(mask, expected)
+
+
+def test_clause_index_single_item_index():
+    """N=1 — broadcast and the fused kernel both must handle the corner cleanly."""
+    attrs = torch.tensor([[[5, -1], [10, -1]]], dtype=torch.long, device="cuda")
+    ci = ExactAttributeFilter().to("cuda")
+    ci.register_index(attrs)
+    q = torch.tensor([[5, 10], [5, 11], [-1, -1]], dtype=torch.long, device="cuda")
+    mask = ci.evaluate_mask(ci.prepare_queries(q))
+    assert mask.shape == (3, 1)
+    assert mask[0, 0].item() is True or bool(mask[0, 0].item())  # both clauses match
+    assert not bool(mask[1, 0].item())  # second clause fails
+    assert bool(mask[2, 0].item())  # both inactive
+
+    ids, counts = ci.evaluate_indices(ci.prepare_queries(q))
+    assert counts.tolist() == [1, 0, 1]
+
+
+def test_evaluate_subset_matches_mask_gather():
+    """``evaluate_subset(q, ids)`` ≡ ``evaluate_mask(q).gather(1, ids)`` — direct
+    coverage incl. reverse clauses and -1-inactive query slots."""
+    n = 1024
+    attrs = make_attrs(n, c=3, a_max=3, n_vocab=15, pad_rate=0.2, seed=81)
+    is_reverse = torch.tensor([True, False, True], device="cuda")
+    ci = ExactAttributeFilter().to("cuda")
+    ci.register_index(attrs, clause_is_reverse=is_reverse)
+
+    q = make_query_attrs(b=8, c=3, n_vocab=15, inactive_rate=0.4, seed=82)
+    g = torch.Generator(device="cuda").manual_seed(83)
+    ids = torch.randint(0, n, (8, 128), generator=g, dtype=torch.long, device="cuda")
+
+    expected = ci.evaluate_mask(ci.prepare_queries(q)).gather(1, ids)
+    assert torch.equal(ci.evaluate_subset(ci.prepare_queries(q), ids), expected)
+
+
+def test_register_index_clause_is_reverse_keyword_only():
+    """clause_is_reverse is keyword-only on the unified FilterModule signature —
+    positional passes must TypeError instead of being accepted silently."""
+    attrs = make_attrs(64, c=2, a_max=2, n_vocab=10, pad_rate=0.0, seed=84)
+    rev = torch.zeros(2, dtype=torch.bool, device="cuda")
+    ci = ExactAttributeFilter().to("cuda")
+    with pytest.raises(TypeError):
+        ci.register_index(attrs, rev)
+
+
+def test_clause_index_evaluate_subset_p_zero():
+    n = 128
+    attrs = make_attrs(n, c=2, a_max=2, n_vocab=10, pad_rate=0.0, seed=61)
+    ci = ExactAttributeFilter().to("cuda")
+    ci.register_index(attrs)
+    q = make_query_attrs(b=4, c=2, n_vocab=10, inactive_rate=0.0, seed=62)
+    empty = torch.empty(4, 0, dtype=torch.long, device="cuda")
+    out = ci.evaluate_subset(ci.prepare_queries(q), empty)
+    assert out.shape == (4, 0)
+    assert out.dtype == torch.bool
+
+
+def test_one_bit_knn_with_filter_mask():
+    """Composition smoke: the exact filter's compacted mask feeds OneBitKNN's candidates path."""
+    n, d, b, k = 4096, 128, 8, 32
+    embs = make_index(n, d)
+    query = make_query(b, d)
+    attrs = make_attrs(n, c=3, a_max=3, n_vocab=40, pad_rate=0.2, seed=21)
+    q_attrs = make_query_attrs(b, c=3, n_vocab=40, inactive_rate=0.2, seed=22)
+
+    ci = ExactAttributeFilter().to("cuda")
+    ci.register_index(attrs)
+    clause_mask = ci.evaluate_mask(ci.prepare_queries(q_attrs))
+
+    cand, counts = compact_mask(clause_mask)
+    knn = OneBitKNN(k=k, backend="triton").to("cuda")
+    knn.register_index(embs)
+    ids, _ = knn(query, candidate_ids=cand, counts=counts)
+    assert ids.shape == (b, k)
+
+    # Every returned id must satisfy the clause conjunction (where the row had any).
+    for r in range(b):
+        if int(clause_mask[r].sum().item()) == 0:
+            continue
+        for j in range(k):
+            i = int(ids[r, j].item())
+            if i < 0:
+                continue
+            assert bool(clause_mask[r, i].item()), f"row {r}: returned id {i} fails clause filter"
+
+
+RANGE_N = 1000
+RANGES = [
+    (0, 0),
+    (500, 500),
+    (RANGE_N, RANGE_N),
+    (0, 1),
+    (7, 8),
+    (RANGE_N - 1, RANGE_N),
+    (33, 97),
+    (65, 191),
+    (129, RANGE_N),
+    (3, None),
+    (0, RANGE_N),
+    (0, None),
+]
+
+
+def _range_filter(backend):
+    attrs = make_attrs(RANGE_N, c=3, a_max=3, n_vocab=6, pad_rate=0.3, seed=21)
+    exact = ExactAttributeFilter(backend=backend)
+    exact.register_index(attrs, clause_is_reverse=torch.tensor([False, True, False], device="cuda"))
+    return exact
+
+
+@pytest.mark.parametrize("backend", ["triton", "torch"])
+def test_evaluate_mask_range_equals_full_mask_slice(backend):
+    """``evaluate_mask(q, start, end)`` is the full mask's ``[:, start:end]`` bit for bit, for
+    empty, single-item and unaligned ranges, ranges ending at N and the whole catalog, with a
+    reverse clause, on both backends."""
+    q = make_query_attrs(b=5, c=3, n_vocab=6, inactive_rate=0.2, seed=22)
+    f = _range_filter(backend)
+    full = f.evaluate_mask(f.prepare_queries(q))
+    assert full.any() and not full.all()
+    for start, end in RANGES:
+        got = f.evaluate_mask(f.prepare_queries(q), start, end)
+        assert got.shape == (5, (RANGE_N if end is None else end) - start)
+        assert torch.equal(got, full[:, start:end]), (start, end)
+
+
+@pytest.mark.parametrize("backend", ["triton", "torch"])
+def test_evaluate_mask_range_allocates_no_full_mask(backend):
+    """A range never builds the ``[B, N]`` mask: the call's peak transient stays far below it."""
+    n, b, lo, hi = 1 << 22, 16, 123_457, 124_457
+    attrs = make_attrs(n, c=1, a_max=1, n_vocab=4, pad_rate=0.0, seed=23)
+    q = make_query_attrs(b=b, c=1, n_vocab=4, inactive_rate=0.0, seed=24)
+    f = ExactAttributeFilter(backend=backend)
+    f.register_index(attrs)
+    del attrs
+    torch.cuda.synchronize()
+    base = torch.cuda.memory_allocated()
+    torch.cuda.reset_peak_memory_stats()
+    out = f.evaluate_mask(f.prepare_queries(q), lo, hi)
+    torch.cuda.synchronize()
+    transient = torch.cuda.max_memory_allocated() - base
+    assert out.shape == (b, hi - lo)
+    assert transient < b * n // 16, transient

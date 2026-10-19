@@ -1,0 +1,60 @@
+[project]
+name = "torchretrieve"
+version = "0.2.0"
+description = "GPU Retrieval with PyTorch"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1",
+    # Meta's SilverTorch code, adapted (torch.ops.st.*; the workspace member silvertorch/, not on
+    # PyPI): SilverTorch's phases 2+3. Building it needs nvcc + ninja + setuptools.
+    "silvertorch",
+    "torch>=2.10,<3",
+    "triton>=3.6",
+]
+
+[project.scripts]
+tune-kernels = "retrieve.ops.tune:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/retrieve"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = ["cpu: runs without CUDA (exempt from the conftest skip gate)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM", "RUF100", "BLE001", "PLC0415"]
+# PLC0415 (no inline imports) is a preview rule; explicit-preview-rules keeps it the only one.
+preview = true
+explicit-preview-rules = true
+
+[tool.ruff.lint.isort]
+known-first-party = ["retrieve"]
+combine-as-imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# Deliberately lazy: `import retrieve` registers no kernel and never loads the silvertorch
+# extension; these four load it (or report it) only when asked.
+"src/retrieve/modules/official.py" = ["PLC0415"]
+"src/retrieve/ops/__init__.py" = ["PLC0415"]
+"src/retrieve/ops/official/__init__.py" = ["PLC0415"]
+"tests/conftest.py" = ["PLC0415"]
+
+[dependency-groups]
+dev = [
+    "ninja>=1.11",
+    "pytest>=9.0.3",
+    "setuptools>=82.0.1",
+]

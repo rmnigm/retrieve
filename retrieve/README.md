@@ -1,0 +1,81 @@
+# torchretrieve
+
+GPU retrieval for recommender systems — PyTorch `nn.Module`s backed by fused Triton kernels.
+
+A library for the candidate-generation / ANN stage of a recsys stack: full-scan KNN, 1-bit Hamming KNN, INT8 IVF (SilverTorch, on Meta's official code adapted), prefilter / postfilter compositions, and an exact attribute filter. Every module follows the same `register_index → forward` shape and runs on a single GPU.
+
+## Install
+
+```bash
+pip install ./silvertorch ./retrieve   # from a clone of this repository; not on PyPI
+```
+
+Source-only distribution. Triton kernels JIT-compile on first call against your local toolchain — no prebuilt CUDA wheels to match. You need a CUDA-capable GPU and a working `torch` + `triton` install (declared as dependencies). The LiNR modules and the filters accept `backend="torch"` for a pure-PyTorch path. `SilverTorch` runs Meta's official SilverTorch code, adapted (`backend="cuda"`, its only backend): the `silvertorch` package, a dependency built from source against your CUDA toolkit at install.
+
+> **Note.** Install pulls in `torch>=2.10` and `triton>=3.6`, the validated versions: validated on an A100-SXM4-80GB (sm_80) with torch 2.10.0+cu128, triton 3.6.0, Python 3.11. The import name is `retrieve`, not `torchretrieve`.
+
+## Quick example
+
+```python
+import torch
+from retrieve import SilverTorch
+
+# 1M items, dim 128 — INT8 IVF + INT8 ANN
+N, D, k = 1_000_000, 128, 10
+item_embs = torch.randn(N, D, device="cuda")
+
+ann = SilverTorch(k=k, n_lists=1024, n_probe=16).cuda()
+ann.register_index(item_embs)
+
+queries = torch.randn(4, D, device="cuda")
+topk_ids, topk_scores = ann(queries)        # ([4, 10], [4, 10])
+```
+
+For attribute-filtered retrieval, swap to `filter_mode="bloom"` (with `m_bits` / `k_hash`) or `filter_mode="exact"` and pass `ann.prepare_queries(query_clause_attrs)` to `forward`. The filter is evaluated inside Meta's search op over the probed clusters only.
+
+## What's in the box
+
+| Module | What it does |
+| --- | --- |
+| `FullScanKNN` | Exhaustive matmul + top-K. Reference / small-N. |
+| `OneBitKNN` | OPORP 1-bit quantization + Hamming top-K. |
+| `SimHashKNN` | SimHash 1-bit quantization + Hamming top-K; `k_bits` may exceed `D`. |
+| `PostfilterKNN` | KNN then attribute filter. |
+| `PrefilterKNN` | Attribute filter then KNN over the candidate set. |
+| `LiNRV1`–`LiNRV3` | The LiNR paper's variants, composed from the above with an optional filter submodule; `LiNRBuilder` builds one. |
+| `SilverTorch` | IVF + INT8 ANN with an optional bloom / exact filter (paper Algorithm 1) on Meta's official code, adapted; `SilverTorchBuilder` builds or loads one. |
+| `ExactAttributeFilter` | The standalone `FilterModule`; compose via `retrieve.functional.combine_masks` / `combine_indices`. |
+| `retrieve.indexing.KMeans` | Index-build helper (clusters for IVF); `init="random"` or `"kmeans++"`. |
+| `retrieve.indexing.quantize_int8`, `quantize_oporp_1bit`, `quantize_simhash_1bit` | Quantization utilities used by the modules above. |
+| `retrieve.ops.triton` / `retrieve.ops.reference` / `retrieve.ops.official` | The kernels behind the modules, one namespace per backend, same op names and signatures. |
+
+Triton is the default backend of the LiNR modules and the filters; they accept
+`backend="torch"` for a pure-PyTorch path. `SilverTorch` runs Meta's official SilverTorch code,
+adapted (`backend="cuda"`, its only backend; the `silvertorch` package). The package is two
+public layers — `retrieve.modules` (re-exported at the top level) and
+`retrieve.ops` — plus `retrieve.indexing` (index-build math) and
+`retrieve.functional` (query-time glue).
+
+## Docs
+
+User guide (in this package, under [`docs/`](docs/)):
+
+- [`getting-started.md`](docs/getting-started.md) — install, the shared lifecycle, first examples.
+- [`modules.md`](docs/modules.md) — which module to pick + per-module API reference.
+- [`filtering-and-quantization.md`](docs/filtering-and-quantization.md) — attribute-filtered retrieval.
+- [`indexing-and-ops.md`](docs/indexing-and-ops.md) — `retrieve.indexing`, `retrieve.functional` and the op namespaces.
+
+System / internals documentation lives in the repository (not in the sdist)
+under `docs/system/`:
+
+- `architecture.md` — module map, what each retrieval family does.
+- `kernels.md` — Triton kernel internals and the adapter over Meta's ops.
+- `filtering.md` — clause / Bloom filter API.
+- `testing.md` — running the correctness suite.
+- `evaluation.md` — running the benchmark harness.
+- `datasets.md` — dataset ETL and the SASRec training pipeline.
+- `checkpoints.md` — trained models + HF Hub workflow.
+
+## License
+
+Apache-2.0.

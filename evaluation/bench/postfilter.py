@@ -1,0 +1,59 @@
+"""The generic-torch baseline (docs/system/evaluation.md § The postfilter baseline)."""
+
+from __future__ import annotations
+
+import torch
+from torch import Tensor, nn
+
+from retrieve.interfaces import FilterModule
+
+
+class Postfilter(nn.Module):
+    capturable = True
+
+    item_embs_t: Tensor  # [D, N] fp16
+
+    def __init__(
+        self, k: int, *, filter: FilterModule | None, backend: str = "torch", alpha: int = 1
+    ) -> None:
+        super().__init__()
+        if filter is None:
+            raise ValueError("postfilter needs a filter")
+        if backend != "torch":
+            raise ValueError(f"postfilter runs on the torch backend only, got {backend!r}")
+        self.k = k
+        self.filter = filter
+        self.backend = backend
+        self.set_query_params(alpha=alpha)
+
+    def register_index(self, item_embs: Tensor) -> None:
+        self.register_buffer("item_embs_t", item_embs.to(torch.float16).t().contiguous())
+
+    def set_query_params(self, *, alpha: int) -> None:
+        if not isinstance(alpha, int) or alpha < 1:
+            raise ValueError(f"alpha must be a positive int, got {alpha!r}")
+        self.alpha = alpha
+
+    def prepare_queries(self, query_clause_attrs: Tensor) -> Tensor:
+        """The filter's query encoding for one batch, outside the timed call."""
+        return self.filter.prepare_queries(query_clause_attrs)
+
+    def forward(self, query: Tensor, prepared: Tensor) -> tuple[Tensor, Tensor]:
+        query = query.to(torch.float16)
+        if query.is_cuda:
+            scores = torch.mm(query, self.item_embs_t, out_dtype=torch.float32)
+        else:  # aten::mm.dtype has no CPU kernel
+            scores = torch.mm(query.float(), self.item_embs_t.float())
+        p = min(self.alpha * self.k, scores.shape[1])
+        scores, ids = torch.topk(scores, p, dim=1)
+        keep = self.filter.evaluate_subset(prepared, ids)
+        order = torch.sort(keep.to(torch.int8), dim=1, descending=True, stable=True).indices
+        order = order[:, : self.k]
+        keep = keep.gather(1, order)
+        ids = ids.gather(1, order).masked_fill(~keep, -1)
+        scores = scores.gather(1, order).masked_fill(~keep, float("-inf"))
+        if p < self.k:
+            pad = self.k - p
+            ids = torch.cat([ids, ids.new_full((ids.shape[0], pad), -1)], dim=1)
+            scores = torch.cat([scores, scores.new_full((ids.shape[0], pad), float("-inf"))], 1)
+        return ids, scores

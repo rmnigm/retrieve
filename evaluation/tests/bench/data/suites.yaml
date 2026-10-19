@@ -1,0 +1,77 @@
+# Suites fixture; job counts are hand-derived in test_config.py.
+quality:
+  datasets: [mini, text]
+  filter_kinds: [none]
+  ks: [10, 50]
+  batch_sizes: [1]
+  arms:
+    - {algo: linr_v1_filter_mask, backends: [triton, torch]}   # collapses to one cuBLAS job
+    - {algo: linr_v3, backends: [triton, torch]}
+    - {algo: silvertorch, backends: [cuda]}
+filter:
+  datasets: [mini]
+  filter_kinds: [clause, bloom]
+  ks: [10, 50]
+  batch_sizes: [1, 2]
+  seeds: [0, 1, 2]
+  sweeps: {mini: [c0, c0c1]}
+  arms:
+    - {algo: linr_v2, backends: [triton, torch]}
+    - {algo: linr_v3, backends: [torch], sweeps: [c0]}
+    - {algo: silvertorch, backends: [cuda]}
+deep:
+  datasets: [mini]
+  dims: [32]
+  filter_kinds: [clause, bloom]
+  ks: [10]
+  batch_sizes: [1]
+  seeds: [0, 1]
+  arms:
+    - algo: silvertorch
+      backends: [cuda]
+      filter_kinds: [bloom]
+      build: {n_lists: [8]}
+      query: {n_probe: [4, 16, 64]}
+      datasets: {mini: {build: {n_lists: [8, 64]}}}
+    - {algo: linr_v3, backends: [torch], filter_kinds: [clause], sweeps: [c0], query: [{candidate_pool: 20}, {candidate_pool: 40}]}
+  bloom: {m_bits: 128}
+codesign:
+  datasets: [mini]
+  dims: [32]
+  filter_kinds: [bloom]
+  ks: [10]
+  batch_sizes: [1]
+  arms:
+    - algo: silvertorch
+      backends: [cuda]
+      build: {n_lists: [8]}
+      query: {n_probe: [4, 8]}
+bad_bloom_path:
+  datasets: [mini]
+  filter_kinds: [clause, bloom]
+  ks: [10]
+  batch_sizes: [1]
+  arms:   # bloom only: the clause job → ConfigError
+    - {algo: silvertorch, backends: [cuda], build: {bloom_path: [full]}}
+bad_params:
+  datasets: [mini]
+  filter_kinds: [none]
+  ks: [10]
+  batch_sizes: [1]
+  arms:   # n_probe is a query param → ConfigError
+    - {algo: silvertorch, backends: [cuda], build: {n_probe: [4]}}
+widths:
+  datasets: [mini]
+  dims: [32]
+  filter_kinds: [clause, bloom]
+  ks: [10, 50]
+  batch_sizes: [1]
+  ks_by_sweep: {mini: {c0c1: [10]}}
+  seeds_by_sweep: {mini: {c0c1: [0, 2]}}
+  arms:
+    - {algo: silvertorch, backends: [cuda], filter_kinds: [bloom], build: {m_bits: [64, 256]}}
+    - {algo: silvertorch, backends: [cuda], filter_kinds: [clause]}
+    - {algo: linr_v1_filter_mask, backends: [torch], build: {compile: [max-autotune]}}
+    - {algo: linr_v3, backends: [triton], query: {candidate_pool_frac: [0.1]}}
+    - {algo: linr_v2, backends: [torch], datasets: {}}   # an empty slot runs nowhere
+bloom: {m_bits: 64, k_hash: 3}
